@@ -7,7 +7,7 @@ use jiff::Timestamp;
 
 use crate::git::{Conflict, EntryKind, Git, Swap, TreeEntry};
 use crate::merge;
-use crate::model::{Issue, Memory, Meta, SCHEMA_VERSION, canonical};
+use crate::model::{Issue, LEASE_MINUTES, Memory, Meta, SCHEMA_VERSION, STALE_AFTER, canonical};
 
 pub const DATA_REF: &str = "refs/foam/data";
 
@@ -210,6 +210,8 @@ impl Store {
                 prefix: prefix.to_string(),
                 schema_version: SCHEMA_VERSION,
                 created_at: Timestamp::now(),
+                lease_minutes: LEASE_MINUTES,
+                stale_after: STALE_AFTER,
             },
             issues: BTreeMap::new(),
             memories: BTreeMap::new(),
@@ -338,6 +340,8 @@ pub fn test_db() -> Db {
             prefix: "t".into(),
             schema_version: SCHEMA_VERSION,
             created_at: Timestamp::now(),
+            lease_minutes: LEASE_MINUTES,
+            stale_after: STALE_AFTER,
         },
         issues: BTreeMap::new(),
         memories: BTreeMap::new(),

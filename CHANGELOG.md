@@ -12,8 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A README.
 - `foam show` lists an issue's children, and `--json` output carries them
   under `children`.
+- `foam config` shows and sets `lease-minutes` and `stale-after`. Both live
+  in `meta.json` on the data ref, so every clone shares them.
 
 ### Changed
+
+- `foam prime` reopens issues whose lease has expired and says which,
+  instead of asking the agent to run `foam reclaim`.
+- `foam prime` keeps its memories section under 4 KB, dropping the least
+  recently updated memories first and saying how many it dropped.
 
 - An epic is not ready while any of its children is open. `foam blocked`
   lists it with the children holding it.

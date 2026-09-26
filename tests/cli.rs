@@ -969,3 +969,59 @@ fn an_epic_shows_its_children_and_waits_on_them() {
     assert!(ready.starts_with(&epic), "{ready}");
     assert_eq!(stdout(foam(dir.path()).arg("blocked")), "");
 }
+
+#[test]
+fn config_sets_the_lease_and_prime_reclaims_expired_ones() {
+    let dir = repo();
+    commit(dir.path(), "one");
+    stdout(foam(dir.path()).args(["init", "--prefix", "t"]));
+    assert_eq!(
+        stdout(foam(dir.path()).arg("config")),
+        "lease-minutes  15\nstale-after    50"
+    );
+    assert_eq!(
+        stdout(foam(dir.path()).args(["config", "lease-minutes", "0"])),
+        "0"
+    );
+    let v: serde_json::Value =
+        serde_json::from_str(&stdout(foam(dir.path()).args(["--json", "config"]))).unwrap();
+    assert_eq!(v["lease-minutes"], 0);
+    assert_eq!(v["stale-after"], 50);
+    foam(dir.path())
+        .args(["config", "lease-minutes"])
+        .assert()
+        .stdout("0\n");
+
+    let a = stdout(foam(dir.path()).args(["create", "a"]));
+    stdout(foam(dir.path()).args(["--actor", "ann", "claim", &a]));
+    let text = stdout(foam(dir.path()).args(["--actor", "bob", "prime"]));
+    assert!(
+        text.contains(&format!(
+            "Reopened 1 issue(s) whose lease had expired: {a}\n"
+        )),
+        "{text}"
+    );
+    assert!(text.contains("1 open, 0 in progress"), "{text}");
+    assert!(text.contains(&format!("{a}  P2  task  a")), "{text}");
+    let text = stdout(foam(dir.path()).args(["--actor", "bob", "prime"]));
+    assert!(!text.contains("Reopened"), "{text}");
+
+    // the memories section stops at its byte budget, dropping
+    // the least recently updated first
+    for i in 0..5 {
+        let text = format!("{i}{}", "x".repeat(1000));
+        stdout(foam(dir.path()).args(["remember", &format!("m{i}"), &text]));
+    }
+    let text = stdout(foam(dir.path()).arg("prime"));
+    assert!(
+        text.contains("1 more not shown; `foam memories` lists all"),
+        "{text}"
+    );
+    assert!(!text.contains("m0: "), "{text}");
+    assert!(text.contains("m1: ") && text.contains("m4: "), "{text}");
+
+    stdout(foam(dir.path()).args(["config", "stale-after", "0"]));
+    let text = stdout(foam(dir.path()).arg("prime"));
+    assert!(text.contains("m4: 4xxx"), "{text}");
+    assert!(text.contains("this commit]"), "{text}");
+}

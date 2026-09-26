@@ -8,8 +8,8 @@ use crate::git::Stamp;
 
 pub const SCHEMA_VERSION: u32 = 1;
 
-/// How long a claim holds before `reclaim` may take it back.
-pub const LEASE: jiff::SignedDuration = jiff::SignedDuration::from_mins(15);
+pub const LEASE_MINUTES: u32 = 15;
+pub const STALE_AFTER: u64 = 50;
 
 /// The contents of `meta.json`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -17,6 +17,26 @@ pub struct Meta {
     pub prefix: String,
     pub schema_version: u32,
     pub created_at: Timestamp,
+    /// How long a claim holds before `reclaim` may take it back.
+    #[serde(default = "default_lease_minutes")]
+    pub lease_minutes: u32,
+    /// Memories more commits behind HEAD than this get an age note.
+    #[serde(default = "default_stale_after")]
+    pub stale_after: u64,
+}
+
+fn default_lease_minutes() -> u32 {
+    LEASE_MINUTES
+}
+
+fn default_stale_after() -> u64 {
+    STALE_AFTER
+}
+
+impl Meta {
+    pub fn lease(&self) -> jiff::SignedDuration {
+        jiff::SignedDuration::from_mins(i64::from(self.lease_minutes))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
@@ -158,11 +178,11 @@ impl Issue {
         self.updated_at = now;
     }
 
-    pub fn claim(&mut self, actor: &str) {
+    pub fn claim(&mut self, actor: &str, lease: jiff::SignedDuration) {
         let now = Timestamp::now();
         self.status = Status::InProgress;
         self.assignee = Some(actor.to_string());
-        self.lease_expires = Some(now + LEASE);
+        self.lease_expires = Some(now + lease);
         self.defer_until = None;
         self.updated_at = now;
     }

@@ -9,7 +9,7 @@ mod store;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 
 use crate::model::{Kind, Status};
 
@@ -127,7 +127,7 @@ enum Cmd {
         #[arg(required = true)]
         ids: Vec<String>,
     },
-    /// Take an issue: mark it in progress under your name with a 15 minute lease
+    /// Take an issue: mark it in progress under your name with a lease
     Claim {
         id: String,
         /// Take it even if someone else holds an unexpired lease
@@ -195,6 +195,21 @@ enum Cmd {
         #[command(subcommand)]
         command: DepCmd,
     },
+    /// Show or set a setting shared by every clone of this repository
+    Config {
+        key: Option<ConfigKey>,
+        /// The new value; omit it to print the current one
+        value: Option<u32>,
+    },
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+pub enum ConfigKey {
+    /// How many minutes a claim holds before reclaim may take it back
+    LeaseMinutes,
+    /// How many commits behind HEAD a memory may be before prime marks it old
+    StaleAfter,
 }
 
 #[derive(Subcommand)]

@@ -6,7 +6,7 @@ use crate::graph;
 use crate::model::{Issue, Memory, Note, Stamps, Status, check_slug, new_id, parse_when};
 use crate::prime;
 use crate::store::{Absorbed, DATA_REF, Db, ORIGIN_REF, Snapshot, Store};
-use crate::{Cli, Cmd, DepCmd, SetupCmd};
+use crate::{Cli, Cmd, ConfigKey, DepCmd, SetupCmd};
 
 /// The global flags, split from the subcommand so both can move.
 struct Options {
@@ -163,6 +163,7 @@ pub fn run(cli: Cli) -> Result<()> {
                 .transpose()
                 .map_err(anyhow::Error::msg)?;
             let issue = store.write(&format!("update {id}"), |db| {
+                let lease = db.meta.lease();
                 if let Some(p) = parent.as_ref().filter(|p| !p.is_empty()) {
                     if !db.issues.contains_key(p) {
                         bail!("no such issue: {p}");
@@ -206,7 +207,7 @@ pub fn run(cli: Cli) -> Result<()> {
                         issue.reopen();
                         issue.unclaim();
                     }
-                    Some(Status::InProgress) => issue.claim(&actor),
+                    Some(Status::InProgress) => issue.claim(&actor, lease),
                     Some(Status::Deferred) if issue.defer_until.is_none() => {
                         bail!("deferring needs --defer-until")
                     }
@@ -262,6 +263,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Cmd::Claim { id, force } => {
             let actor = actor(&store, &cli);
             let issue = store.write(&format!("claim {id} by {actor}"), |db| {
+                let lease = db.meta.lease();
                 let issue = get_mut(db, &id)?;
                 if issue.status == Status::Closed {
                     bail!("{id} is closed");
@@ -273,7 +275,7 @@ pub fn run(cli: Cli) -> Result<()> {
                         issue.lease_expires.unwrap()
                     );
                 }
-                issue.claim(&actor);
+                issue.claim(&actor, lease);
                 Ok(issue.clone())
             })?;
             print_written(&issue, &cli)
@@ -299,30 +301,19 @@ pub fn run(cli: Cli) -> Result<()> {
         Cmd::Heartbeat { id } => {
             let actor = actor(&store, &cli);
             let issue = store.write(&format!("heartbeat {id}"), |db| {
+                let lease = db.meta.lease();
                 let issue = get_mut(db, &id)?;
                 if issue.status != Status::InProgress || issue.assignee.as_deref() != Some(&*actor)
                 {
                     bail!("{id} is not held by {actor}");
                 }
-                issue.claim(&actor);
+                issue.claim(&actor, lease);
                 Ok(issue.clone())
             })?;
             print_written(&issue, &cli)
         }
         Cmd::Reclaim => {
-            let freed = store.write("reclaim", |db| {
-                let now = Timestamp::now();
-                let mut freed = Vec::new();
-                for issue in db.issues.values_mut() {
-                    if issue.status == Status::InProgress
-                        && issue.lease_expires.is_none_or(|t| t <= now)
-                    {
-                        issue.unclaim();
-                        freed.push(issue.id.clone());
-                    }
-                }
-                Ok(freed)
-            })?;
+            let freed = reclaim(&store)?;
             if cli.json {
                 println!("{}", serde_json::to_string_pretty(&freed)?);
             } else {
@@ -431,13 +422,68 @@ pub fn run(cli: Cli) -> Result<()> {
                 bail!("foam is not initialized here");
             };
             let actor = actor(&store, &cli);
-            let text = prime::render(&snap.db, &store.git, &actor, limit);
+            let mut snap = snap;
+            let reclaimed = if snap
+                .db
+                .issues
+                .values()
+                .any(|i| lease_expired(i, Timestamp::now()))
+            {
+                let freed = reclaim(&store)?;
+                snap = load(&store)?;
+                freed
+            } else {
+                Vec::new()
+            };
+            let text = prime::render(&snap.db, &store.git, &actor, limit, &reclaimed);
             if hook_json {
                 println!("{}", prime::hook_json(&text));
             } else {
                 print!("{text}");
             }
             Ok(())
+        }
+        Cmd::Config { key, value } => {
+            let show =
+                |meta: &crate::model::Meta, key: Option<ConfigKey>, json: bool| -> Result<()> {
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&serde_json::json!({
+                                "lease-minutes": meta.lease_minutes,
+                                "stale-after": meta.stale_after,
+                            }))?
+                        );
+                        return Ok(());
+                    }
+                    match key {
+                        Some(ConfigKey::LeaseMinutes) => println!("{}", meta.lease_minutes),
+                        Some(ConfigKey::StaleAfter) => println!("{}", meta.stale_after),
+                        None => {
+                            println!("lease-minutes  {}", meta.lease_minutes);
+                            println!("stale-after    {}", meta.stale_after);
+                        }
+                    }
+                    Ok(())
+                };
+            match (key, value) {
+                (Some(key), Some(value)) => {
+                    let name = match key {
+                        ConfigKey::LeaseMinutes => "lease-minutes",
+                        ConfigKey::StaleAfter => "stale-after",
+                    };
+                    let meta = store.write(&format!("config {name} {value}"), |db| {
+                        match key {
+                            ConfigKey::LeaseMinutes => db.meta.lease_minutes = value,
+                            ConfigKey::StaleAfter => db.meta.stale_after = u64::from(value),
+                        }
+                        Ok(db.meta.clone())
+                    })?;
+                    show(&meta, Some(key), cli.json)
+                }
+                (key, None) => show(&load(&store)?.db.meta, key, cli.json),
+                (None, Some(_)) => bail!("a value needs a key"),
+            }
         }
         Cmd::Setup { command } => match command {
             SetupCmd::Claude { remove } => setup_claude(&store, remove),
@@ -801,6 +847,26 @@ fn done(ids: &[String], verb: &str, json: bool) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn lease_expired(issue: &Issue, now: Timestamp) -> bool {
+    issue.status == Status::InProgress && issue.lease_expires.is_none_or(|t| t <= now)
+}
+
+/// Reopen every in-progress issue whose lease has expired,
+/// and return their ids.
+fn reclaim(store: &Store) -> Result<Vec<String>> {
+    store.write("reclaim", |db| {
+        let now = Timestamp::now();
+        let mut freed = Vec::new();
+        for issue in db.issues.values_mut() {
+            if lease_expired(issue, now) {
+                issue.unclaim();
+                freed.push(issue.id.clone());
+            }
+        }
+        Ok(freed)
+    })
 }
 
 fn load(store: &Store) -> Result<Snapshot> {

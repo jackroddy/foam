@@ -8,8 +8,8 @@ use crate::graph;
 use crate::model::Status;
 use crate::store::Db;
 
-/// Memories older than this many commits get an age note.
-const STALE_AFTER: u64 = 50;
+/// The most bytes the memories section may take.
+const MEMORY_BUDGET: usize = 4096;
 
 const CONTRACT: &str = "\
 foam tracks this repository's issues and memories on a git ref; nothing is \
@@ -35,7 +35,7 @@ foam update <id> [--title ..] [--priority N] [--defer-until DATE]
 Add --json to any command for machine-readable output.";
 
 /// Render the session-start context for `actor`.
-pub fn render(db: &Db, git: &Git, actor: &str, limit: usize) -> String {
+pub fn render(db: &Db, git: &Git, actor: &str, limit: usize, reclaimed: &[String]) -> String {
     let now = Timestamp::now();
     let mut out = String::new();
     out.push_str("# foam\n\n");
@@ -58,15 +58,12 @@ pub fn render(db: &Db, git: &Git, actor: &str, limit: usize) -> String {
         count(Status::Deferred),
         count(Status::Closed),
     );
-    let expired = db
-        .issues
-        .values()
-        .filter(|i| i.status == Status::InProgress && i.lease_expires.is_none_or(|t| t <= now))
-        .count();
-    if expired > 0 {
+    if !reclaimed.is_empty() {
         let _ = writeln!(
             out,
-            "{expired} in-progress issue(s) have an expired lease; `foam reclaim` reopens them"
+            "Reopened {} issue(s) whose lease had expired: {}",
+            reclaimed.len(),
+            reclaimed.join(" ")
         );
     }
 
@@ -108,13 +105,37 @@ pub fn render(db: &Db, git: &Git, actor: &str, limit: usize) -> String {
 
     if !db.memories.is_empty() {
         out.push_str("\n## Memories\n\n");
-        for m in db.memories.values() {
-            let distance = git.distance(&m.stamp.commit);
-            let note = match distance {
-                Distance::Behind(n) if n < STALE_AFTER => String::new(),
-                _ => format!("  [{}]", age(&m.stamp, distance)),
-            };
-            let _ = writeln!(out, "{}: {}{note}", m.slug, m.text);
+        let mut lines: Vec<(&str, Timestamp, String)> = db
+            .memories
+            .values()
+            .map(|m| {
+                let distance = git.distance(&m.stamp.commit);
+                let note = match distance {
+                    Distance::Behind(n) if n < db.meta.stale_after => String::new(),
+                    _ => format!("  [{}]", age(&m.stamp, distance)),
+                };
+                let line = format!("{}: {}{note}\n", m.slug, m.text);
+                (m.slug.as_str(), m.updated_at, line)
+            })
+            .collect();
+        // the least recently updated memories are the ones cut
+        lines.sort_by_key(|(_, updated, _)| std::cmp::Reverse(*updated));
+        let mut used = 0;
+        let mut kept: Vec<&(&str, Timestamp, String)> = Vec::new();
+        for entry in &lines {
+            if used + entry.2.len() > MEMORY_BUDGET && !kept.is_empty() {
+                break;
+            }
+            used += entry.2.len();
+            kept.push(entry);
+        }
+        let cut = lines.len() - kept.len();
+        kept.sort_by_key(|(slug, _, _)| *slug);
+        for (_, _, line) in kept {
+            out.push_str(line);
+        }
+        if cut > 0 {
+            let _ = writeln!(out, "{cut} more not shown; `foam memories` lists all");
         }
     }
     out

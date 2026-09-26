@@ -196,7 +196,7 @@ mod tests {
     fn status_moves_as_a_group() {
         let base = test_issue("t-a");
         let mut ours = base.clone();
-        ours.claim("ann");
+        ours.claim("ann", jiff::SignedDuration::from_mins(15));
         let mut theirs = base.clone();
         theirs.close(
             Some("done".into()),
