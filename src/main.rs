@@ -23,6 +23,10 @@ struct Cli {
     #[arg(long, global = true)]
     json: bool,
 
+    /// Who is acting; defaults to $FOAM_ACTOR, then git user.name, then $USER
+    #[arg(long, global = true)]
+    actor: Option<String>,
+
     #[command(subcommand)]
     command: Cmd,
 }
@@ -121,6 +125,24 @@ enum Cmd {
         #[arg(required = true)]
         ids: Vec<String>,
     },
+    /// Take an issue: mark it in progress under your name with a 15 minute lease
+    Claim {
+        id: String,
+        /// Take it even if someone else holds an unexpired lease
+        #[arg(long)]
+        force: bool,
+    },
+    /// Give an issue back: open again, unassigned
+    Unclaim {
+        id: String,
+        /// Release it even if someone else holds it
+        #[arg(long)]
+        force: bool,
+    },
+    /// Extend the lease on an issue you hold
+    Heartbeat { id: String },
+    /// Reopen every in-progress issue whose lease has expired
+    Reclaim,
     /// Manage what an issue waits on
     Dep {
         #[command(subcommand)]

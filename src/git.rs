@@ -207,4 +207,15 @@ impl Git {
             .unwrap_or_else(|| "detached".to_string());
         Ok(Stamp { commit, branch })
     }
+
+    pub fn config(&self, key: &str) -> Option<String> {
+        let out = self
+            .command(&["config", "--get", key])
+            .stderr(Stdio::null())
+            .output()
+            .ok()
+            .filter(|o| o.status.success())?;
+        let value = String::from_utf8_lossy(&out.stdout).trim_end().to_string();
+        (!value.is_empty()).then_some(value)
+    }
 }

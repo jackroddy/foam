@@ -239,3 +239,66 @@ fn update_changes_fields_and_deferral() {
         .assert()
         .code(1);
 }
+
+#[test]
+fn claims_and_leases() {
+    let dir = repo();
+    foam(dir.path())
+        .args(["init", "--prefix", "t"])
+        .assert()
+        .success();
+    let a = stdout(foam(dir.path()).args(["create", "a"]));
+
+    let json = stdout(foam(dir.path()).args(["--json", "--actor", "ann", "claim", &a]));
+    let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(v["status"], "in_progress");
+    assert_eq!(v["assignee"], "ann");
+    assert!(v["lease_expires"].is_string());
+    assert_eq!(stdout(foam(dir.path()).arg("ready")), "");
+
+    // another actor cannot take or release it while the lease holds
+    foam(dir.path())
+        .args(["--actor", "bob", "claim", &a])
+        .assert()
+        .code(1);
+    foam(dir.path())
+        .args(["--actor", "bob", "unclaim", &a])
+        .assert()
+        .code(1);
+    foam(dir.path())
+        .args(["--actor", "bob", "heartbeat", &a])
+        .assert()
+        .code(1);
+    stdout(foam(dir.path()).args(["--actor", "ann", "heartbeat", &a]));
+
+    // nothing has expired, so reclaim frees nothing
+    assert_eq!(stdout(foam(dir.path()).arg("reclaim")), "");
+
+    let json = stdout(foam(dir.path()).args(["--json", "--actor", "bob", "claim", &a, "--force"]));
+    let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(v["assignee"], "bob");
+
+    stdout(foam(dir.path()).args(["--actor", "bob", "unclaim", &a]));
+    assert_eq!(stdout(foam(dir.path()).arg("ready")).lines().count(), 1);
+    foam(dir.path()).args(["unclaim", &a]).assert().code(1);
+
+    stdout(foam(dir.path()).args(["close", &a]));
+    foam(dir.path()).args(["claim", &a]).assert().code(1);
+}
+
+#[test]
+fn actor_falls_back_to_the_environment() {
+    let dir = repo();
+    foam(dir.path())
+        .args(["init", "--prefix", "t"])
+        .assert()
+        .success();
+    let a = stdout(foam(dir.path()).args(["create", "a"]));
+    let json = stdout(
+        foam(dir.path())
+            .env("FOAM_ACTOR", "env-actor")
+            .args(["--json", "claim", &a]),
+    );
+    let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(v["assignee"], "env-actor");
+}

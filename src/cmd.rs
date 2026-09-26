@@ -12,6 +12,7 @@ use crate::{Cli, Cmd, DepCmd};
 struct Options {
     directory: PathBuf,
     json: bool,
+    actor: Option<String>,
 }
 
 pub fn run(cli: Cli) -> Result<()> {
@@ -20,6 +21,7 @@ pub fn run(cli: Cli) -> Result<()> {
     let cli = Options {
         directory: cli.directory,
         json: cli.json,
+        actor: cli.actor,
     };
     match command {
         Cmd::Init { prefix } => init(&store, prefix, &cli),
@@ -252,6 +254,79 @@ pub fn run(cli: Cli) -> Result<()> {
             }
             Ok(())
         }
+        Cmd::Claim { id, force } => {
+            let actor = actor(&store, &cli);
+            store.write(&format!("claim {id} by {actor}"), |db| {
+                let issue = get_mut(db, &id)?;
+                if issue.status == Status::Closed {
+                    bail!("{id} is closed");
+                }
+                if !force && issue.held_by_other(&actor, Timestamp::now()) {
+                    bail!(
+                        "{id} is held by {} until {}",
+                        issue.assignee.as_deref().unwrap_or("?"),
+                        issue.lease_expires.unwrap()
+                    );
+                }
+                issue.claim(&actor);
+                Ok(())
+            })?;
+            show_after(&store, &id, &cli)
+        }
+        Cmd::Unclaim { id, force } => {
+            let actor = actor(&store, &cli);
+            store.write(&format!("unclaim {id}"), |db| {
+                let issue = get_mut(db, &id)?;
+                if issue.status != Status::InProgress {
+                    bail!("{id} is not in progress");
+                }
+                if !force && issue.held_by_other(&actor, Timestamp::now()) {
+                    bail!(
+                        "{id} is held by {}; pass --force to release it",
+                        issue.assignee.as_deref().unwrap_or("?")
+                    );
+                }
+                issue.unclaim();
+                Ok(())
+            })?;
+            show_after(&store, &id, &cli)
+        }
+        Cmd::Heartbeat { id } => {
+            let actor = actor(&store, &cli);
+            store.write(&format!("heartbeat {id}"), |db| {
+                let issue = get_mut(db, &id)?;
+                if issue.status != Status::InProgress || issue.assignee.as_deref() != Some(&*actor)
+                {
+                    bail!("{id} is not held by {actor}");
+                }
+                issue.claim(&actor);
+                Ok(())
+            })?;
+            show_after(&store, &id, &cli)
+        }
+        Cmd::Reclaim => {
+            let freed = store.write("reclaim", |db| {
+                let now = Timestamp::now();
+                let mut freed = Vec::new();
+                for issue in db.issues.values_mut() {
+                    if issue.status == Status::InProgress
+                        && issue.lease_expires.is_none_or(|t| t <= now)
+                    {
+                        issue.unclaim();
+                        freed.push(issue.id.clone());
+                    }
+                }
+                Ok(freed)
+            })?;
+            if cli.json {
+                println!("{}", serde_json::to_string_pretty(&freed)?);
+            } else {
+                for id in freed {
+                    println!("reopened {id}");
+                }
+            }
+            Ok(())
+        }
         Cmd::Dep { command } => match command {
             DepCmd::Add { id, blocker } => {
                 store.write(&format!("dep {id} <- {blocker}"), |db| {
@@ -335,6 +410,15 @@ fn get_mut<'a>(db: &'a mut Db, id: &str) -> Result<&'a mut Issue> {
         .with_context(|| format!("no such issue: {id}"))
 }
 
+fn actor(store: &Store, cli: &Options) -> String {
+    cli.actor
+        .clone()
+        .or_else(|| std::env::var("FOAM_ACTOR").ok())
+        .or_else(|| store.git.config("user.name"))
+        .or_else(|| std::env::var("USER").ok())
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
 fn fresh_id(db: &Db) -> String {
     loop {
         let id = new_id(&db.meta.prefix);
@@ -388,7 +472,10 @@ fn print_issue(i: &Issue, db: &Db) {
         println!("parent: {p}");
     }
     if let Some(a) = &i.assignee {
-        println!("assignee: {a}");
+        match i.lease_expires {
+            Some(t) => println!("assignee: {a}  lease until {t}"),
+            None => println!("assignee: {a}"),
+        }
     }
     if let Some(t) = i.defer_until {
         println!("deferred until: {t}");

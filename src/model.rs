@@ -8,6 +8,9 @@ use crate::git::Stamp;
 
 pub const SCHEMA_VERSION: u32 = 1;
 
+/// How long a claim holds before `reclaim` may take it back.
+pub const LEASE: jiff::SignedDuration = jiff::SignedDuration::from_mins(15);
+
 /// The contents of `meta.json`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Meta {
@@ -152,6 +155,29 @@ impl Issue {
         self.stamps.closed = Some(stamp.clone());
         self.lease_expires = None;
         self.updated_at = now;
+    }
+
+    pub fn claim(&mut self, actor: &str) {
+        let now = Timestamp::now();
+        self.status = Status::InProgress;
+        self.assignee = Some(actor.to_string());
+        self.lease_expires = Some(now + LEASE);
+        self.defer_until = None;
+        self.updated_at = now;
+    }
+
+    pub fn unclaim(&mut self) {
+        self.status = Status::Open;
+        self.assignee = None;
+        self.lease_expires = None;
+        self.touch();
+    }
+
+    /// Whether someone other than `actor` holds an unexpired lease.
+    pub fn held_by_other(&self, actor: &str, now: Timestamp) -> bool {
+        self.status == Status::InProgress
+            && self.assignee.as_deref() != Some(actor)
+            && self.lease_expires.is_some_and(|t| t > now)
     }
 
     pub fn reopen(&mut self) {

@@ -16,3 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `reopen`. An issue is ready when it is open, past any deferral, and
   every issue it waits on is closed. Adding a dependency that would form a
   cycle is refused.
+- `foam claim`, `unclaim`, `heartbeat` and `reclaim`. A claim marks an issue
+  in progress under the actor's name with a 15 minute lease; `reclaim`
+  reopens every issue whose lease has run out. The actor is `--actor`, then
+  `$FOAM_ACTOR`, then git's `user.name`, then `$USER`.
