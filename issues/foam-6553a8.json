@@ -1,0 +1,27 @@
+{
+  "id": "foam-6553a8",
+  "title": "Define P0 to P4 in the contract",
+  "body": "Priorities exist with no meaning attached, so each agent invents one and they disagree. A fixed table in the contract paragraph: P0 blocks all other work, P1 this session, P2 soon, P3 when convenient, P4 someday. Five lines.",
+  "type": "task",
+  "status": "open",
+  "priority": 2,
+  "labels": [],
+  "parent": "foam-7e74ef",
+  "blocked_by": [],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-09-26T23:36:35.744984441Z",
+  "updated_at": "2026-09-26T23:36:35.744984441Z",
+  "closed_at": null,
+  "close_reason": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "ee9471d",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
