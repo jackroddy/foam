@@ -1,0 +1,27 @@
+{
+  "id": "foam-92fbad",
+  "title": "Let prime reclaim expired leases itself",
+  "body": "prime reports expired leases and tells the agent to run reclaim. It could reclaim them and say so, since a session start is the moment a dead agent's work should return to the pool.",
+  "type": "task",
+  "status": "open",
+  "priority": 3,
+  "labels": [],
+  "parent": "foam-c4574c",
+  "blocked_by": [],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-09-26T22:21:19.227519573Z",
+  "updated_at": "2026-09-26T22:21:19.227519573Z",
+  "closed_at": null,
+  "close_reason": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "0a25e5f",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
