@@ -1,5 +1,6 @@
 mod cmd;
 mod git;
+mod graph;
 mod model;
 mod store;
 
@@ -72,6 +73,69 @@ enum Cmd {
         #[arg(long)]
         all: bool,
     },
+    /// Issues that can be worked now: open, past any deferral, nothing blocking
+    Ready {
+        /// Show at most this many
+        #[arg(long)]
+        limit: Option<usize>,
+    },
+    /// Open issues that something still blocks
+    Blocked,
+    /// Change fields of an issue
+    Update {
+        id: String,
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(long)]
+        body: Option<String>,
+        #[arg(long = "type", value_enum)]
+        kind: Option<Kind>,
+        #[arg(long, short, value_parser = clap::value_parser!(u8).range(0..=4))]
+        priority: Option<u8>,
+        /// open clears any deferral; closed is the same as `close`
+        #[arg(long, value_enum)]
+        status: Option<Status>,
+        /// Empty string clears
+        #[arg(long)]
+        assignee: Option<String>,
+        #[arg(long = "add-label")]
+        add_label: Vec<String>,
+        #[arg(long = "rm-label")]
+        rm_label: Vec<String>,
+        /// Empty string clears
+        #[arg(long)]
+        parent: Option<String>,
+        /// Defer until an RFC 3339 timestamp or a YYYY-MM-DD date (UTC)
+        #[arg(long = "defer-until")]
+        defer_until: Option<String>,
+    },
+    /// Close one or more issues
+    Close {
+        #[arg(required = true)]
+        ids: Vec<String>,
+        #[arg(long)]
+        reason: Option<String>,
+    },
+    /// Reopen one or more closed issues
+    Reopen {
+        #[arg(required = true)]
+        ids: Vec<String>,
+    },
+    /// Manage what an issue waits on
+    Dep {
+        #[command(subcommand)]
+        command: DepCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum DepCmd {
+    /// Make `id` wait on `blocker`
+    Add { id: String, blocker: String },
+    /// Stop `id` waiting on `blocker`
+    Rm { id: String, blocker: String },
+    /// Show `id` and everything it waits on
+    Tree { id: String },
 }
 
 fn main() -> ExitCode {

@@ -193,11 +193,25 @@ impl Db {
     }
 }
 
+/// An empty database with prefix `t`, for tests that never
+/// touch a repository.
+#[cfg(test)]
+pub fn test_db() -> Db {
+    Db {
+        meta: Meta {
+            prefix: "t".into(),
+            schema_version: SCHEMA_VERSION,
+            created_at: Timestamp::now(),
+        },
+        issues: BTreeMap::new(),
+        memories: BTreeMap::new(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::git::Stamp;
-    use crate::model::{Kind, Stamps, Status};
+    use crate::model::test_issue as issue;
     use std::process::Command;
 
     fn repo() -> (tempfile::TempDir, Store) {
@@ -211,38 +225,6 @@ mod tests {
         assert!(ok);
         let store = Store::open(dir.path()).unwrap();
         (dir, store)
-    }
-
-    fn issue(id: &str) -> Issue {
-        let now = Timestamp::now();
-        let stamp = Stamp {
-            commit: "none".into(),
-            branch: "main".into(),
-        };
-        Issue {
-            id: id.into(),
-            title: "t".into(),
-            body: String::new(),
-            kind: Kind::Task,
-            status: Status::Open,
-            priority: 2,
-            labels: vec![],
-            parent: None,
-            blocked_by: vec![],
-            related: vec![],
-            assignee: None,
-            lease_expires: None,
-            defer_until: None,
-            created_at: now,
-            updated_at: now,
-            closed_at: None,
-            close_reason: None,
-            notes: vec![],
-            stamps: Stamps {
-                created: stamp,
-                closed: None,
-            },
-        }
     }
 
     #[test]

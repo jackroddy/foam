@@ -138,3 +138,108 @@ pub fn new_id(prefix: &str) -> String {
     let n = rand::random::<u32>() & 0xff_ffff;
     format!("{prefix}-{n:06x}")
 }
+
+impl Issue {
+    pub fn touch(&mut self) {
+        self.updated_at = Timestamp::now();
+    }
+
+    pub fn close(&mut self, reason: Option<String>, stamp: &Stamp) {
+        let now = Timestamp::now();
+        self.status = Status::Closed;
+        self.closed_at = Some(now);
+        self.close_reason = reason;
+        self.stamps.closed = Some(stamp.clone());
+        self.lease_expires = None;
+        self.updated_at = now;
+    }
+
+    pub fn reopen(&mut self) {
+        self.status = Status::Open;
+        self.closed_at = None;
+        self.close_reason = None;
+        self.stamps.closed = None;
+        self.defer_until = None;
+        self.touch();
+    }
+}
+
+/// Parse an RFC 3339 timestamp, or a date as midnight UTC.
+pub fn parse_when(s: &str) -> Result<Timestamp, String> {
+    if let Ok(t) = s.parse::<Timestamp>() {
+        return Ok(t);
+    }
+    let date: jiff::civil::Date = s
+        .parse()
+        .map_err(|_| format!("not a timestamp or a date: {s}"))?;
+    date.in_tz("UTC")
+        .map(|z| z.timestamp())
+        .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+pub fn test_issue(id: &str) -> Issue {
+    let now = Timestamp::now();
+    let stamp = Stamp {
+        commit: "none".into(),
+        branch: "main".into(),
+    };
+    Issue {
+        id: id.into(),
+        title: "t".into(),
+        body: String::new(),
+        kind: Kind::Task,
+        status: Status::Open,
+        priority: 2,
+        labels: vec![],
+        parent: None,
+        blocked_by: vec![],
+        related: vec![],
+        assignee: None,
+        lease_expires: None,
+        defer_until: None,
+        created_at: now,
+        updated_at: now,
+        closed_at: None,
+        close_reason: None,
+        notes: vec![],
+        stamps: Stamps {
+            created: stamp,
+            closed: None,
+        },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn canonical_bytes_are_stable_and_newline_terminated() {
+        let issue = test_issue("t-000001");
+        let a = canonical(&issue);
+        let b = canonical(&issue);
+        assert_eq!(a, b);
+        assert!(a.ends_with(b"}\n"));
+        assert!(a.starts_with(b"{\n  \"id\": \"t-000001\",\n"));
+    }
+
+    #[test]
+    fn ids_have_the_prefix_and_six_hex_digits() {
+        let id = new_id("foam");
+        let (prefix, hex) = id.rsplit_once('-').unwrap();
+        assert_eq!(prefix, "foam");
+        assert_eq!(hex.len(), 6);
+        assert!(hex.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn when_accepts_dates_and_timestamps() {
+        assert_eq!(
+            parse_when("2026-10-01").unwrap().to_string(),
+            "2026-10-01T00:00:00Z"
+        );
+        assert!(parse_when("2026-10-01T12:00:00Z").is_ok());
+        assert!(parse_when("tomorrow").is_err());
+    }
+}
