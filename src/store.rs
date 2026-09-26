@@ -120,9 +120,23 @@ impl Store {
             let mut files = self.load_files(&merged.tree)?;
             for c in &merged.conflicts {
                 files.remove(&c.path);
+                // decode needs a meta.json; ours stands, since
+                // the two only differ when the clones ran init
+                // separately and the prefix is a local choice
+                if c.path == "meta.json" {
+                    let ours = c
+                        .ours
+                        .as_deref()
+                        .or(c.base.as_deref())
+                        .or(c.theirs.as_deref());
+                    if let Some(oid) = ours {
+                        let bytes = self.git.cat_file_batch(&[oid])?.remove(0);
+                        files.insert(c.path.clone(), (oid.to_string(), bytes));
+                    }
+                }
             }
             let mut db = Db::decode(&files)?;
-            for c in &merged.conflicts {
+            for c in merged.conflicts.iter().filter(|c| c.path != "meta.json") {
                 self.resolve(&mut db, c)?;
             }
             let tree = self.write_tree(&db, &files)?;
@@ -183,13 +197,6 @@ impl Store {
                 Some(m) => db.memories.insert(slug, m),
                 None => db.memories.remove(&slug),
             };
-        } else if c.path == "meta.json" {
-            // ours stands; the two only differ if the clones
-            // ran init separately, and the prefix is a local
-            // choice either way
-            if let Some(m) = parse::<Meta>(ours, &c.path)? {
-                db.meta = m;
-            }
         } else {
             bail!("unexpected path in the data ref: {}", c.path);
         }

@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use anyhow::{Context, Result, bail};
 use jiff::Timestamp;
 
@@ -12,7 +10,6 @@ use crate::{Cli, Cmd, DepCmd, SetupCmd};
 
 /// The global flags, split from the subcommand so both can move.
 struct Options {
-    directory: PathBuf,
     json: bool,
     actor: Option<String>,
 }
@@ -21,12 +18,11 @@ pub fn run(cli: Cli) -> Result<()> {
     let store = Store::open(&cli.directory)?;
     let command = cli.command;
     let cli = Options {
-        directory: cli.directory,
         json: cli.json,
         actor: cli.actor,
     };
     match command {
-        Cmd::Init { prefix } => init(&store, prefix, &cli),
+        Cmd::Init { prefix } => init(&store, prefix),
         Cmd::Create {
             title,
             kind,
@@ -37,7 +33,7 @@ pub fn run(cli: Cli) -> Result<()> {
             blocked_by,
         } => {
             let stamp = store.git.head_stamp()?;
-            let id = store.write_named(|db| {
+            let issue = store.write_named(|db| {
                 let id = fresh_id(db);
                 for other in blocked_by.iter().chain(parent.iter()) {
                     if !db.issues.contains_key(other) {
@@ -69,14 +65,13 @@ pub fn run(cli: Cli) -> Result<()> {
                         closed: None,
                     },
                 };
-                db.issues.insert(id.clone(), issue);
-                Ok((id.clone(), format!("create {id}")))
+                db.issues.insert(id.clone(), issue.clone());
+                Ok((issue, format!("create {id}")))
             })?;
-            let snap = load(&store)?;
             if cli.json {
-                println!("{}", serde_json::to_string_pretty(&snap.db.issues[&id])?);
+                println!("{}", serde_json::to_string_pretty(&issue)?);
             } else {
-                println!("{id}");
+                println!("{}", issue.id);
             }
             Ok(())
         }
@@ -154,13 +149,14 @@ pub fn run(cli: Cli) -> Result<()> {
             parent,
             defer_until,
         } => {
+            let actor = actor(&store, &cli);
             let stamp = store.git.head_stamp()?;
             let defer_until = defer_until
                 .as_deref()
                 .map(parse_when)
                 .transpose()
                 .map_err(anyhow::Error::msg)?;
-            store.write(&format!("update {id}"), |db| {
+            let issue = store.write(&format!("update {id}"), |db| {
                 if let Some(p) = parent.as_ref().filter(|p| !p.is_empty()) {
                     if !db.issues.contains_key(p) {
                         bail!("no such issue: {p}");
@@ -200,14 +196,21 @@ pub fn run(cli: Cli) -> Result<()> {
                 }
                 match status {
                     Some(Status::Closed) => issue.close(None, &stamp),
-                    Some(Status::Open) => issue.reopen(),
-                    Some(s) => issue.status = s,
+                    Some(Status::Open) => {
+                        issue.reopen();
+                        issue.unclaim();
+                    }
+                    Some(Status::InProgress) => issue.claim(&actor),
+                    Some(Status::Deferred) if issue.defer_until.is_none() => {
+                        bail!("deferring needs --defer-until")
+                    }
+                    Some(Status::Deferred) => issue.status = Status::Deferred,
                     None => {}
                 }
                 issue.touch();
-                Ok(())
+                Ok(issue.clone())
             })?;
-            show_after(&store, &id, &cli)
+            print_written(&issue, &cli)
         }
         Cmd::Close { ids, reason } => {
             let stamp = store.git.head_stamp()?;
@@ -252,7 +255,7 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Cmd::Claim { id, force } => {
             let actor = actor(&store, &cli);
-            store.write(&format!("claim {id} by {actor}"), |db| {
+            let issue = store.write(&format!("claim {id} by {actor}"), |db| {
                 let issue = get_mut(db, &id)?;
                 if issue.status == Status::Closed {
                     bail!("{id} is closed");
@@ -265,13 +268,13 @@ pub fn run(cli: Cli) -> Result<()> {
                     );
                 }
                 issue.claim(&actor);
-                Ok(())
+                Ok(issue.clone())
             })?;
-            show_after(&store, &id, &cli)
+            print_written(&issue, &cli)
         }
         Cmd::Unclaim { id, force } => {
             let actor = actor(&store, &cli);
-            store.write(&format!("unclaim {id}"), |db| {
+            let issue = store.write(&format!("unclaim {id}"), |db| {
                 let issue = get_mut(db, &id)?;
                 if issue.status != Status::InProgress {
                     bail!("{id} is not in progress");
@@ -283,22 +286,22 @@ pub fn run(cli: Cli) -> Result<()> {
                     );
                 }
                 issue.unclaim();
-                Ok(())
+                Ok(issue.clone())
             })?;
-            show_after(&store, &id, &cli)
+            print_written(&issue, &cli)
         }
         Cmd::Heartbeat { id } => {
             let actor = actor(&store, &cli);
-            store.write(&format!("heartbeat {id}"), |db| {
+            let issue = store.write(&format!("heartbeat {id}"), |db| {
                 let issue = get_mut(db, &id)?;
                 if issue.status != Status::InProgress || issue.assignee.as_deref() != Some(&*actor)
                 {
                     bail!("{id} is not held by {actor}");
                 }
                 issue.claim(&actor);
-                Ok(())
+                Ok(issue.clone())
             })?;
-            show_after(&store, &id, &cli)
+            print_written(&issue, &cli)
         }
         Cmd::Reclaim => {
             let freed = store.write("reclaim", |db| {
@@ -326,7 +329,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Cmd::Note { id, text } => {
             let actor = actor(&store, &cli);
             let stamp = store.git.head_stamp()?;
-            store.write(&format!("note {id}"), |db| {
+            let issue = store.write(&format!("note {id}"), |db| {
                 let issue = get_mut(db, &id)?;
                 issue.notes.push(Note {
                     at: Timestamp::now(),
@@ -336,9 +339,9 @@ pub fn run(cli: Cli) -> Result<()> {
                     branch: stamp.branch.clone(),
                 });
                 issue.touch();
-                Ok(())
+                Ok(issue.clone())
             })?;
-            show_after(&store, &id, &cli)
+            print_written(&issue, &cli)
         }
         Cmd::Search { query } => {
             let snap = load(&store)?;
@@ -356,27 +359,21 @@ pub fn run(cli: Cli) -> Result<()> {
         Cmd::Remember { slug, text } => {
             check_slug(&slug).map_err(anyhow::Error::msg)?;
             let stamp = store.git.head_stamp()?;
-            store.write(&format!("remember {slug}"), |db| {
+            let memory = store.write(&format!("remember {slug}"), |db| {
                 let now = Timestamp::now();
                 let created_at = db.memories.get(&slug).map_or(now, |m| m.created_at);
-                db.memories.insert(
-                    slug.clone(),
-                    Memory {
-                        slug: slug.clone(),
-                        text: text.clone(),
-                        created_at,
-                        updated_at: now,
-                        stamp: stamp.clone(),
-                    },
-                );
-                Ok(())
+                let memory = Memory {
+                    slug: slug.clone(),
+                    text: text.clone(),
+                    created_at,
+                    updated_at: now,
+                    stamp: stamp.clone(),
+                };
+                db.memories.insert(slug.clone(), memory.clone());
+                Ok(memory)
             })?;
             if cli.json {
-                let snap = load(&store)?;
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&snap.db.memories[&slug])?
-                );
+                println!("{}", serde_json::to_string_pretty(&memory)?);
             } else {
                 println!("remembered {slug}");
             }
@@ -405,7 +402,7 @@ pub fn run(cli: Cli) -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(m)?);
             } else {
                 println!("{}", m.text);
-                println!("({})", age(&m.stamp, &store.git));
+                println!("({})", age(&m.stamp, store.git.distance(&m.stamp.commit)));
             }
             Ok(())
         }
@@ -464,7 +461,7 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Cmd::Dep { command } => match command {
             DepCmd::Add { id, blocker } => {
-                store.write(&format!("dep {id} <- {blocker}"), |db| {
+                let issue = store.write(&format!("dep {id} <- {blocker}"), |db| {
                     if !db.issues.contains_key(&blocker) {
                         bail!("no such issue: {blocker}");
                     }
@@ -476,12 +473,12 @@ pub fn run(cli: Cli) -> Result<()> {
                         issue.blocked_by.push(blocker.clone());
                         issue.touch();
                     }
-                    Ok(())
+                    Ok(issue.clone())
                 })?;
-                show_after(&store, &id, &cli)
+                print_written(&issue, &cli)
             }
             DepCmd::Rm { id, blocker } => {
-                store.write(&format!("undep {id} <- {blocker}"), |db| {
+                let issue = store.write(&format!("undep {id} <- {blocker}"), |db| {
                     let issue = get_mut(db, &id)?;
                     let before = issue.blocked_by.len();
                     issue.blocked_by.retain(|b| *b != blocker);
@@ -489,9 +486,9 @@ pub fn run(cli: Cli) -> Result<()> {
                         bail!("{id} does not wait on {blocker}");
                     }
                     issue.touch();
-                    Ok(())
+                    Ok(issue.clone())
                 })?;
-                show_after(&store, &id, &cli)
+                print_written(&issue, &cli)
             }
             DepCmd::Tree { id } => {
                 let snap = load(&store)?;
@@ -510,14 +507,14 @@ pub fn run(cli: Cli) -> Result<()> {
     }
 }
 
-fn init(store: &Store, prefix: Option<String>, cli: &Options) -> Result<()> {
+fn init(store: &Store, prefix: Option<String>) -> Result<()> {
     if store.exists()? {
         bail!("foam is already initialized here");
     }
     let prefix = match prefix {
         Some(p) => p,
         None => {
-            let dir = std::fs::canonicalize(&cli.directory)?;
+            let dir = store.git.toplevel()?;
             dir.file_name()
                 .and_then(|n| n.to_str())
                 .map(|n| {
@@ -530,7 +527,15 @@ fn init(store: &Store, prefix: Option<String>, cli: &Options) -> Result<()> {
     };
     let remote = "origin";
     let has_remote = store.git.remote_url(remote).is_some();
-    if has_remote && store.git.ls_remote(remote, DATA_REF)? {
+    let remote_has_data = has_remote
+        && match store.git.ls_remote(remote, DATA_REF) {
+            Ok(has) => has,
+            Err(e) => {
+                eprintln!("foam: could not reach {remote} ({e:#}); starting locally, sync later");
+                false
+            }
+        };
+    if remote_has_data {
         store.git.fetch(remote, &format!("{DATA_REF}:{DATA_REF}"))?;
         println!("fetched {DATA_REF} from {remote}");
     } else {
@@ -610,6 +615,7 @@ const PRE_PUSH: &str = "\
 # foam: push the data ref alongside code
 cat >/dev/null
 [ -n \"$FOAM_IN_HOOK\" ] && exit 0
+command -v foam >/dev/null 2>&1 || exit 0
 git remote get-url \"$1\" >/dev/null 2>&1 || exit 0
 git rev-parse -q --verify refs/foam/data >/dev/null || exit 0
 FOAM_IN_HOOK=1 foam sync --remote \"$1\" || exit 1
@@ -627,8 +633,23 @@ fn setup_sync(store: &Store, remote: &str) -> Result<()> {
         println!("added the fetch refspec for {DATA_REF} to {remote}");
     }
     let hook = store.git.hooks_dir()?.join("pre-push");
+    if store.git.hooks_redirected() {
+        eprintln!(
+            "foam: core.hooksPath is set, so no hook was installed; add this to {}:\n{}",
+            hook.display(),
+            PRE_PUSH.trim_start_matches("#!/bin/sh\n")
+        );
+        return Ok(());
+    }
     match std::fs::read_to_string(&hook) {
         Ok(existing) if existing.contains(HOOK_MARK) => {}
+        Ok(existing) if !is_shell(&existing) => {
+            eprintln!(
+                "foam: {} is not a shell script, so it was left alone; run this from it:\n{}",
+                hook.display(),
+                PRE_PUSH.trim_start_matches("#!/bin/sh\n")
+            );
+        }
         Ok(existing) => {
             // keep whatever was there and run ours after it,
             // minus our own shebang line
@@ -649,6 +670,17 @@ fn setup_sync(store: &Store, remote: &str) -> Result<()> {
         std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755))?;
     }
     Ok(())
+}
+
+/// Whether a hook script's shebang names a Bourne-style shell.
+fn is_shell(script: &str) -> bool {
+    match script.lines().next() {
+        Some(first) if first.starts_with("#!") => {
+            first.ends_with("sh") || first.contains("sh ") || first.ends_with("bash")
+        }
+        // no shebang: git runs it through sh
+        _ => true,
+    }
 }
 
 /// Fetch, merge and push the data ref, retrying while someone
@@ -799,10 +831,8 @@ fn fresh_id(db: &Db) -> String {
     }
 }
 
-/// Print the issue as it is after a write.
-fn show_after(store: &Store, id: &str, cli: &Options) -> Result<()> {
-    let snap = load(store)?;
-    let issue = get(&snap.db, id)?;
+/// Print an issue a write just committed.
+fn print_written(issue: &Issue, cli: &Options) -> Result<()> {
     if cli.json {
         println!("{}", serde_json::to_string_pretty(issue)?);
     } else {
@@ -823,8 +853,8 @@ fn print_issues(issues: &[&Issue], json: bool) -> Result<()> {
 }
 
 /// Describe how far `HEAD` has moved since a stamp was taken.
-pub fn age(stamp: &Stamp, git: &Git) -> String {
-    match git.distance(&stamp.commit) {
+pub fn age(stamp: &Stamp, distance: Distance) -> String {
+    match distance {
         Distance::Behind(0) => format!("at {}, this commit", stamp.commit),
         Distance::Behind(1) => format!("at {}, 1 commit ago", stamp.commit),
         Distance::Behind(n) => format!("at {}, {n} commits ago", stamp.commit),
@@ -840,7 +870,8 @@ pub fn age(stamp: &Stamp, git: &Git) -> String {
 }
 
 pub fn memory_line(m: &Memory, git: &Git) -> String {
-    format!("{}  {}  ({})", m.slug, m.text, age(&m.stamp, git))
+    let distance = git.distance(&m.stamp.commit);
+    format!("{}  {}  ({})", m.slug, m.text, age(&m.stamp, distance))
 }
 
 fn line(i: &Issue) -> String {

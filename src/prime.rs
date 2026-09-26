@@ -101,9 +101,10 @@ pub fn render(db: &Db, git: &Git, actor: &str, limit: usize) -> String {
     if !db.memories.is_empty() {
         out.push_str("\n## Memories\n\n");
         for m in db.memories.values() {
-            let note = match git.distance(&m.stamp.commit) {
+            let distance = git.distance(&m.stamp.commit);
+            let note = match distance {
                 Distance::Behind(n) if n < STALE_AFTER => String::new(),
-                _ => format!("  [{}]", age(&m.stamp, git)),
+                _ => format!("  [{}]", age(&m.stamp, distance)),
             };
             let _ = writeln!(out, "{}: {}{note}", m.slug, m.text);
         }

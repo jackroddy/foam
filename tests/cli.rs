@@ -762,3 +762,145 @@ fn log_and_json_on_writes() {
         serde_json::from_str(&stdout(foam(dir.path()).args(["--json", "doctor"]))).unwrap();
     assert!(problems.is_empty());
 }
+
+#[test]
+fn two_clones_that_both_ran_init_still_merge() {
+    let (_root, a, b) = two_clones();
+    stdout(foam(&a).args(["init", "--prefix", "aa"]));
+    stdout(foam(&b).args(["init", "--prefix", "bb"]));
+    let x = stdout(foam(&a).args(["create", "from a"]));
+    let y = stdout(foam(&b).args(["create", "from b"]));
+    stdout(foam(&a).arg("sync"));
+    let out = stdout(foam(&b).arg("sync"));
+    assert!(out.contains("merged origin"), "{out}");
+    let listed = stdout(foam(&b).arg("list"));
+    assert!(listed.contains(&x) && listed.contains(&y), "{listed}");
+    // b merged first, so its meta.json stood; a then
+    // fast-forwards onto that merge and takes the prefix too
+    assert!(stdout(foam(&b).args(["create", "later"])).starts_with("bb-"));
+    git(&a, &["fetch", "-q"]);
+    assert!(stdout(foam(&a).arg("list")).contains(&y));
+    assert!(stdout(foam(&a).args(["create", "later"])).starts_with("bb-"));
+}
+
+#[test]
+fn update_status_goes_through_claims_and_deferral() {
+    let dir = repo();
+    stdout(foam(dir.path()).args(["init", "--prefix", "t"]));
+    let a = stdout(foam(dir.path()).args(["create", "a"]));
+    stdout(foam(dir.path()).args(["--actor", "ann", "claim", &a]));
+    let v: serde_json::Value = serde_json::from_str(&stdout(
+        foam(dir.path()).args(["--json", "update", &a, "--status", "open"]),
+    ))
+    .unwrap();
+    assert_eq!(v["assignee"], serde_json::Value::Null);
+    assert_eq!(v["lease_expires"], serde_json::Value::Null);
+
+    let v: serde_json::Value = serde_json::from_str(&stdout(foam(dir.path()).args([
+        "--json",
+        "--actor",
+        "bob",
+        "update",
+        &a,
+        "--status",
+        "in_progress",
+    ])))
+    .unwrap();
+    assert_eq!(v["assignee"], "bob");
+    assert!(v["lease_expires"].is_string());
+    assert_eq!(stdout(foam(dir.path()).arg("reclaim")), "");
+
+    foam(dir.path())
+        .args(["update", &a, "--status", "deferred"])
+        .assert()
+        .code(1);
+}
+
+#[test]
+fn init_offline_and_from_a_subdirectory() {
+    let dir = repo();
+    git(
+        dir.path(),
+        &["remote", "add", "origin", "/nonexistent/remote.git"],
+    );
+    let sub = dir.path().join("deep/er");
+    std::fs::create_dir_all(&sub).unwrap();
+    let out = foam(&sub).arg("init").output().unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(String::from_utf8_lossy(&out.stderr).contains("could not reach origin"));
+    let id = stdout(foam(&sub).args(["create", "x"]));
+    let prefix = dir
+        .path()
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_lowercase();
+    let prefix: String = prefix
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '-' })
+        .collect();
+    assert!(id.starts_with(&format!("{prefix}-")), "{id} vs {prefix}");
+}
+
+#[test]
+fn hook_install_respects_other_hooks() {
+    // a redirected hooks path is left alone
+    let dir = repo();
+    git(
+        dir.path(),
+        &["remote", "add", "origin", "/nonexistent/remote.git"],
+    );
+    let elsewhere = dir.path().join("myhooks");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    git(
+        dir.path(),
+        &["config", "core.hooksPath", elsewhere.to_str().unwrap()],
+    );
+    let out = foam(dir.path()).arg("init").output().unwrap();
+    assert!(out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("core.hooksPath is set"));
+    assert!(!elsewhere.join("pre-push").exists());
+    assert!(!dir.path().join(".git/hooks/pre-push").exists());
+
+    // a python hook is left alone; a shell hook gets the block appended
+    let dir = repo();
+    git(
+        dir.path(),
+        &["remote", "add", "origin", "/nonexistent/remote.git"],
+    );
+    let hook = dir.path().join(".git/hooks/pre-push");
+    std::fs::create_dir_all(hook.parent().unwrap()).unwrap();
+    std::fs::write(&hook, "#!/usr/bin/env python3\nprint('hi')\n").unwrap();
+    let out = foam(dir.path()).arg("init").output().unwrap();
+    assert!(String::from_utf8_lossy(&out.stderr).contains("not a shell script"));
+    assert_eq!(
+        std::fs::read_to_string(&hook).unwrap(),
+        "#!/usr/bin/env python3\nprint('hi')\n"
+    );
+    std::fs::write(&hook, "#!/bin/bash\necho hi\n").unwrap();
+    // the remote is unreachable, so the sync itself fails;
+    // the setup half has already run
+    let _ = foam(dir.path()).args(["sync", "--setup"]).output().unwrap();
+    let text = std::fs::read_to_string(&hook).unwrap();
+    assert!(text.starts_with("#!/bin/bash\necho hi\n"), "{text}");
+    assert!(text.contains("foam sync --remote"), "{text}");
+    assert!(text.contains("command -v foam"), "{text}");
+}
+
+#[test]
+fn large_databases_load() {
+    let dir = repo();
+    stdout(foam(dir.path()).args(["init", "--prefix", "t"]));
+    // enough records that cat-file's input and output both
+    // exceed a pipe buffer
+    let body = "x".repeat(2000);
+    for i in 0..60 {
+        stdout(foam(dir.path()).args(["create", &format!("issue {i}"), "--body", &body]));
+    }
+    assert_eq!(stdout(foam(dir.path()).arg("list")).lines().count(), 60);
+}

@@ -101,12 +101,14 @@ impl Git {
             .stderr(Stdio::piped())
             .spawn()
             .context("failed to run git")?;
-        child
-            .stdin
-            .take()
-            .expect("stdin was piped")
-            .write_all(input)?;
+        // the child may fill its stdout pipe before it has
+        // read all of its stdin, so feed it from a thread
+        // while this one drains the output
+        let mut stdin = child.stdin.take().expect("stdin was piped");
+        let input = input.to_vec();
+        let feeder = std::thread::spawn(move || stdin.write_all(&input));
         let out = child.wait_with_output()?;
+        feeder.join().expect("feeder thread panicked")?;
         if !out.status.success() {
             bail!(
                 "git {} failed: {}",
@@ -131,7 +133,7 @@ impl Git {
 
     /// Every blob under `commit`, as `(path, oid)`.
     pub fn ls_tree(&self, commit: &str) -> Result<Vec<(String, String)>> {
-        let out = self.run(&["ls-tree", "-r", "-z", commit])?;
+        let out = self.run(&["ls-tree", "-r", "-z", "--full-tree", commit])?;
         let mut entries = Vec::new();
         for record in out.split(|b| *b == 0).filter(|r| !r.is_empty()) {
             let record = std::str::from_utf8(record)?;
@@ -254,6 +256,12 @@ impl Git {
         (!value.is_empty()).then_some(value)
     }
 
+    /// Whether `core.hooksPath` sends hooks somewhere other than
+    /// this repository's own hooks directory.
+    pub fn hooks_redirected(&self) -> bool {
+        self.config("core.hooksPath").is_some()
+    }
+
     pub fn distance(&self, commit: &str) -> Distance {
         if self
             .rev_parse(&format!("{commit}^{{commit}}"))
@@ -299,7 +307,14 @@ impl Git {
     /// Three-way merge `theirs` into `ours` without a checkout.
     pub fn merge_tree(&self, ours: &str, theirs: &str) -> Result<Merged> {
         let out = self
-            .command(&["merge-tree", "--write-tree", "-z", ours, theirs])
+            .command(&[
+                "merge-tree",
+                "--write-tree",
+                "--allow-unrelated-histories",
+                "-z",
+                ours,
+                theirs,
+            ])
             .stderr(Stdio::piped())
             .output()?;
         // exit 0 is clean, 1 is conflicts; anything else failed
