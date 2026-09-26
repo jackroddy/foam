@@ -1,0 +1,27 @@
+{
+  "id": "foam-4a3440",
+  "title": "Codex and Cursor hook recipes",
+  "body": "Deferred from the plan. Same shape as setup claude: one hook entry, no generated markdown.",
+  "type": "feature",
+  "status": "open",
+  "priority": 3,
+  "labels": [],
+  "parent": null,
+  "blocked_by": [],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-09-26T22:21:19.247808625Z",
+  "updated_at": "2026-09-26T22:21:19.247808625Z",
+  "closed_at": null,
+  "close_reason": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "0a25e5f",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
