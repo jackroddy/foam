@@ -3,25 +3,28 @@
   "title": "ready skips an epic that still has open children",
   "body": "",
   "type": "task",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 2,
   "labels": [],
   "parent": "foam-c4574c",
   "blocked_by": [],
   "related": [],
   "assignee": "Jack Roddy",
-  "lease_expires": "2026-09-26T22:46:28.674133098Z",
+  "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-09-26T22:31:23.644075335Z",
-  "updated_at": "2026-09-26T22:31:28.674133098Z",
-  "closed_at": null,
-  "close_reason": null,
+  "updated_at": "2026-09-26T22:34:03.579995642Z",
+  "closed_at": "2026-09-26T22:34:03.579995642Z",
+  "close_reason": "commit b107e0c; tests in graph.rs and tests/cli.rs",
   "notes": [],
   "stamps": {
     "created": {
       "commit": "e99c0b2",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "b107e0c",
+      "branch": "dev"
+    }
   }
 }
