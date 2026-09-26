@@ -47,7 +47,7 @@ enum Cmd {
         /// Kind of issue
         #[arg(long = "type", value_enum, default_value_t = Kind::Task)]
         kind: Kind,
-        /// 0 is highest, 4 lowest
+        /// 0 blocks all other work, 1 this session, 2 soon, 3 when convenient, 4 someday
         #[arg(long, short, default_value_t = 2, value_parser = clap::value_parser!(u8).range(0..=4))]
         priority: u8,
         /// Add a label; repeatable
@@ -57,7 +57,7 @@ enum Cmd {
         #[arg(long)]
         parent: Option<String>,
         /// Longer description
-        #[arg(long, default_value = "")]
+        #[arg(long, default_value = "", allow_hyphen_values = true)]
         body: String,
         /// Issue that must close first; repeatable
         #[arg(long = "blocked-by")]
@@ -90,9 +90,9 @@ enum Cmd {
     /// Change fields of an issue
     Update {
         id: String,
-        #[arg(long)]
+        #[arg(long, allow_hyphen_values = true)]
         title: Option<String>,
-        #[arg(long)]
+        #[arg(long, allow_hyphen_values = true)]
         body: Option<String>,
         #[arg(long = "type", value_enum)]
         kind: Option<Kind>,
@@ -119,7 +119,7 @@ enum Cmd {
     Close {
         #[arg(required = true)]
         ids: Vec<String>,
-        #[arg(long)]
+        #[arg(long, allow_hyphen_values = true)]
         reason: Option<String>,
     },
     /// Reopen one or more closed issues
@@ -146,11 +146,19 @@ enum Cmd {
     /// Reopen every in-progress issue whose lease has expired
     Reclaim,
     /// Append a note to an issue
-    Note { id: String, text: String },
+    Note {
+        id: String,
+        #[arg(allow_hyphen_values = true)]
+        text: String,
+    },
     /// Search issue titles, bodies and notes, and memories, case-insensitively; closed issues included
     Search { query: String },
     /// Store a memory under a slug, replacing any with the same slug
-    Remember { slug: String, text: String },
+    Remember {
+        slug: String,
+        #[arg(allow_hyphen_values = true)]
+        text: String,
+    },
     /// List every memory
     Memories,
     /// Print one memory

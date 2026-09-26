@@ -32,7 +32,9 @@ foam blocked                    what is waiting, and on what
 foam search <query>             issue titles, bodies, notes; memories
 foam remember <slug> <text> | memories | recall <slug> | forget <slug>
 foam update <id> [--title ..] [--priority N] [--defer-until DATE]
-Add --json to any command for machine-readable output.";
+Add --json to any command for machine-readable output.
+Priority: P0 blocks all other work, P1 this session, P2 soon, P3 when \
+convenient, P4 someday.";
 
 /// Render the session-start context for `actor`.
 pub fn render(db: &Db, git: &Git, actor: &str, limit: usize, reclaimed: &[String]) -> String {

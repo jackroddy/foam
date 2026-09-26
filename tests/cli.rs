@@ -44,6 +44,15 @@ fn init_create_show_list() {
     let a = stdout(foam(dir.path()).args(["create", "first", "-p", "1"]));
     assert!(a.starts_with("t-"), "{a}");
     let b = stdout(foam(dir.path()).args(["create", "second", "--blocked-by", &a]));
+    // free text may start with a dash
+    stdout(foam(dir.path()).args(["update", &b, "--body", "--reason is optional"]));
+    stdout(foam(dir.path()).args(["note", &b, "-v flag"]));
+    stdout(foam(dir.path()).args(["remember", "dash", "--json everywhere"]));
+    let shown = stdout(foam(dir.path()).args(["show", &b]));
+    assert!(
+        shown.contains("--reason is optional") && shown.contains("] -v flag"),
+        "{shown}"
+    );
 
     let shown = stdout(foam(dir.path()).args(["show", &b]));
     assert!(shown.contains("second"));
@@ -1030,8 +1039,8 @@ fn config_sets_the_lease_and_prime_reclaims_expired_ones() {
 
     // the memories section stops at its byte budget, dropping
     // the least recently updated first
-    for i in 0..5 {
-        let text = format!("{i}{}", "x".repeat(1000));
+    for i in 0..11 {
+        let text = format!("{i}{}", "x".repeat(400));
         stdout(foam(dir.path()).args(["remember", &format!("m{i}"), &text]));
     }
     let text = stdout(foam(dir.path()).arg("prime"));
@@ -1040,7 +1049,13 @@ fn config_sets_the_lease_and_prime_reclaims_expired_ones() {
         "{text}"
     );
     assert!(!text.contains("m0: "), "{text}");
-    assert!(text.contains("m1: ") && text.contains("m4: "), "{text}");
+    assert!(text.contains("m1: ") && text.contains("m10: "), "{text}");
+    let out = foam(dir.path())
+        .args(["remember", "long", &"y".repeat(513)])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("the most is 512"));
 
     stdout(foam(dir.path()).args(["config", "stale-after", "0"]));
     let text = stdout(foam(dir.path()).arg("prime"));

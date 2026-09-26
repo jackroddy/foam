@@ -3,7 +3,9 @@ use jiff::Timestamp;
 
 use crate::git::{Distance, Git, Push, Stamp};
 use crate::graph;
-use crate::model::{Issue, Memory, Note, Stamps, Status, check_slug, new_id, parse_when};
+use crate::model::{
+    Issue, MEMORY_MAX_BYTES, Memory, Note, Stamps, Status, check_slug, new_id, parse_when,
+};
 use crate::prime;
 use crate::store::{Absorbed, DATA_REF, Db, ORIGIN_REF, Snapshot, Store};
 use crate::{Cli, Cmd, ConfigKey, DepCmd, SetupCmd};
@@ -377,6 +379,12 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Cmd::Remember { slug, text } => {
             check_slug(&slug).map_err(anyhow::Error::msg)?;
+            if text.len() > MEMORY_MAX_BYTES {
+                bail!(
+                    "a memory is a fact, not a document: {} bytes, the most is {MEMORY_MAX_BYTES}",
+                    text.len()
+                );
+            }
             let stamp = store.git.head_stamp()?;
             let memory = store.write(&format!("remember {slug}"), |db| {
                 let now = Timestamp::now();

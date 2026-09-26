@@ -9,6 +9,7 @@ use crate::git::Stamp;
 pub const SCHEMA_VERSION: u32 = 1;
 
 pub const LEASE_MINUTES: u32 = 15;
+pub const MEMORY_MAX_BYTES: usize = 512;
 pub const STALE_AFTER: u64 = 50;
 
 /// The contents of `meta.json`.

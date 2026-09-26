@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- A body, title, note, memory or close reason may start with a dash.
+- `foam remember` refuses a text over 512 bytes.
+- The priorities have meanings: P0 blocks all other work, P1 this session,
+  P2 soon, P3 when convenient, P4 someday. `create --help` and the prime
+  cheat sheet say so.
 - An epic's line in `list`, `ready`, `blocked`, `search` and `prime` ends
   with `[closed/total closed]` over its children, and `show` puts the same
   count on its children heading.
