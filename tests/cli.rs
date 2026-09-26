@@ -904,3 +904,27 @@ fn large_databases_load() {
     }
     assert_eq!(stdout(foam(dir.path()).arg("list")).lines().count(), 60);
 }
+
+#[test]
+fn a_closed_pipe_ends_the_process_quietly() {
+    let dir = repo();
+    stdout(foam(dir.path()).args(["init", "--prefix", "t"]));
+    for i in 0..50 {
+        stdout(foam(dir.path()).args(["create", &format!("issue {i}")]));
+    }
+    let bin = Command::cargo_bin("foam").unwrap();
+    let out = Command::new("bash")
+        .args([
+            "-c",
+            &format!(
+                "{} list | head -c 1 >/dev/null",
+                bin.get_program().to_str().unwrap()
+            ),
+        ])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!err.contains("panicked"), "{err}");
+    assert!(out.status.success());
+}

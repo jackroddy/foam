@@ -229,6 +229,7 @@ dependencies = [
  "assert_cmd",
  "clap",
  "jiff",
+ "libc",
  "rand",
  "serde",
  "serde_json",

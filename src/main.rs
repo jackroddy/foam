@@ -218,6 +218,16 @@ enum DepCmd {
 }
 
 fn main() -> ExitCode {
+    // a reader that stops early, `foam list | head`, closes the
+    // pipe; with SIGPIPE ignored, the next println! panics
+    // instead of ending the process the way head expects
+    #[cfg(unix)]
+    unsafe {
+        // SAFETY: signal(2) with SIG_DFL only changes the
+        // disposition of one signal in this process, before
+        // any other thread exists
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
     let cli = Cli::parse();
     match cmd::run(cli) {
         Ok(()) => ExitCode::SUCCESS,
