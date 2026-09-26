@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "foam prime --hook-json",
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      }
+    ]
+  }
+}
