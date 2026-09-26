@@ -22,7 +22,7 @@ before relying on one that is marked as old or from another branch.";
 
 const CHEAT_SHEET: &str = "\
 foam ready [--limit N]          issues that can be worked now
-foam show <id>                  one issue in full, with notes and blockers
+foam show <id>                  one issue in full, with notes, blockers and children
 foam create <title> [--type T] [-p 0-4] [--blocked-by ID] [--parent ID]
 foam claim <id> | unclaim <id> | heartbeat <id>
 foam note <id> <text>           append a note
@@ -90,7 +90,15 @@ pub fn render(db: &Db, git: &Git, actor: &str, limit: usize) -> String {
     }
 
     let ready = graph::ready(db, now);
-    let _ = write!(out, "\n## Ready ({} total)\n\n", ready.len());
+    if ready.len() > limit {
+        let _ = write!(
+            out,
+            "\n## Ready ({limit} of {} shown; `foam ready` lists all)\n\n",
+            ready.len()
+        );
+    } else {
+        let _ = write!(out, "\n## Ready ({} total)\n\n", ready.len());
+    }
     if ready.is_empty() {
         out.push_str("nothing is ready\n");
     }

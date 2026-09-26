@@ -928,3 +928,44 @@ fn a_closed_pipe_ends_the_process_quietly() {
     assert!(!err.contains("panicked"), "{err}");
     assert!(out.status.success());
 }
+
+#[test]
+fn an_epic_shows_its_children_and_waits_on_them() {
+    let dir = repo();
+    commit(dir.path(), "one");
+    foam(dir.path())
+        .args(["init", "--prefix", "t"])
+        .assert()
+        .success();
+    let epic = stdout(foam(dir.path()).args(["create", "big", "--type", "epic", "-p", "0"]));
+    let a = stdout(foam(dir.path()).args(["create", "one", "--parent", &epic]));
+    let b = stdout(foam(dir.path()).args(["create", "two", "--parent", &epic]));
+
+    let shown = stdout(foam(dir.path()).args(["show", &epic]));
+    assert!(shown.contains("children:\n"), "{shown}");
+    assert!(shown.contains(&format!("  {a}  open  one\n")), "{shown}");
+    let v: serde_json::Value =
+        serde_json::from_str(&stdout(foam(dir.path()).args(["--json", "show", &epic]))).unwrap();
+    assert_eq!(v["children"], serde_json::json!([a, b]));
+
+    let ready = stdout(foam(dir.path()).arg("ready"));
+    assert_eq!(ready.lines().count(), 2, "{ready}");
+    assert!(!ready.contains(&epic));
+    let blocked = stdout(foam(dir.path()).arg("blocked"));
+    assert!(blocked.starts_with(&epic), "{blocked}");
+    assert!(blocked.ends_with(&format!("<- {a} {b}")), "{blocked}");
+
+    let text = stdout(foam(dir.path()).args(["prime", "--limit", "1"]));
+    assert!(
+        text.contains("## Ready (1 of 2 shown; `foam ready` lists all)"),
+        "{text}"
+    );
+    assert!(text.contains(&a) && !text.contains(&b));
+    let text = stdout(foam(dir.path()).args(["prime", "--limit", "2"]));
+    assert!(text.contains("## Ready (2 total)"), "{text}");
+
+    stdout(foam(dir.path()).args(["close", &a, &b, "--reason", "done"]));
+    let ready = stdout(foam(dir.path()).arg("ready"));
+    assert!(ready.starts_with(&epic), "{ready}");
+    assert_eq!(stdout(foam(dir.path()).arg("blocked")), "");
+}

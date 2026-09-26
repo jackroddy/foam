@@ -10,6 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - A README.
+- `foam show` lists an issue's children, and `--json` output carries them
+  under `children`.
+
+### Changed
+
+- An epic is not ready while any of its children is open. `foam blocked`
+  lists it with the children holding it.
+- When `foam prime` cuts the ready list short, the heading gives how many
+  it shows and how many are ready.
 
 ## [0.1.0] - 2026-09-26
 

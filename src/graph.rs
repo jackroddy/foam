@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use jiff::Timestamp;
 
-use crate::model::{Issue, Status};
+use crate::model::{Issue, Kind, Status};
 use crate::store::Db;
 
 /// Whether an issue is waiting to be worked: open, or deferred
@@ -32,8 +32,34 @@ pub fn open_blockers<'a>(db: &'a Db, issue: &'a Issue) -> Vec<&'a str> {
         .collect()
 }
 
+/// The issues whose parent is `id`, highest priority first.
+pub fn children<'a>(db: &'a Db, id: &str) -> Vec<&'a Issue> {
+    let mut out: Vec<&Issue> = db
+        .issues
+        .values()
+        .filter(|i| i.parent.as_deref() == Some(id))
+        .collect();
+    out.sort_by_key(|i| (i.priority, i.created_at));
+    out
+}
+
+/// Everything that holds an issue back: its open blockers,
+/// and for an epic its children that are not yet closed.
+pub fn holders<'a>(db: &'a Db, issue: &'a Issue) -> Vec<&'a str> {
+    let mut out = open_blockers(db, issue);
+    if issue.kind == Kind::Epic {
+        out.extend(
+            children(db, &issue.id)
+                .into_iter()
+                .filter(|c| c.status != Status::Closed)
+                .map(|c| c.id.as_str()),
+        );
+    }
+    out
+}
+
 pub fn is_ready(db: &Db, issue: &Issue, now: Timestamp) -> bool {
-    is_pending(issue, now) && open_blockers(db, issue).is_empty()
+    is_pending(issue, now) && holders(db, issue).is_empty()
 }
 
 /// Pending issues with nothing holding them back, highest
@@ -54,7 +80,7 @@ pub fn blocked(db: &Db, now: Timestamp) -> Vec<(&Issue, Vec<&str>)> {
         .issues
         .values()
         .filter(|i| is_pending(i, now))
-        .map(|i| (i, open_blockers(db, i)))
+        .map(|i| (i, holders(db, i)))
         .filter(|(_, b)| !b.is_empty())
         .collect();
     out.sort_by_key(|(i, _)| (i.priority, i.created_at));
@@ -185,6 +211,36 @@ mod tests {
         assert!(!is_ready(&db, &db.issues["t-bottom"], now()));
         db.issues.get_mut("t-r").unwrap().status = Status::Closed;
         assert!(is_ready(&db, &db.issues["t-bottom"], now()));
+    }
+
+    #[test]
+    fn an_epic_waits_on_its_open_children() {
+        let mut db = test_db();
+        let mut epic = test_issue("t-epic");
+        epic.kind = Kind::Epic;
+        let mut a = test_issue("t-a");
+        a.parent = Some("t-epic".into());
+        let mut b = test_issue("t-b");
+        b.parent = Some("t-epic".into());
+        // a task with children is not held by them
+        let mut task = test_issue("t-task");
+        task.kind = Kind::Task;
+        let mut c = test_issue("t-c");
+        c.parent = Some("t-task".into());
+        for i in [epic, a, b, task, c] {
+            db.issues.insert(i.id.clone(), i);
+        }
+
+        assert!(!is_ready(&db, &db.issues["t-epic"], now()));
+        assert!(is_ready(&db, &db.issues["t-a"], now()));
+        assert!(is_ready(&db, &db.issues["t-task"], now()));
+        assert_eq!(blocked(&db, now())[0].1, ["t-a", "t-b"]);
+
+        db.issues.get_mut("t-a").unwrap().status = Status::Closed;
+        db.issues.get_mut("t-b").unwrap().status = Status::InProgress;
+        assert!(!is_ready(&db, &db.issues["t-epic"], now()));
+        db.issues.get_mut("t-b").unwrap().status = Status::Closed;
+        assert!(is_ready(&db, &db.issues["t-epic"], now()));
     }
 
     #[test]

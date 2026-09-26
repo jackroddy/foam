@@ -79,7 +79,13 @@ pub fn run(cli: Cli) -> Result<()> {
             let snap = load(&store)?;
             let issue = get(&snap.db, &id)?;
             if cli.json {
-                println!("{}", serde_json::to_string_pretty(issue)?);
+                let mut v = serde_json::to_value(issue)?;
+                let children: Vec<&str> = graph::children(&snap.db, &id)
+                    .iter()
+                    .map(|c| c.id.as_str())
+                    .collect();
+                v["children"] = serde_json::json!(children);
+                println!("{}", serde_json::to_string_pretty(&v)?);
             } else {
                 print_issue(issue, &snap.db);
             }
@@ -893,6 +899,13 @@ fn print_issue(i: &Issue, db: &Db) {
     }
     if let Some(p) = &i.parent {
         println!("parent: {p}");
+    }
+    let children = graph::children(db, &i.id);
+    if !children.is_empty() {
+        println!("children:");
+        for c in children {
+            println!("  {}  {}  {}", c.id, c.status, c.title);
+        }
     }
     if let Some(a) = &i.assignee {
         match i.lease_expires {
