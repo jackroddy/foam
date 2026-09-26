@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-09-26
+
 ### Added
 
 - `foam init`, `create`, `show` and `list`. Issues are JSON files in a chain
@@ -41,3 +43,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   expired leases, future timestamps and a missing refspec or hook.
 - `foam log` shows the data ref's history, optionally only the entries that
   touched one id. Every command accepts `--json`.
+
+[Unreleased]: https://github.com/jackroddy/foam/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/jackroddy/foam/releases/tag/v0.1.0
