@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   under `children`.
 - `foam config` shows and sets `lease-minutes` and `stale-after`. Both live
   in `meta.json` on the data ref, so every clone shares them.
+- `foam search` matches memory slugs and texts too, printed after the
+  issues. Its `--json` output is now an object with `issues` and
+  `memories`.
 
 ### Changed
 

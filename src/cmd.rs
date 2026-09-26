@@ -351,7 +351,29 @@ pub fn run(cli: Cli) -> Result<()> {
                 .filter(|i| hit(&i.title) || hit(&i.body) || i.notes.iter().any(|n| hit(&n.text)))
                 .collect();
             issues.sort_by_key(|i| (i.status == Status::Closed, i.priority, i.created_at));
-            print_issues(&issues, cli.json)
+            let memories: Vec<&Memory> = snap
+                .db
+                .memories
+                .values()
+                .filter(|m| hit(&m.slug) || hit(&m.text))
+                .collect();
+            if cli.json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "issues": issues,
+                        "memories": memories,
+                    }))?
+                );
+            } else {
+                for i in issues {
+                    println!("{}", line(i));
+                }
+                for m in memories {
+                    println!("{}", memory_line(m, &store.git));
+                }
+            }
+            Ok(())
         }
         Cmd::Remember { slug, text } => {
             check_slug(&slug).map_err(anyhow::Error::msg)?;

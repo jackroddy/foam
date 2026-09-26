@@ -347,6 +347,18 @@ fn notes_search_and_memories() {
     assert_eq!(stdout(foam(dir.path()).args(["search", "zzz"])), "");
     stdout(foam(dir.path()).args(["close", &b]));
     assert!(stdout(foam(dir.path()).args(["search", "other"])).contains("closed"));
+    stdout(foam(dir.path()).args(["remember", "peg-hole", "round pegs only"]));
+    let found = stdout(foam(dir.path()).args(["search", "PEG"]));
+    assert!(
+        found.starts_with(&a) && found.contains("peg-hole  round pegs only"),
+        "{found}"
+    );
+    let found = stdout(foam(dir.path()).args(["search", "round"]));
+    assert!(found.starts_with("peg-hole"), "{found}");
+    let v: serde_json::Value =
+        serde_json::from_str(&stdout(foam(dir.path()).args(["--json", "search", "peg"]))).unwrap();
+    assert_eq!(v["issues"][0]["id"], a);
+    assert_eq!(v["memories"][0]["slug"], "peg-hole");
 
     stdout(foam(dir.path()).args(["remember", "parser-lib", "we use nom"]));
     foam(dir.path())
@@ -1024,4 +1036,39 @@ fn config_sets_the_lease_and_prime_reclaims_expired_ones() {
     let text = stdout(foam(dir.path()).arg("prime"));
     assert!(text.contains("m4: 4xxx"), "{text}");
     assert!(text.contains("this commit]"), "{text}");
+}
+
+#[test]
+fn concurrent_claims_admit_exactly_one() {
+    let dir = repo();
+    stdout(foam(dir.path()).args(["init", "--prefix", "t"]));
+    let a = stdout(foam(dir.path()).args(["create", "a"]));
+    let n = 6;
+    let handles: Vec<_> = (0..n)
+        .map(|i| {
+            let path = dir.path().to_path_buf();
+            let a = a.clone();
+            std::thread::spawn(move || {
+                foam(&path)
+                    .args(["--actor", &format!("agent{i}"), "claim", &a])
+                    .output()
+                    .unwrap()
+            })
+        })
+        .collect();
+    let mut won = 0;
+    for h in handles {
+        let out = h.join().unwrap();
+        if out.status.success() {
+            won += 1;
+        } else {
+            let err = String::from_utf8_lossy(&out.stderr);
+            assert!(err.contains("is held by"), "{err}");
+        }
+    }
+    assert_eq!(won, 1);
+    let v: serde_json::Value =
+        serde_json::from_str(&stdout(foam(dir.path()).args(["--json", "show", &a]))).unwrap();
+    assert_eq!(v["status"], "in_progress");
+    assert!(v["assignee"].as_str().unwrap().starts_with("agent"));
 }

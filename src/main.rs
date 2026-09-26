@@ -147,7 +147,7 @@ enum Cmd {
     Reclaim,
     /// Append a note to an issue
     Note { id: String, text: String },
-    /// Search titles, bodies and notes, case-insensitively; closed issues included
+    /// Search issue titles, bodies and notes, and memories, case-insensitively; closed issues included
     Search { query: String },
     /// Store a memory under a slug, replacing any with the same slug
     Remember { slug: String, text: String },

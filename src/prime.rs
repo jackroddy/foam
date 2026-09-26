@@ -29,7 +29,7 @@ foam note <id> <text>           append a note
 foam close <id> --reason <why>  | foam reopen <id>
 foam dep add <id> <blocker>     make <id> wait on <blocker>
 foam blocked                    what is waiting, and on what
-foam search <query>             titles, bodies and notes
+foam search <query>             issue titles, bodies, notes; memories
 foam remember <slug> <text> | memories | recall <slug> | forget <slug>
 foam update <id> [--title ..] [--priority N] [--defer-until DATE]
 Add --json to any command for machine-readable output.";
