@@ -3,7 +3,7 @@
   "title": "Cap prime's size",
   "body": "A repo with many memories makes prime long. Decide a cap and what gets trimmed first: oldest memories, or ready issues past --limit are already cut.",
   "type": "task",
-  "status": "open",
+  "status": "closed",
   "priority": 3,
   "labels": [],
   "parent": "foam-c4574c",
@@ -13,15 +13,18 @@
   "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-09-26T22:21:19.23439157Z",
-  "updated_at": "2026-09-26T22:21:19.23439157Z",
-  "closed_at": null,
-  "close_reason": null,
+  "updated_at": "2026-09-26T23:00:08.532155024Z",
+  "closed_at": "2026-09-26T23:00:08.532155024Z",
+  "close_reason": "commit 08151e5; config lives in meta.json, test in tests/cli.rs",
   "notes": [],
   "stamps": {
     "created": {
       "commit": "0a25e5f",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "08151e5",
+      "branch": "dev"
+    }
   }
 }
