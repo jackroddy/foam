@@ -56,7 +56,7 @@ pub struct Stamps {
 }
 
 /// One issue, as stored in `issues/<id>.json`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Issue {
     pub id: String,
     pub title: String,
@@ -81,7 +81,7 @@ pub struct Issue {
 }
 
 /// One memory, as stored in `memories/<slug>.json`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Memory {
     pub slug: String,
     pub text: String,

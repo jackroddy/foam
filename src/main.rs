@@ -1,6 +1,7 @@
 mod cmd;
 mod git;
 mod graph;
+mod merge;
 mod model;
 mod prime;
 mod store;
@@ -170,6 +171,17 @@ enum Cmd {
         #[command(subcommand)]
         command: SetupCmd,
     },
+    /// Fetch the remote's data ref, merge it, and push the result
+    Sync {
+        /// Which remote
+        #[arg(long, default_value = "origin")]
+        remote: String,
+        /// Also add the fetch refspec and the pre-push hook to this clone
+        #[arg(long)]
+        setup: bool,
+    },
+    /// Check the data and this clone's setup for problems
+    Doctor,
     /// Manage what an issue waits on
     Dep {
         #[command(subcommand)]

@@ -5,10 +5,14 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use jiff::Timestamp;
 
-use crate::git::{EntryKind, Git, Swap, TreeEntry};
+use crate::git::{Conflict, EntryKind, Git, Swap, TreeEntry};
+use crate::merge;
 use crate::model::{Issue, Memory, Meta, SCHEMA_VERSION, canonical};
 
 pub const DATA_REF: &str = "refs/foam/data";
+
+/// Where a fetch lands the remote's data ref.
+pub const ORIGIN_REF: &str = "refs/foam/origin";
 
 const RETRIES: usize = 5;
 
@@ -18,6 +22,14 @@ pub struct Db {
     pub meta: Meta,
     pub issues: BTreeMap<String, Issue>,
     pub memories: BTreeMap<String, Memory>,
+}
+
+/// What `absorb_origin` did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Absorbed {
+    Nothing,
+    FastForward,
+    Merged { conflicts: usize },
 }
 
 /// One loaded commit of the data ref.
@@ -51,7 +63,9 @@ impl Store {
     }
 
     /// Load the data ref, or `None` when `foam init` has not run.
+    /// Anything fetched onto the origin ref is merged in first.
     pub fn load(&self) -> Result<Option<Snapshot>> {
+        self.absorb_origin()?;
         let Some(commit) = self.git.rev_parse(DATA_REF)? else {
             return Ok(None);
         };
@@ -59,21 +73,127 @@ impl Store {
     }
 
     fn load_commit(&self, commit: &str) -> Result<Snapshot> {
-        let entries = self.git.ls_tree(commit)?;
-        let oids: Vec<&str> = entries.iter().map(|(_, oid)| oid.as_str()).collect();
-        let blobs = self.git.cat_file_batch(&oids)?;
-
-        let mut files = BTreeMap::new();
-        for ((path, oid), bytes) in entries.into_iter().zip(blobs) {
-            files.insert(path, (oid, bytes));
-        }
-
+        let files = self.load_files(commit)?;
         let db = Db::decode(&files)?;
         Ok(Snapshot {
             commit: commit.to_string(),
             db,
             files,
         })
+    }
+
+    fn load_files(&self, treeish: &str) -> Result<BTreeMap<String, (String, Vec<u8>)>> {
+        let entries = self.git.ls_tree(treeish)?;
+        let oids: Vec<&str> = entries.iter().map(|(_, oid)| oid.as_str()).collect();
+        let blobs = self.git.cat_file_batch(&oids)?;
+        let mut files = BTreeMap::new();
+        for ((path, oid), bytes) in entries.into_iter().zip(blobs) {
+            files.insert(path, (oid, bytes));
+        }
+        Ok(files)
+    }
+
+    /// Bring the data ref up to date with whatever the last
+    /// fetch put on the origin ref. Returns what happened.
+    pub fn absorb_origin(&self) -> Result<Absorbed> {
+        for _ in 0..RETRIES {
+            let Some(origin) = self.git.rev_parse(ORIGIN_REF)? else {
+                return Ok(Absorbed::Nothing);
+            };
+            let Some(data) = self.git.rev_parse(DATA_REF)? else {
+                // a clone that fetched before it ever wrote
+                return match self.git.update_ref(DATA_REF, &origin, None)? {
+                    Swap::Done => Ok(Absorbed::FastForward),
+                    Swap::Lost => continue,
+                };
+            };
+            if origin == data || self.git.is_ancestor(&origin, &data)? {
+                return Ok(Absorbed::Nothing);
+            }
+            if self.git.is_ancestor(&data, &origin)? {
+                return match self.git.update_ref(DATA_REF, &origin, Some(&data))? {
+                    Swap::Done => Ok(Absorbed::FastForward),
+                    Swap::Lost => continue,
+                };
+            }
+            let merged = self.git.merge_tree(&data, &origin)?;
+            let mut files = self.load_files(&merged.tree)?;
+            for c in &merged.conflicts {
+                files.remove(&c.path);
+            }
+            let mut db = Db::decode(&files)?;
+            for c in &merged.conflicts {
+                self.resolve(&mut db, c)?;
+            }
+            let tree = self.write_tree(&db, &files)?;
+            let commit = self
+                .git
+                .commit_tree(&tree, &[&data, &origin], "merge origin")?;
+            match self.git.update_ref(DATA_REF, &commit, Some(&data))? {
+                Swap::Done => {
+                    return Ok(Absorbed::Merged {
+                        conflicts: merged.conflicts.len(),
+                    });
+                }
+                Swap::Lost => continue,
+            }
+        }
+        bail!("gave up merging the origin ref: another writer kept winning")
+    }
+
+    /// Settle one conflicted path by merging its three records.
+    fn resolve(&self, db: &mut Db, c: &Conflict) -> Result<()> {
+        let oids: Vec<&str> = [&c.base, &c.ours, &c.theirs]
+            .into_iter()
+            .flatten()
+            .map(String::as_str)
+            .collect();
+        let mut blobs = self.git.cat_file_batch(&oids)?.into_iter();
+        let mut next = |present: &Option<String>| present.as_ref().map(|_| blobs.next().unwrap());
+        let (base, ours, theirs) = (next(&c.base), next(&c.ours), next(&c.theirs));
+
+        fn parse<T: serde::de::DeserializeOwned>(
+            bytes: Option<Vec<u8>>,
+            path: &str,
+        ) -> Result<Option<T>> {
+            bytes
+                .map(|b| serde_json::from_slice(&b).with_context(|| path.to_string()))
+                .transpose()
+        }
+
+        if let Some(name) = c.path.strip_prefix("issues/") {
+            let id = name.trim_end_matches(".json").to_string();
+            let merged = merge::issue(
+                parse::<Issue>(base, &c.path)?.as_ref(),
+                parse::<Issue>(ours, &c.path)?.as_ref(),
+                parse::<Issue>(theirs, &c.path)?.as_ref(),
+            );
+            match merged {
+                Some(i) => db.issues.insert(id, i),
+                None => db.issues.remove(&id),
+            };
+        } else if let Some(name) = c.path.strip_prefix("memories/") {
+            let slug = name.trim_end_matches(".json").to_string();
+            let merged = merge::memory(
+                parse::<Memory>(base, &c.path)?.as_ref(),
+                parse::<Memory>(ours, &c.path)?.as_ref(),
+                parse::<Memory>(theirs, &c.path)?.as_ref(),
+            );
+            match merged {
+                Some(m) => db.memories.insert(slug, m),
+                None => db.memories.remove(&slug),
+            };
+        } else if c.path == "meta.json" {
+            // ours stands; the two only differ if the clones
+            // ran init separately, and the prefix is a local
+            // choice either way
+            if let Some(m) = parse::<Meta>(ours, &c.path)? {
+                db.meta = m;
+            }
+        } else {
+            bail!("unexpected path in the data ref: {}", c.path);
+        }
+        Ok(())
     }
 
     /// Create the data ref with an empty database.

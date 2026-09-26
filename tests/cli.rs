@@ -501,3 +501,225 @@ fn setup_claude_merges_into_settings() {
     std::fs::write(&path, "not json").unwrap();
     foam(dir.path()).args(["setup", "claude"]).assert().code(1);
 }
+
+fn git(dir: &Path, args: &[&str]) -> String {
+    let out = Command::new("git")
+        .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8(out.stdout)
+        .unwrap()
+        .trim_end()
+        .to_string()
+}
+
+/// A bare remote and two clones of it, each with one commit on main.
+fn two_clones() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
+    let root = tempfile::tempdir().unwrap();
+    let bare = root.path().join("remote.git");
+    git(
+        root.path(),
+        &["init", "-q", "--bare", "-b", "main", bare.to_str().unwrap()],
+    );
+    let a = root.path().join("a");
+    let b = root.path().join("b");
+    git(
+        root.path(),
+        &["clone", "-q", bare.to_str().unwrap(), a.to_str().unwrap()],
+    );
+    commit(&a, "one");
+    git(&a, &["push", "-q", "-u", "origin", "main"]);
+    git(
+        root.path(),
+        &["clone", "-q", bare.to_str().unwrap(), b.to_str().unwrap()],
+    );
+    (root, a, b)
+}
+
+#[test]
+fn sync_moves_data_between_clones_and_merges_it() {
+    let (_root, a, b) = two_clones();
+    // init in a: origin exists but has no data yet
+    let out = stdout(foam(&a).args(["init", "--prefix", "t"]));
+    assert!(out.contains("initialized"), "{out}");
+    assert!(out.contains("fetch refspec"), "{out}");
+    assert!(a.join(".git/hooks/pre-push").exists());
+    let x = stdout(foam(&a).args(["create", "from a"]));
+    stdout(foam(&a).arg("sync"));
+
+    // init in b adopts the remote's data instead of starting fresh
+    let out = stdout(foam(&b).args(["init"]));
+    assert!(out.contains("fetched"), "{out}");
+    assert!(stdout(foam(&b).arg("list")).contains("from a"));
+
+    // each side adds an issue and edits the same one differently
+    let y = stdout(foam(&b).args(["create", "from b"]));
+    stdout(foam(&b).args(["--actor", "bee", "note", &x, "seen in b"]));
+    stdout(foam(&b).args(["remember", "shared", "b says"]));
+    stdout(foam(&b).arg("sync"));
+
+    stdout(foam(&a).args(["update", &x, "--add-label", "urgent"]));
+    stdout(foam(&a).args(["remember", "shared", "a says"]));
+    let out = stdout(foam(&a).arg("sync"));
+    assert!(out.contains("merged origin, settling"), "{out}");
+    let listed = stdout(foam(&a).arg("list"));
+    assert!(listed.contains(&x) && listed.contains(&y), "{listed}");
+    let v: serde_json::Value =
+        serde_json::from_str(&stdout(foam(&a).args(["--json", "show", &x]))).unwrap();
+    assert_eq!(v["labels"], serde_json::json!(["urgent"]));
+    assert_eq!(v["notes"][0]["text"], "seen in b");
+    // both wrote the memory with no base; a wrote last
+    assert_eq!(
+        stdout(foam(&a).args(["recall", "shared"])).lines().next(),
+        Some("a says")
+    );
+
+    // b sees the merge after a plain git fetch, with no foam sync
+    git(&b, &["fetch", "-q"]);
+    let v: serde_json::Value =
+        serde_json::from_str(&stdout(foam(&b).args(["--json", "show", &x]))).unwrap();
+    assert_eq!(v["labels"], serde_json::json!(["urgent"]));
+    assert_eq!(
+        stdout(foam(&b).args(["recall", "shared"])).lines().next(),
+        Some("a says")
+    );
+    assert_eq!(
+        git(&b, &["rev-parse", "refs/foam/data"]),
+        git(&a, &["rev-parse", "refs/foam/data"])
+    );
+
+    // the merge commit has both parents
+    let parents = git(&a, &["log", "-1", "--format=%P", "refs/foam/data"]);
+    assert_eq!(parents.split(' ').count(), 2, "{parents}");
+    stdout(foam(&a).arg("doctor"));
+    stdout(foam(&b).arg("doctor"));
+}
+
+#[test]
+fn git_push_carries_the_data_ref_through_the_hook() {
+    let (root, a, b) = two_clones();
+    stdout(foam(&a).args(["init", "--prefix", "t"]));
+    stdout(foam(&a).args(["create", "hooked"]));
+    commit(&a, "two");
+    // the hook runs foam from PATH
+    let bin = Command::cargo_bin("foam").unwrap();
+    let path = format!(
+        "{}:{}",
+        bin.get_program()
+            .to_str()
+            .unwrap()
+            .rsplit_once('/')
+            .unwrap()
+            .0,
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let out = Command::new("git")
+        .args(["push", "-q"])
+        .env("PATH", path)
+        .current_dir(&a)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let bare = root.path().join("remote.git");
+    git(&bare, &["rev-parse", "refs/foam/data"]);
+    stdout(foam(&b).arg("init"));
+    assert!(stdout(foam(&b).arg("list")).contains("hooked"));
+}
+
+#[test]
+fn doctor_reports_problems() {
+    let dir = repo();
+    stdout(foam(dir.path()).args(["init", "--prefix", "t"]));
+    stdout(foam(dir.path()).args(["create", "fine"]));
+    assert!(stdout(foam(dir.path()).arg("doctor")).starts_with("ok:"));
+
+    // hand-write a record with a dangling blocker and a dead lease
+    let json = stdout(foam(dir.path()).args(["--json", "create", "broken"]));
+    let mut v: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let id = v["id"].as_str().unwrap().to_string();
+    v["blocked_by"] = serde_json::json!(["t-nope"]);
+    v["status"] = serde_json::json!("in_progress");
+    v["lease_expires"] = serde_json::json!("2000-01-01T00:00:00Z");
+    let blob = git(dir.path(), &["hash-object", "-w", "--stdin"]);
+    let _ = blob;
+    // easier: rebuild the tree through git plumbing
+    let tmp = dir.path().join("rec.json");
+    std::fs::write(&tmp, serde_json::to_vec_pretty(&v).unwrap()).unwrap();
+    let oid = git(dir.path(), &["hash-object", "-w", tmp.to_str().unwrap()]);
+    std::fs::remove_file(&tmp).unwrap();
+    let tree = git(dir.path(), &["ls-tree", "refs/foam/data"]);
+    let issues_tree = tree
+        .lines()
+        .find(|l| l.ends_with("\tissues"))
+        .unwrap()
+        .split(' ')
+        .nth(2)
+        .unwrap()
+        .split('\t')
+        .next()
+        .unwrap()
+        .to_string();
+    let issues = git(dir.path(), &["ls-tree", &issues_tree]);
+    let mut entries: Vec<String> = issues
+        .lines()
+        .filter(|l| !l.ends_with(&format!("\t{id}.json")))
+        .map(str::to_string)
+        .collect();
+    entries.push(format!("100644 blob {oid}\t{id}.json"));
+    let mk = |input: String| {
+        let mut child = Command::new("git")
+            .args(["mktree"])
+            .current_dir(dir.path())
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        use std::io::Write;
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(input.as_bytes())
+            .unwrap();
+        let out = child.wait_with_output().unwrap();
+        String::from_utf8(out.stdout).unwrap().trim().to_string()
+    };
+    let new_issues = mk(entries.join("\n") + "\n");
+    let root_entries: Vec<String> = tree
+        .lines()
+        .map(|l| {
+            if l.ends_with("\tissues") {
+                format!("040000 tree {new_issues}\tissues")
+            } else {
+                l.to_string()
+            }
+        })
+        .collect();
+    let new_root = mk(root_entries.join("\n") + "\n");
+    let old = git(dir.path(), &["rev-parse", "refs/foam/data"]);
+    let commit = git(
+        dir.path(),
+        &["commit-tree", &new_root, "-p", &old, "-m", "tamper"],
+    );
+    git(dir.path(), &["update-ref", "refs/foam/data", &commit, &old]);
+
+    let out = foam(dir.path()).arg("doctor").output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("t-nope, which does not exist"), "{text}");
+    assert!(text.contains("expired lease"), "{text}");
+    // the dangling blocker does not hold the issue back
+    assert!(stdout(foam(dir.path()).arg("reclaim")).contains(&id));
+    assert!(stdout(foam(dir.path()).arg("ready")).contains(&id));
+}

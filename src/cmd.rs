@@ -3,11 +3,11 @@ use std::path::PathBuf;
 use anyhow::{Context, Result, bail};
 use jiff::Timestamp;
 
-use crate::git::{Distance, Git, Stamp};
+use crate::git::{Distance, Git, Push, Stamp};
 use crate::graph;
 use crate::model::{Issue, Memory, Note, Stamps, Status, check_slug, new_id, parse_when};
 use crate::prime;
-use crate::store::{Db, Snapshot, Store};
+use crate::store::{Absorbed, DATA_REF, Db, ORIGIN_REF, Snapshot, Store};
 use crate::{Cli, Cmd, DepCmd, SetupCmd};
 
 /// The global flags, split from the subcommand so both can move.
@@ -438,6 +438,13 @@ pub fn run(cli: Cli) -> Result<()> {
         Cmd::Setup { command } => match command {
             SetupCmd::Claude { remove } => setup_claude(&store, remove),
         },
+        Cmd::Sync { remote, setup } => {
+            if setup {
+                setup_sync(&store, &remote)?;
+            }
+            sync(&store, &remote)
+        }
+        Cmd::Doctor => doctor(&store),
         Cmd::Dep { command } => match command {
             DepCmd::Add { id, blocker } => {
                 store.write(&format!("dep {id} <- {blocker}"), |db| {
@@ -497,11 +504,18 @@ fn init(store: &Store, prefix: Option<String>, cli: &Options) -> Result<()> {
                 .unwrap_or_else(|| "foam".to_string())
         }
     };
-    store.init(&prefix)?;
-    println!(
-        "initialized {} with prefix {prefix}",
-        crate::store::DATA_REF
-    );
+    let remote = "origin";
+    let has_remote = store.git.remote_url(remote).is_some();
+    if has_remote && store.git.ls_remote(remote, DATA_REF)? {
+        store.git.fetch(remote, &format!("{DATA_REF}:{DATA_REF}"))?;
+        println!("fetched {DATA_REF} from {remote}");
+    } else {
+        store.init(&prefix)?;
+        println!("initialized {DATA_REF} with prefix {prefix}");
+    }
+    if has_remote {
+        setup_sync(store, remote)?;
+    }
     println!("run `foam setup claude` to load context into Claude Code at session start");
     Ok(())
 }
@@ -563,6 +577,151 @@ fn setup_claude(store: &Store, remove: bool) -> Result<()> {
         (false, false) => println!("added the foam hook to {}", path.display()),
     }
     Ok(())
+}
+
+const HOOK_MARK: &str = "# foam: push the data ref alongside code";
+
+const PRE_PUSH: &str = "\
+#!/bin/sh
+# foam: push the data ref alongside code
+cat >/dev/null
+[ -n \"$FOAM_IN_HOOK\" ] && exit 0
+git remote get-url \"$1\" >/dev/null 2>&1 || exit 0
+git rev-parse -q --verify refs/foam/data >/dev/null || exit 0
+FOAM_IN_HOOK=1 foam sync --remote \"$1\" || exit 1
+";
+
+/// Add the fetch refspec and the pre-push hook to this clone.
+fn setup_sync(store: &Store, remote: &str) -> Result<()> {
+    if store.git.remote_url(remote).is_none() {
+        bail!("no remote named {remote}");
+    }
+    let key = format!("remote.{remote}.fetch");
+    let spec = format!("+{DATA_REF}:{ORIGIN_REF}");
+    if !store.git.config_all(&key).contains(&spec) {
+        store.git.config_add(&key, &spec)?;
+        println!("added the fetch refspec for {DATA_REF} to {remote}");
+    }
+    let hook = store.git.hooks_dir()?.join("pre-push");
+    match std::fs::read_to_string(&hook) {
+        Ok(existing) if existing.contains(HOOK_MARK) => {}
+        Ok(existing) => {
+            // keep whatever was there and run ours after it,
+            // minus our own shebang line
+            let ours = PRE_PUSH.trim_start_matches("#!/bin/sh\n");
+            std::fs::write(&hook, format!("{existing}\n{ours}"))?;
+            println!("appended the foam block to {}", hook.display());
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            std::fs::create_dir_all(hook.parent().unwrap())?;
+            std::fs::write(&hook, PRE_PUSH)?;
+            println!("installed {}", hook.display());
+        }
+        Err(e) => return Err(e).with_context(|| hook.display().to_string()),
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755))?;
+    }
+    Ok(())
+}
+
+/// Fetch, merge and push the data ref, retrying while someone
+/// else keeps pushing first.
+fn sync(store: &Store, remote: &str) -> Result<()> {
+    if store.git.remote_url(remote).is_none() {
+        bail!("no remote named {remote}");
+    }
+    for _ in 0..3 {
+        if store.git.ls_remote(remote, DATA_REF)? {
+            store
+                .git
+                .fetch(remote, &format!("+{DATA_REF}:{ORIGIN_REF}"))?;
+        }
+        match store.absorb_origin()? {
+            Absorbed::Nothing => {}
+            Absorbed::FastForward => println!("fast-forwarded to {remote}"),
+            Absorbed::Merged { conflicts: 0 } => println!("merged {remote}"),
+            Absorbed::Merged { conflicts } => {
+                println!("merged {remote}, settling {conflicts} record(s) both sides changed")
+            }
+        }
+        if store.git.rev_parse(DATA_REF)?.is_none() {
+            bail!("foam is not initialized here");
+        }
+        match store.git.push(remote, &format!("{DATA_REF}:{DATA_REF}"))? {
+            Push::Done => {
+                println!("pushed {DATA_REF} to {remote}");
+                return Ok(());
+            }
+            Push::Rejected => continue,
+        }
+    }
+    bail!("could not push {DATA_REF}: {remote} kept moving")
+}
+
+/// Report what is wrong, if anything, and exit 1 if something is.
+fn doctor(store: &Store) -> Result<()> {
+    let snap = load(store)?;
+    let db = &snap.db;
+    let now = Timestamp::now();
+    let mut problems = 0;
+    let mut report = |line: String| {
+        problems += 1;
+        println!("{line}");
+    };
+    for i in db.issues.values() {
+        for b in &i.blocked_by {
+            if !db.issues.contains_key(b) {
+                report(format!("{}: waits on {b}, which does not exist", i.id));
+            }
+        }
+        if let Some(p) = i.parent.as_ref().filter(|p| !db.issues.contains_key(*p)) {
+            report(format!("{}: parent {p} does not exist", i.id));
+        }
+        if i.status == Status::InProgress && i.lease_expires.is_none_or(|t| t <= now) {
+            report(format!(
+                "{}: in progress with an expired lease; `foam reclaim` reopens it",
+                i.id
+            ));
+        }
+        let ahead = now + jiff::SignedDuration::from_mins(5);
+        if i.updated_at > ahead {
+            report(format!(
+                "{}: updated_at is in the future; a clock is wrong somewhere",
+                i.id
+            ));
+        }
+    }
+    for m in db.memories.values() {
+        if m.updated_at > now + jiff::SignedDuration::from_mins(5) {
+            report(format!("memory {}: updated_at is in the future", m.slug));
+        }
+    }
+    if store.git.remote_url("origin").is_some() {
+        let spec = format!("+{DATA_REF}:{ORIGIN_REF}");
+        if !store.git.config_all("remote.origin.fetch").contains(&spec) {
+            report(
+                "origin has no fetch refspec for the data ref; `foam sync --setup` adds it".into(),
+            );
+        }
+        let hook = store.git.hooks_dir()?.join("pre-push");
+        if !std::fs::read_to_string(&hook).is_ok_and(|h| h.contains(HOOK_MARK)) {
+            report("no foam pre-push hook; `foam sync --setup` installs it".into());
+        }
+    }
+    if problems == 0 {
+        println!(
+            "ok: {} issue(s), {} memor{}",
+            db.issues.len(),
+            db.memories.len(),
+            if db.memories.len() == 1 { "y" } else { "ies" }
+        );
+        Ok(())
+    } else {
+        bail!("{problems} problem(s)")
+    }
 }
 
 fn load(store: &Store) -> Result<Snapshot> {

@@ -31,3 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `foam setup claude` adds that hook to `.claude/settings.json` without
   touching anything else in the file. `init` no longer writes to the
   working tree at all; it prints the setup command instead.
+- `foam sync` and `doctor`. When the repository has an `origin`, `init`
+  adopts the data ref already there or creates one, adds a fetch refspec so
+  every `git fetch` lands the remote's data on `refs/foam/origin`, and
+  installs a pre-push hook that syncs before each `git push`. Any `foam`
+  command merges what a fetch brought in before it runs; records both sides
+  changed are merged field by field, with removals kept and the newer side
+  winning a field both changed. `doctor` reports dangling references,
+  expired leases, future timestamps and a missing refspec or hook.

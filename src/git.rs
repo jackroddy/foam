@@ -42,6 +42,30 @@ pub enum Distance {
     Unknown,
 }
 
+/// The result of `git merge-tree --write-tree`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Merged {
+    pub tree: String,
+    pub conflicts: Vec<Conflict>,
+}
+
+/// One conflicted path with its three blobs; a missing stage
+/// means the path was absent from that side.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Conflict {
+    pub path: String,
+    pub base: Option<String>,
+    pub ours: Option<String>,
+    pub theirs: Option<String>,
+}
+
+/// The outcome of a push.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Push {
+    Done,
+    Rejected,
+}
+
 /// The outcome of a compare-and-swap on a ref.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Swap {
@@ -262,5 +286,145 @@ impl Git {
     pub fn toplevel(&self) -> Result<PathBuf> {
         let out = self.run(&["rev-parse", "--show-toplevel"])?;
         Ok(PathBuf::from(String::from_utf8(out)?.trim_end()))
+    }
+
+    pub fn is_ancestor(&self, ancestor: &str, descendant: &str) -> Result<bool> {
+        let status = self
+            .command(&["merge-base", "--is-ancestor", ancestor, descendant])
+            .stderr(Stdio::null())
+            .status()?;
+        Ok(status.success())
+    }
+
+    /// Three-way merge `theirs` into `ours` without a checkout.
+    pub fn merge_tree(&self, ours: &str, theirs: &str) -> Result<Merged> {
+        let out = self
+            .command(&["merge-tree", "--write-tree", "-z", ours, theirs])
+            .stderr(Stdio::piped())
+            .output()?;
+        // exit 0 is clean, 1 is conflicts; anything else failed
+        if !matches!(out.status.code(), Some(0 | 1)) {
+            bail!(
+                "git merge-tree failed: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            );
+        }
+        let mut records = out.stdout.split(|b| *b == 0);
+        let tree = std::str::from_utf8(records.next().unwrap_or_default())?.to_string();
+        let mut conflicts: Vec<Conflict> = Vec::new();
+        // "<mode> <oid> <stage>\t<path>" until an empty record
+        // ends the section
+        for record in records {
+            if record.is_empty() {
+                break;
+            }
+            let record = std::str::from_utf8(record)?;
+            let (meta, path) = record
+                .split_once('\t')
+                .ok_or_else(|| anyhow!("malformed merge-tree record: {record}"))?;
+            let mut fields = meta.split(' ');
+            let (Some(_mode), Some(oid), Some(stage)) =
+                (fields.next(), fields.next(), fields.next())
+            else {
+                bail!("malformed merge-tree record: {record}");
+            };
+            let entry = match conflicts.iter_mut().find(|c| c.path == path) {
+                Some(c) => c,
+                None => {
+                    conflicts.push(Conflict {
+                        path: path.to_string(),
+                        ..Default::default()
+                    });
+                    conflicts.last_mut().unwrap()
+                }
+            };
+            let slot = match stage {
+                "1" => &mut entry.base,
+                "2" => &mut entry.ours,
+                "3" => &mut entry.theirs,
+                _ => bail!("unexpected merge stage in: {record}"),
+            };
+            *slot = Some(oid.to_string());
+        }
+        Ok(Merged { tree, conflicts })
+    }
+
+    /// Whether `remote` has a ref named `name`.
+    pub fn ls_remote(&self, remote: &str, name: &str) -> Result<bool> {
+        let out = self
+            .command(&["ls-remote", "--exit-code", remote, name])
+            .stderr(Stdio::piped())
+            .output()?;
+        match out.status.code() {
+            Some(0) => Ok(true),
+            // 2 is "no matching refs"
+            Some(2) => Ok(false),
+            _ => bail!(
+                "git ls-remote {remote} failed: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            ),
+        }
+    }
+
+    pub fn fetch(&self, remote: &str, refspec: &str) -> Result<()> {
+        self.run(&["fetch", "--quiet", remote, refspec])?;
+        Ok(())
+    }
+
+    pub fn push(&self, remote: &str, refspec: &str) -> Result<Push> {
+        // the pre-push hook foam installs runs foam sync,
+        // which would push again; the variable tells it
+        // this push is already that
+        let out = self
+            .command(&["push", "--quiet", remote, refspec])
+            .env("FOAM_IN_HOOK", "1")
+            .stderr(Stdio::piped())
+            .output()?;
+        if out.status.success() {
+            return Ok(Push::Done);
+        }
+        let err = String::from_utf8_lossy(&out.stderr);
+        if err.contains("[rejected]")
+            || err.contains("non-fast-forward")
+            || err.contains("fetch first")
+        {
+            return Ok(Push::Rejected);
+        }
+        bail!("git push failed: {}", err.trim());
+    }
+
+    pub fn remote_url(&self, remote: &str) -> Option<String> {
+        self.config(&format!("remote.{remote}.url"))
+    }
+
+    pub fn config_all(&self, key: &str) -> Vec<String> {
+        self.command(&["config", "--get-all", key])
+            .stderr(Stdio::null())
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| {
+                String::from_utf8_lossy(&o.stdout)
+                    .lines()
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    pub fn config_add(&self, key: &str, value: &str) -> Result<()> {
+        self.run(&["config", "--add", key, value])?;
+        Ok(())
+    }
+
+    /// Where this repository's hooks live.
+    pub fn hooks_dir(&self) -> Result<PathBuf> {
+        let out = self.run(&["rev-parse", "--git-path", "hooks"])?;
+        let path = PathBuf::from(String::from_utf8(out)?.trim_end());
+        Ok(if path.is_absolute() {
+            path
+        } else {
+            self.dir.join(path)
+        })
     }
 }
