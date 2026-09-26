@@ -1,0 +1,210 @@
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+
+use anyhow::{Context, Result, anyhow, bail};
+
+/// A handle on the repository that contains `dir`.
+#[derive(Debug, Clone)]
+pub struct Git {
+    dir: PathBuf,
+}
+
+/// One entry of a tree, as `git mktree` takes it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TreeEntry {
+    pub name: String,
+    pub oid: String,
+    pub kind: EntryKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EntryKind {
+    Blob,
+    Tree,
+}
+
+/// Where `HEAD` was when a write happened.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Stamp {
+    pub commit: String,
+    pub branch: String,
+}
+
+/// The outcome of a compare-and-swap on a ref.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Swap {
+    Done,
+    Lost,
+}
+
+impl Git {
+    pub fn open(dir: &Path) -> Result<Git> {
+        let git = Git {
+            dir: dir.to_path_buf(),
+        };
+        git.run(&["rev-parse", "--git-dir"])
+            .with_context(|| format!("{} is not inside a git repository", dir.display()))?;
+        Ok(git)
+    }
+
+    fn command(&self, args: &[&str]) -> Command {
+        let mut cmd = Command::new("git");
+        cmd.arg("-C").arg(&self.dir).args(args);
+        cmd
+    }
+
+    fn run(&self, args: &[&str]) -> Result<Vec<u8>> {
+        self.run_with_input(args, &[])
+    }
+
+    fn run_with_input(&self, args: &[&str], input: &[u8]) -> Result<Vec<u8>> {
+        let mut child = self
+            .command(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .context("failed to run git")?;
+        child
+            .stdin
+            .take()
+            .expect("stdin was piped")
+            .write_all(input)?;
+        let out = child.wait_with_output()?;
+        if !out.status.success() {
+            bail!(
+                "git {} failed: {}",
+                args.join(" "),
+                String::from_utf8_lossy(&out.stderr).trim()
+            );
+        }
+        Ok(out.stdout)
+    }
+
+    /// The object id `rev` names, or `None` if nothing does.
+    pub fn rev_parse(&self, rev: &str) -> Result<Option<String>> {
+        let out = self
+            .command(&["rev-parse", "--verify", "-q", rev])
+            .stderr(Stdio::null())
+            .output()?;
+        if !out.status.success() {
+            return Ok(None);
+        }
+        Ok(Some(String::from_utf8(out.stdout)?.trim_end().to_string()))
+    }
+
+    /// Every blob under `commit`, as `(path, oid)`.
+    pub fn ls_tree(&self, commit: &str) -> Result<Vec<(String, String)>> {
+        let out = self.run(&["ls-tree", "-r", "-z", commit])?;
+        let mut entries = Vec::new();
+        for record in out.split(|b| *b == 0).filter(|r| !r.is_empty()) {
+            let record = std::str::from_utf8(record)?;
+            // "<mode> <type> <oid>\t<path>"
+            let (meta, path) = record
+                .split_once('\t')
+                .ok_or_else(|| anyhow!("malformed ls-tree record: {record}"))?;
+            let oid = meta
+                .rsplit(' ')
+                .next()
+                .ok_or_else(|| anyhow!("malformed ls-tree record: {record}"))?;
+            entries.push((path.to_string(), oid.to_string()));
+        }
+        Ok(entries)
+    }
+
+    /// The contents of each of `oids`, in order.
+    pub fn cat_file_batch(&self, oids: &[&str]) -> Result<Vec<Vec<u8>>> {
+        if oids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut input = oids.join("\n");
+        input.push('\n');
+        let out = self.run_with_input(&["cat-file", "--batch"], input.as_bytes())?;
+        let mut blobs = Vec::with_capacity(oids.len());
+        let mut rest = &out[..];
+        for oid in oids {
+            // "<oid> <type> <size>\n<content>\n"
+            let nl = rest
+                .iter()
+                .position(|b| *b == b'\n')
+                .ok_or_else(|| anyhow!("truncated cat-file output at {oid}"))?;
+            let header = std::str::from_utf8(&rest[..nl])?;
+            let size: usize = header
+                .rsplit(' ')
+                .next()
+                .and_then(|s| s.parse().ok())
+                .ok_or_else(|| anyhow!("object {oid} is missing: {header}"))?;
+            let start = nl + 1;
+            blobs.push(rest[start..start + size].to_vec());
+            rest = &rest[start + size + 1..];
+        }
+        Ok(blobs)
+    }
+
+    pub fn hash_object(&self, content: &[u8]) -> Result<String> {
+        let out = self.run_with_input(&["hash-object", "-w", "--stdin"], content)?;
+        Ok(String::from_utf8(out)?.trim_end().to_string())
+    }
+
+    pub fn mktree(&self, entries: &[TreeEntry]) -> Result<String> {
+        let mut input = String::new();
+        for e in entries {
+            let (mode, kind) = match e.kind {
+                EntryKind::Blob => ("100644", "blob"),
+                EntryKind::Tree => ("040000", "tree"),
+            };
+            input.push_str(&format!("{mode} {kind} {}\t{}\n", e.oid, e.name));
+        }
+        let out = self.run_with_input(&["mktree"], input.as_bytes())?;
+        Ok(String::from_utf8(out)?.trim_end().to_string())
+    }
+
+    pub fn commit_tree(&self, tree: &str, parents: &[&str], message: &str) -> Result<String> {
+        let mut args = vec!["commit-tree", tree];
+        for p in parents {
+            args.push("-p");
+            args.push(p);
+        }
+        args.push("-m");
+        args.push(message);
+        let out = self.run(&args)?;
+        Ok(String::from_utf8(out)?.trim_end().to_string())
+    }
+
+    /// Point `name` at `new`, provided it still points at `old`
+    /// (`None` means it must not exist yet).
+    pub fn update_ref(&self, name: &str, new: &str, old: Option<&str>) -> Result<Swap> {
+        let out = self
+            .command(&["update-ref", name, new, old.unwrap_or("")])
+            .stderr(Stdio::piped())
+            .output()?;
+        if out.status.success() {
+            return Ok(Swap::Done);
+        }
+        let err = String::from_utf8_lossy(&out.stderr);
+        // git reports a failed old-value check as "cannot lock
+        // ref", the same words as a real lock contention; both
+        // clear on a retry so both are reported as Lost
+        if err.contains("cannot lock ref") || err.contains("but expected") {
+            return Ok(Swap::Lost);
+        }
+        bail!("git update-ref {name} failed: {}", err.trim());
+    }
+
+    pub fn head_stamp(&self) -> Result<Stamp> {
+        let commit = self
+            .rev_parse("HEAD")?
+            .map(|oid| oid[..7].to_string())
+            .unwrap_or_else(|| "none".to_string());
+        let branch = self
+            .command(&["symbolic-ref", "--short", "-q", "HEAD"])
+            .stderr(Stdio::null())
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim_end().to_string())
+            .unwrap_or_else(|| "detached".to_string());
+        Ok(Stamp { commit, branch })
+    }
+}
