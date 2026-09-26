@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- An epic's line in `list`, `ready`, `blocked`, `search` and `prime` ends
+  with `[closed/total closed]` over its children, and `show` puts the same
+  count on its children heading.
 - `foam prime` reopens issues whose lease has expired and says which,
   instead of asking the agent to run `foam reclaim`.
 - `foam prime` keeps its memories section under 4 KB, dropping the least

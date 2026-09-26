@@ -43,6 +43,23 @@ pub fn children<'a>(db: &'a Db, id: &str) -> Vec<&'a Issue> {
     out
 }
 
+/// How an epic is going: `(closed, total)` over its children.
+/// None for anything else, or an epic with no children.
+pub fn rollup(db: &Db, issue: &Issue) -> Option<(usize, usize)> {
+    if issue.kind != Kind::Epic {
+        return None;
+    }
+    let children = children(db, &issue.id);
+    if children.is_empty() {
+        return None;
+    }
+    let closed = children
+        .iter()
+        .filter(|c| c.status == Status::Closed)
+        .count();
+    Some((closed, children.len()))
+}
+
 /// Everything that holds an issue back: its open blockers,
 /// and for an epic its children that are not yet closed.
 pub fn holders<'a>(db: &'a Db, issue: &'a Issue) -> Vec<&'a str> {

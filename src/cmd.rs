@@ -116,7 +116,7 @@ pub fn run(cli: Cli) -> Result<()> {
                 })
                 .collect();
             issues.sort_by_key(|i| (i.priority, i.created_at));
-            print_issues(&issues, cli.json)
+            print_issues(&issues, &snap.db, cli.json)
         }
         Cmd::Ready { limit } => {
             let snap = load(&store)?;
@@ -124,7 +124,7 @@ pub fn run(cli: Cli) -> Result<()> {
             if let Some(n) = limit {
                 issues.truncate(n);
             }
-            print_issues(&issues, cli.json)
+            print_issues(&issues, &snap.db, cli.json)
         }
         Cmd::Blocked => {
             let snap = load(&store)?;
@@ -137,7 +137,7 @@ pub fn run(cli: Cli) -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&rows)?);
             } else {
                 for (i, by) in blocked {
-                    println!("{}  <- {}", line(i), by.join(" "));
+                    println!("{}  <- {}", line(i, Some(&snap.db)), by.join(" "));
                 }
             }
             Ok(())
@@ -367,7 +367,7 @@ pub fn run(cli: Cli) -> Result<()> {
                 );
             } else {
                 for i in issues {
-                    println!("{}", line(i));
+                    println!("{}", line(i, Some(&snap.db)));
                 }
                 for m in memories {
                     println!("{}", memory_line(m, &store.git));
@@ -930,20 +930,28 @@ fn print_written(issue: &Issue, cli: &Options) -> Result<()> {
     if cli.json {
         println!("{}", serde_json::to_string_pretty(issue)?);
     } else {
-        println!("{}", line(issue));
+        println!("{}", line(issue, None));
     }
     Ok(())
 }
 
-fn print_issues(issues: &[&Issue], json: bool) -> Result<()> {
+fn print_issues(issues: &[&Issue], db: &Db, json: bool) -> Result<()> {
     if json {
         println!("{}", serde_json::to_string_pretty(issues)?);
     } else {
         for i in issues {
-            println!("{}", line(i));
+            println!("{}", line(i, Some(db)));
         }
     }
     Ok(())
+}
+
+/// The `[closed/total closed]` tag for an epic's line, or nothing.
+pub fn rollup_tag(db: &Db, i: &Issue) -> String {
+    match graph::rollup(db, i) {
+        Some((closed, total)) => format!("  [{closed}/{total} closed]"),
+        None => String::new(),
+    }
 }
 
 /// Describe how far `HEAD` has moved since a stamp was taken.
@@ -968,8 +976,11 @@ pub fn memory_line(m: &Memory, git: &Git) -> String {
     format!("{}  {}  ({})", m.slug, m.text, age(&m.stamp, distance))
 }
 
-fn line(i: &Issue) -> String {
+fn line(i: &Issue, db: Option<&Db>) -> String {
     let mut s = format!("{}  P{}  {:<11}  {}", i.id, i.priority, i.status, i.title);
+    if let Some(db) = db {
+        s.push_str(&rollup_tag(db, i));
+    }
     if let Some(a) = &i.assignee {
         s.push_str(&format!("  @{a}"));
     }
@@ -990,7 +1001,10 @@ fn print_issue(i: &Issue, db: &Db) {
     }
     let children = graph::children(db, &i.id);
     if !children.is_empty() {
-        println!("children:");
+        match graph::rollup(db, i) {
+            Some((closed, total)) => println!("children ({closed}/{total} closed):"),
+            None => println!("children:"),
+        }
         for c in children {
             println!("  {}  {}  {}", c.id, c.status, c.title);
         }

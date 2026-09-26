@@ -2,7 +2,7 @@ use std::fmt::Write;
 
 use jiff::Timestamp;
 
-use crate::cmd::age;
+use crate::cmd::{age, rollup_tag};
 use crate::git::{Distance, Git};
 use crate::graph;
 use crate::model::Status;
@@ -100,7 +100,15 @@ pub fn render(db: &Db, git: &Git, actor: &str, limit: usize, reclaimed: &[String
         out.push_str("nothing is ready\n");
     }
     for i in ready.iter().take(limit) {
-        let _ = writeln!(out, "{}  P{}  {}  {}", i.id, i.priority, i.kind, i.title);
+        let _ = writeln!(
+            out,
+            "{}  P{}  {}  {}{}",
+            i.id,
+            i.priority,
+            i.kind,
+            i.title,
+            rollup_tag(db, i)
+        );
     }
 
     if !db.memories.is_empty() {
