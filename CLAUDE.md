@@ -4,8 +4,8 @@ A Rust CLI issue tracker and agent memory for one git repository. Issues,
 their blocker graph, notes and memories live as JSON files in a chain of
 commits on `refs/foam/data`, written with git plumbing and never checked
 out. `foam prime` renders the agent's context from that data at session
-start. `FOAM-PLAN.md` is the design; read it before changing storage, merge
-or readiness semantics.
+start. The design is in `FOAM-PLAN.md`, which is kept out of git; read it
+when it is present before changing storage, merge or readiness semantics.
 
 ## Branches
 
