@@ -39,3 +39,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   changed are merged field by field, with removals kept and the newer side
   winning a field both changed. `doctor` reports dangling references,
   expired leases, future timestamps and a missing refspec or hook.
+- `foam log` shows the data ref's history, optionally only the entries that
+  touched one id. Every command accepts `--json`.

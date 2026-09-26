@@ -37,7 +37,7 @@ pub fn run(cli: Cli) -> Result<()> {
             blocked_by,
         } => {
             let stamp = store.git.head_stamp()?;
-            let id = store.write("create", |db| {
+            let id = store.write_named(|db| {
                 let id = fresh_id(db);
                 for other in blocked_by.iter().chain(parent.iter()) {
                     if !db.issues.contains_key(other) {
@@ -70,7 +70,7 @@ pub fn run(cli: Cli) -> Result<()> {
                     },
                 };
                 db.issues.insert(id.clone(), issue);
-                Ok(id)
+                Ok((id.clone(), format!("create {id}")))
             })?;
             let snap = load(&store)?;
             if cli.json {
@@ -235,10 +235,7 @@ pub fn run(cli: Cli) -> Result<()> {
                 }
                 Ok(())
             })?;
-            for id in &ids {
-                println!("closed {id}");
-            }
-            Ok(())
+            done(&ids, "closed", cli.json)
         }
         Cmd::Reopen { ids } => {
             store.write(&format!("reopen {}", ids.join(" ")), |db| {
@@ -251,10 +248,7 @@ pub fn run(cli: Cli) -> Result<()> {
                 }
                 Ok(())
             })?;
-            for id in &ids {
-                println!("reopened {id}");
-            }
-            Ok(())
+            done(&ids, "reopened", cli.json)
         }
         Cmd::Claim { id, force } => {
             let actor = actor(&store, &cli);
@@ -377,7 +371,15 @@ pub fn run(cli: Cli) -> Result<()> {
                 );
                 Ok(())
             })?;
-            println!("remembered {slug}");
+            if cli.json {
+                let snap = load(&store)?;
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&snap.db.memories[&slug])?
+                );
+            } else {
+                println!("remembered {slug}");
+            }
             Ok(())
         }
         Cmd::Memories => {
@@ -414,8 +416,7 @@ pub fn run(cli: Cli) -> Result<()> {
                     .with_context(|| format!("no such memory: {slug}"))?;
                 Ok(())
             })?;
-            println!("forgot {slug}");
-            Ok(())
+            done(std::slice::from_ref(&slug), "forgot", cli.json)
         }
         Cmd::Prime { hook_json, limit } => {
             let Some(snap) = store.load()? else {
@@ -444,7 +445,23 @@ pub fn run(cli: Cli) -> Result<()> {
             }
             sync(&store, &remote)
         }
-        Cmd::Doctor => doctor(&store),
+        Cmd::Doctor => doctor(&store, cli.json),
+        Cmd::Log { id, limit } => {
+            load(&store)?;
+            let entries = store.git.log(DATA_REF, limit, id.as_deref())?;
+            if cli.json {
+                let rows: Vec<serde_json::Value> = entries
+                    .iter()
+                    .map(|(oid, when, msg)| serde_json::json!({ "commit": oid, "at": when, "message": msg }))
+                    .collect();
+                println!("{}", serde_json::to_string_pretty(&rows)?);
+            } else {
+                for (oid, when, msg) in entries {
+                    println!("{}  {when}  {msg}", &oid[..7]);
+                }
+            }
+            Ok(())
+        }
         Cmd::Dep { command } => match command {
             DepCmd::Add { id, blocker } => {
                 store.write(&format!("dep {id} <- {blocker}"), |db| {
@@ -479,7 +496,14 @@ pub fn run(cli: Cli) -> Result<()> {
             DepCmd::Tree { id } => {
                 let snap = load(&store)?;
                 get(&snap.db, &id)?;
-                print!("{}", graph::tree(&snap.db, &id));
+                if cli.json {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&graph::tree_json(&snap.db, &id))?
+                    );
+                } else {
+                    print!("{}", graph::tree(&snap.db, &id));
+                }
                 Ok(())
             }
         },
@@ -662,15 +686,12 @@ fn sync(store: &Store, remote: &str) -> Result<()> {
 }
 
 /// Report what is wrong, if anything, and exit 1 if something is.
-fn doctor(store: &Store) -> Result<()> {
+fn doctor(store: &Store, json: bool) -> Result<()> {
     let snap = load(store)?;
     let db = &snap.db;
     let now = Timestamp::now();
-    let mut problems = 0;
-    let mut report = |line: String| {
-        problems += 1;
-        println!("{line}");
-    };
+    let mut problems: Vec<String> = Vec::new();
+    let mut report = |line: String| problems.push(line);
     for i in db.issues.values() {
         for b in &i.blocked_by {
             if !db.issues.contains_key(b) {
@@ -711,17 +732,37 @@ fn doctor(store: &Store) -> Result<()> {
             report("no foam pre-push hook; `foam sync --setup` installs it".into());
         }
     }
-    if problems == 0 {
+    if json {
+        println!("{}", serde_json::to_string_pretty(&problems)?);
+    } else if problems.is_empty() {
         println!(
             "ok: {} issue(s), {} memor{}",
             db.issues.len(),
             db.memories.len(),
             if db.memories.len() == 1 { "y" } else { "ies" }
         );
+    } else {
+        for p in &problems {
+            println!("{p}");
+        }
+    }
+    if problems.is_empty() {
         Ok(())
     } else {
-        bail!("{problems} problem(s)")
+        bail!("{} problem(s)", problems.len())
     }
+}
+
+/// Print what a write did to several ids.
+fn done(ids: &[String], verb: &str, json: bool) -> Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(ids)?);
+    } else {
+        for id in ids {
+            println!("{verb} {id}");
+        }
+    }
+    Ok(())
 }
 
 fn load(store: &Store) -> Result<Snapshot> {

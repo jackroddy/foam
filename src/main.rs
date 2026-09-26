@@ -182,6 +182,14 @@ enum Cmd {
     },
     /// Check the data and this clone's setup for problems
     Doctor,
+    /// The history of the data ref, newest first
+    Log {
+        /// Only entries that touched this issue or memory
+        id: Option<String>,
+        /// Show at most this many
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+    },
     /// Manage what an issue waits on
     Dep {
         #[command(subcommand)]

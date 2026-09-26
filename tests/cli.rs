@@ -723,3 +723,42 @@ fn doctor_reports_problems() {
     assert!(stdout(foam(dir.path()).arg("reclaim")).contains(&id));
     assert!(stdout(foam(dir.path()).arg("ready")).contains(&id));
 }
+
+#[test]
+fn log_and_json_on_writes() {
+    let dir = repo();
+    stdout(foam(dir.path()).args(["init", "--prefix", "t"]));
+    let a = stdout(foam(dir.path()).args(["create", "a"]));
+    let b = stdout(foam(dir.path()).args(["create", "b"]));
+    stdout(foam(dir.path()).args(["dep", "add", &b, &a]));
+    let closed = stdout(foam(dir.path()).args(["--json", "close", &a, &b]));
+    assert_eq!(
+        serde_json::from_str::<Vec<String>>(&closed).unwrap(),
+        [a.clone(), b.clone()]
+    );
+    stdout(foam(dir.path()).args(["remember", "m", "x"]));
+    let forgot = stdout(foam(dir.path()).args(["--json", "forget", "m"]));
+    assert_eq!(serde_json::from_str::<Vec<String>>(&forgot).unwrap(), ["m"]);
+
+    let log = stdout(foam(dir.path()).arg("log"));
+    assert!(log.lines().next().unwrap().ends_with("forget m"), "{log}");
+    assert!(log.lines().last().unwrap().ends_with("init"), "{log}");
+    let log_a = stdout(foam(dir.path()).args(["log", &a]));
+    // create a, dep b <- a, close a b
+    assert_eq!(log_a.lines().count(), 3, "{log_a}");
+    let v: serde_json::Value = serde_json::from_str(&stdout(
+        foam(dir.path()).args(["--json", "log", "--limit", "1"]),
+    ))
+    .unwrap();
+    assert_eq!(v[0]["message"], "forget m");
+
+    let tree: serde_json::Value = serde_json::from_str(&stdout(
+        foam(dir.path()).args(["--json", "dep", "tree", &b]),
+    ))
+    .unwrap();
+    assert_eq!(tree["blocked_by"][0]["id"], a);
+    assert_eq!(tree["blocked_by"][0]["status"], "closed");
+    let problems: Vec<String> =
+        serde_json::from_str(&stdout(foam(dir.path()).args(["--json", "doctor"]))).unwrap();
+    assert!(problems.is_empty());
+}

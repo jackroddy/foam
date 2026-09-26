@@ -91,6 +91,29 @@ pub fn tree(db: &Db, id: &str) -> String {
     out
 }
 
+/// The same tree as nested JSON: `{id, status, title, blocked_by: [...]}`.
+pub fn tree_json(db: &Db, id: &str) -> serde_json::Value {
+    let mut seen = HashSet::new();
+    node(db, id, &mut seen)
+}
+
+fn node(db: &Db, id: &str, seen: &mut HashSet<String>) -> serde_json::Value {
+    let Some(issue) = db.issues.get(id) else {
+        return serde_json::json!({ "id": id, "missing": true });
+    };
+    let children: Vec<serde_json::Value> = if seen.insert(id.to_string()) {
+        issue.blocked_by.iter().map(|b| node(db, b, seen)).collect()
+    } else {
+        Vec::new()
+    };
+    serde_json::json!({
+        "id": id,
+        "status": issue.status,
+        "title": issue.title,
+        "blocked_by": children,
+    })
+}
+
 fn walk(db: &Db, id: &str, depth: usize, seen: &mut HashSet<String>, out: &mut String) {
     let indent = "  ".repeat(depth);
     let Some(issue) = db.issues.get(id) else {

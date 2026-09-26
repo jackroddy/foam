@@ -223,12 +223,21 @@ impl Store {
         message: &str,
         mut change: impl FnMut(&mut Db) -> Result<T>,
     ) -> Result<T> {
+        self.write_named(|db| Ok((change(db)?, message.to_string())))
+    }
+
+    /// Like `write`, for a change that only knows its commit
+    /// message once it has run.
+    pub fn write_named<T>(
+        &self,
+        mut change: impl FnMut(&mut Db) -> Result<(T, String)>,
+    ) -> Result<T> {
         for attempt in 1..=RETRIES {
             let snap = self.load()?.context("foam is not initialized here")?;
             let mut db = snap.db;
-            let out = change(&mut db)?;
+            let (out, message) = change(&mut db)?;
             let tree = self.write_tree(&db, &snap.files)?;
-            let commit = self.git.commit_tree(&tree, &[&snap.commit], message)?;
+            let commit = self.git.commit_tree(&tree, &[&snap.commit], &message)?;
             match self.git.update_ref(DATA_REF, &commit, Some(&snap.commit))? {
                 Swap::Done => return Ok(out),
                 Swap::Lost => {

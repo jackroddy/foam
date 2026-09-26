@@ -427,4 +427,47 @@ impl Git {
             self.dir.join(path)
         })
     }
+
+    /// The newest `limit` commits on `name` as `(oid, when, subject)`,
+    /// only those whose subject mentions `word` when one is given.
+    pub fn log(
+        &self,
+        name: &str,
+        limit: usize,
+        word: Option<&str>,
+    ) -> Result<Vec<(String, String, String)>> {
+        let limit = limit.to_string();
+        let mut args = vec!["log", "--format=%H%x00%cI%x00%s", "-n", &limit];
+        let grep;
+        if let Some(w) = word {
+            grep = format!("--grep={}", regex_escape(w));
+            args.push(&grep);
+        }
+        args.push(name);
+        let out = self.run(&args)?;
+        let text = String::from_utf8(out)?;
+        Ok(text
+            .lines()
+            .filter_map(|l| {
+                let mut f = l.splitn(3, '\0');
+                Some((
+                    f.next()?.to_string(),
+                    f.next()?.to_string(),
+                    f.next()?.to_string(),
+                ))
+            })
+            .collect())
+    }
+}
+
+/// Escape `s` for git's basic regular expressions.
+fn regex_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if "\\.[]*^$".contains(c) {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
 }
