@@ -1,0 +1,27 @@
+{
+  "id": "foam-a10c60",
+  "title": "Graph rendering and epic rollups",
+  "body": "Deferred from the plan: foam graph for the blocker DAG, and epics that summarize their children's state.",
+  "type": "feature",
+  "status": "open",
+  "priority": 3,
+  "labels": [],
+  "parent": null,
+  "blocked_by": [],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-09-26T22:21:19.254438534Z",
+  "updated_at": "2026-09-26T22:21:19.254438534Z",
+  "closed_at": null,
+  "close_reason": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "0a25e5f",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
