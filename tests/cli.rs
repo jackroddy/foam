@@ -411,3 +411,93 @@ fn notes_search_and_memories() {
         .assert()
         .code(1);
 }
+
+#[test]
+fn prime_reports_state_and_wraps_as_hook_json() {
+    let dir = repo();
+    commit(dir.path(), "one");
+    // an uninitialized repo is not an error for the hook
+    foam(dir.path())
+        .args(["prime", "--hook-json"])
+        .assert()
+        .success()
+        .stdout("");
+    foam(dir.path()).arg("prime").assert().code(3);
+
+    foam(dir.path())
+        .args(["init", "--prefix", "t"])
+        .assert()
+        .success();
+    let a = stdout(foam(dir.path()).args(["create", "first", "-p", "0"]));
+    let b = stdout(foam(dir.path()).args(["create", "second", "--blocked-by", &a]));
+    let c = stdout(foam(dir.path()).args(["create", "mine"]));
+    stdout(foam(dir.path()).args(["--actor", "ann", "claim", &c]));
+    stdout(foam(dir.path()).args(["remember", "style", "tabs not spaces"]));
+
+    let text = stdout(foam(dir.path()).args(["--actor", "ann", "prime"]));
+    assert!(text.starts_with("# foam\n"), "{text}");
+    assert!(text.contains("## Commands"));
+    assert!(text.contains("2 open, 1 in progress, 0 deferred, 0 closed; on main at "));
+    assert!(text.contains(&format!("{c}  P2  mine  (lease 1")), "{text}");
+    assert!(text.contains("## Ready (1 total)"));
+    assert!(text.contains(&format!("{a}  P0  task  first")));
+    assert!(!text.contains(&b));
+    assert!(text.ends_with("style: tabs not spaces"), "{text}");
+
+    let text = stdout(foam(dir.path()).args(["--actor", "bob", "prime", "--limit", "0"]));
+    assert!(!text.contains("## In progress"));
+    assert!(!text.contains("first"));
+
+    let json = stdout(foam(dir.path()).args(["prime", "--hook-json"]));
+    let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(v["hookSpecificOutput"]["hookEventName"], "SessionStart");
+    let ctx = v["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .unwrap();
+    assert!(ctx.starts_with("# foam\n"));
+    assert!(
+        json.lines().count() == 1,
+        "one line, so a hook reads it whole"
+    );
+}
+
+#[test]
+fn setup_claude_merges_into_settings() {
+    let dir = repo();
+    foam(dir.path())
+        .args(["init", "--prefix", "t"])
+        .assert()
+        .success();
+    let path = dir.path().join(".claude/settings.json");
+    assert!(!path.exists(), "init leaves the working tree alone");
+
+    stdout(foam(dir.path()).args(["setup", "claude"]));
+    let v: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(
+        v["hooks"]["SessionStart"][0]["hooks"][0]["command"],
+        "foam prime --hook-json"
+    );
+
+    // adding again is a no-op; other settings survive both ways
+    std::fs::write(
+        &path,
+        r#"{"permissions":{"allow":["Bash(ls)"]},"hooks":{"SessionStart":[{"matcher":"","hooks":[{"type":"command","command":"foam prime --hook-json"}]},{"matcher":"","hooks":[{"type":"command","command":"echo hi"}]}]}}"#,
+    )
+    .unwrap();
+    stdout(foam(dir.path()).args(["setup", "claude"]));
+    let v: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(v["hooks"]["SessionStart"].as_array().unwrap().len(), 2);
+    assert_eq!(v["permissions"]["allow"][0], "Bash(ls)");
+
+    stdout(foam(dir.path()).args(["setup", "claude", "--remove"]));
+    let v: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(v["hooks"]["SessionStart"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        v["hooks"]["SessionStart"][0]["hooks"][0]["command"],
+        "echo hi"
+    );
+    assert_eq!(v["permissions"]["allow"][0], "Bash(ls)");
+
+    std::fs::write(&path, "not json").unwrap();
+    foam(dir.path()).args(["setup", "claude"]).assert().code(1);
+}

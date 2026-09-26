@@ -2,6 +2,7 @@ mod cmd;
 mod git;
 mod graph;
 mod model;
+mod prime;
 mod store;
 
 use std::path::PathBuf;
@@ -155,10 +156,34 @@ enum Cmd {
     Recall { slug: String },
     /// Delete a memory
     Forget { slug: String },
+    /// Print the context an agent needs at session start
+    Prime {
+        /// Wrap the output as a Claude Code SessionStart hook payload
+        #[arg(long = "hook-json")]
+        hook_json: bool,
+        /// Ready issues to list
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+    },
+    /// Install or remove an editor integration
+    Setup {
+        #[command(subcommand)]
+        command: SetupCmd,
+    },
     /// Manage what an issue waits on
     Dep {
         #[command(subcommand)]
         command: DepCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum SetupCmd {
+    /// A SessionStart hook in .claude/settings.json that runs `foam prime --hook-json`
+    Claude {
+        /// Take the hook out again
+        #[arg(long)]
+        remove: bool,
     },
 }
 

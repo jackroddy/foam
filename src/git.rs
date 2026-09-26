@@ -257,4 +257,10 @@ impl Git {
             .map(Distance::Behind)
             .unwrap_or(Distance::Unknown)
     }
+
+    /// The root of the working tree.
+    pub fn toplevel(&self) -> Result<PathBuf> {
+        let out = self.run(&["rev-parse", "--show-toplevel"])?;
+        Ok(PathBuf::from(String::from_utf8(out)?.trim_end()))
+    }
 }

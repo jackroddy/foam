@@ -24,3 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Every write records the commit and branch it happened on, and `memories`
   says how far `HEAD` has moved since each memory was written, or that it
   was written on a branch this one never merged.
+- `foam prime` renders the context an agent needs at session start: the
+  workflow, a command sheet, counts, the actor's in-progress issues, what is
+  ready, and every memory with an age note when it is old or from another
+  branch. `--hook-json` wraps it for a Claude Code SessionStart hook, and
+  `foam setup claude` adds that hook to `.claude/settings.json` without
+  touching anything else in the file. `init` no longer writes to the
+  working tree at all; it prints the setup command instead.

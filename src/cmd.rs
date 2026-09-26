@@ -6,8 +6,9 @@ use jiff::Timestamp;
 use crate::git::{Distance, Git, Stamp};
 use crate::graph;
 use crate::model::{Issue, Memory, Note, Stamps, Status, check_slug, new_id, parse_when};
+use crate::prime;
 use crate::store::{Db, Snapshot, Store};
-use crate::{Cli, Cmd, DepCmd};
+use crate::{Cli, Cmd, DepCmd, SetupCmd};
 
 /// The global flags, split from the subcommand so both can move.
 struct Options {
@@ -416,6 +417,27 @@ pub fn run(cli: Cli) -> Result<()> {
             println!("forgot {slug}");
             Ok(())
         }
+        Cmd::Prime { hook_json, limit } => {
+            let Some(snap) = store.load()? else {
+                if hook_json {
+                    // a hook must not fail a session in a repo
+                    // that never ran foam init
+                    return Ok(());
+                }
+                bail!("foam is not initialized here");
+            };
+            let actor = actor(&store, &cli);
+            let text = prime::render(&snap.db, &store.git, &actor, limit);
+            if hook_json {
+                println!("{}", prime::hook_json(&text));
+            } else {
+                print!("{text}");
+            }
+            Ok(())
+        }
+        Cmd::Setup { command } => match command {
+            SetupCmd::Claude { remove } => setup_claude(&store, remove),
+        },
         Cmd::Dep { command } => match command {
             DepCmd::Add { id, blocker } => {
                 store.write(&format!("dep {id} <- {blocker}"), |db| {
@@ -480,6 +502,66 @@ fn init(store: &Store, prefix: Option<String>, cli: &Options) -> Result<()> {
         "initialized {} with prefix {prefix}",
         crate::store::DATA_REF
     );
+    println!("run `foam setup claude` to load context into Claude Code at session start");
+    Ok(())
+}
+
+const HOOK_COMMAND: &str = "foam prime --hook-json";
+
+/// Add or remove the SessionStart hook in `.claude/settings.json`,
+/// leaving everything else in the file as it was.
+fn setup_claude(store: &Store, remove: bool) -> Result<()> {
+    let path = store.git.toplevel()?.join(".claude").join("settings.json");
+    let mut settings: serde_json::Value = match std::fs::read(&path) {
+        Ok(bytes) => serde_json::from_slice(&bytes)
+            .with_context(|| format!("{} is not valid JSON", path.display()))?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => serde_json::json!({}),
+        Err(e) => return Err(e).with_context(|| path.display().to_string()),
+    };
+    if !settings.is_object() {
+        bail!("{} does not hold a JSON object", path.display());
+    }
+    let hooks = settings
+        .as_object_mut()
+        .unwrap()
+        .entry("hooks")
+        .or_insert_with(|| serde_json::json!({}));
+    if !hooks.is_object() {
+        bail!("{}: \"hooks\" is not an object", path.display());
+    }
+    let session_start = hooks
+        .as_object_mut()
+        .unwrap()
+        .entry("SessionStart")
+        .or_insert_with(|| serde_json::json!([]));
+    let Some(entries) = session_start.as_array_mut() else {
+        bail!("{}: \"SessionStart\" is not an array", path.display());
+    };
+    let is_ours = |entry: &serde_json::Value| {
+        entry["hooks"].as_array().is_some_and(|hs| {
+            hs.iter()
+                .any(|h| h["command"].as_str() == Some(HOOK_COMMAND))
+        })
+    };
+    let present = entries.iter().any(is_ours);
+    if remove {
+        entries.retain(|e| !is_ours(e));
+    } else if !present {
+        entries.push(serde_json::json!({
+            "matcher": "",
+            "hooks": [{ "type": "command", "command": HOOK_COMMAND }],
+        }));
+    }
+    std::fs::create_dir_all(path.parent().unwrap())?;
+    let mut bytes = serde_json::to_vec_pretty(&settings)?;
+    bytes.push(b'\n');
+    std::fs::write(&path, bytes)?;
+    match (remove, present) {
+        (true, true) => println!("removed the foam hook from {}", path.display()),
+        (true, false) => println!("no foam hook in {}", path.display()),
+        (false, true) => println!("the foam hook is already in {}", path.display()),
+        (false, false) => println!("added the foam hook to {}", path.display()),
+    }
     Ok(())
 }
 
