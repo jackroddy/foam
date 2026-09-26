@@ -190,6 +190,21 @@ impl Issue {
     }
 }
 
+/// Check a memory slug: lowercase letters, digits and hyphens.
+pub fn check_slug(slug: &str) -> Result<(), String> {
+    let ok = !slug.is_empty()
+        && slug
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+    if ok {
+        Ok(())
+    } else {
+        Err(format!(
+            "slug must be lowercase letters, digits and hyphens: {slug}"
+        ))
+    }
+}
+
 /// Parse an RFC 3339 timestamp, or a date as midnight UTC.
 pub fn parse_when(s: &str) -> Result<Timestamp, String> {
     if let Ok(t) = s.parse::<Timestamp>() {

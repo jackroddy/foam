@@ -3,8 +3,9 @@ use std::path::PathBuf;
 use anyhow::{Context, Result, bail};
 use jiff::Timestamp;
 
+use crate::git::{Distance, Git, Stamp};
 use crate::graph;
-use crate::model::{Issue, Stamps, Status, new_id, parse_when};
+use crate::model::{Issue, Memory, Note, Stamps, Status, check_slug, new_id, parse_when};
 use crate::store::{Db, Snapshot, Store};
 use crate::{Cli, Cmd, DepCmd};
 
@@ -327,6 +328,94 @@ pub fn run(cli: Cli) -> Result<()> {
             }
             Ok(())
         }
+        Cmd::Note { id, text } => {
+            let actor = actor(&store, &cli);
+            let stamp = store.git.head_stamp()?;
+            store.write(&format!("note {id}"), |db| {
+                let issue = get_mut(db, &id)?;
+                issue.notes.push(Note {
+                    at: Timestamp::now(),
+                    author: actor.clone(),
+                    text: text.clone(),
+                    commit: stamp.commit.clone(),
+                    branch: stamp.branch.clone(),
+                });
+                issue.touch();
+                Ok(())
+            })?;
+            show_after(&store, &id, &cli)
+        }
+        Cmd::Search { query } => {
+            let snap = load(&store)?;
+            let q = query.to_lowercase();
+            let hit = |s: &str| s.to_lowercase().contains(&q);
+            let mut issues: Vec<&Issue> = snap
+                .db
+                .issues
+                .values()
+                .filter(|i| hit(&i.title) || hit(&i.body) || i.notes.iter().any(|n| hit(&n.text)))
+                .collect();
+            issues.sort_by_key(|i| (i.status == Status::Closed, i.priority, i.created_at));
+            print_issues(&issues, cli.json)
+        }
+        Cmd::Remember { slug, text } => {
+            check_slug(&slug).map_err(anyhow::Error::msg)?;
+            let stamp = store.git.head_stamp()?;
+            store.write(&format!("remember {slug}"), |db| {
+                let now = Timestamp::now();
+                let created_at = db.memories.get(&slug).map_or(now, |m| m.created_at);
+                db.memories.insert(
+                    slug.clone(),
+                    Memory {
+                        slug: slug.clone(),
+                        text: text.clone(),
+                        created_at,
+                        updated_at: now,
+                        stamp: stamp.clone(),
+                    },
+                );
+                Ok(())
+            })?;
+            println!("remembered {slug}");
+            Ok(())
+        }
+        Cmd::Memories => {
+            let snap = load(&store)?;
+            let memories: Vec<&Memory> = snap.db.memories.values().collect();
+            if cli.json {
+                println!("{}", serde_json::to_string_pretty(&memories)?);
+            } else {
+                for m in memories {
+                    println!("{}", memory_line(m, &store.git));
+                }
+            }
+            Ok(())
+        }
+        Cmd::Recall { slug } => {
+            let snap = load(&store)?;
+            let m = snap
+                .db
+                .memories
+                .get(&slug)
+                .with_context(|| format!("no such memory: {slug}"))?;
+            if cli.json {
+                println!("{}", serde_json::to_string_pretty(m)?);
+            } else {
+                println!("{}", m.text);
+                println!("({})", age(&m.stamp, &store.git));
+            }
+            Ok(())
+        }
+        Cmd::Forget { slug } => {
+            store.write(&format!("forget {slug}"), |db| {
+                db.memories
+                    .remove(&slug)
+                    .with_context(|| format!("no such memory: {slug}"))?;
+                Ok(())
+            })?;
+            println!("forgot {slug}");
+            Ok(())
+        }
         Cmd::Dep { command } => match command {
             DepCmd::Add { id, blocker } => {
                 store.write(&format!("dep {id} <- {blocker}"), |db| {
@@ -449,6 +538,27 @@ fn print_issues(issues: &[&Issue], json: bool) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Describe how far `HEAD` has moved since a stamp was taken.
+pub fn age(stamp: &Stamp, git: &Git) -> String {
+    match git.distance(&stamp.commit) {
+        Distance::Behind(0) => format!("at {}, this commit", stamp.commit),
+        Distance::Behind(1) => format!("at {}, 1 commit ago", stamp.commit),
+        Distance::Behind(n) => format!("at {}, {n} commits ago", stamp.commit),
+        Distance::Elsewhere => format!(
+            "at {} on {}, not in this branch's history",
+            stamp.commit, stamp.branch
+        ),
+        Distance::Unknown => format!(
+            "at {} on {}, a commit this clone lacks",
+            stamp.commit, stamp.branch
+        ),
+    }
+}
+
+pub fn memory_line(m: &Memory, git: &Git) -> String {
+    format!("{}  {}  ({})", m.slug, m.text, age(&m.stamp, git))
 }
 
 fn line(i: &Issue) -> String {

@@ -143,6 +143,18 @@ enum Cmd {
     Heartbeat { id: String },
     /// Reopen every in-progress issue whose lease has expired
     Reclaim,
+    /// Append a note to an issue
+    Note { id: String, text: String },
+    /// Search titles, bodies and notes, case-insensitively; closed issues included
+    Search { query: String },
+    /// Store a memory under a slug, replacing any with the same slug
+    Remember { slug: String, text: String },
+    /// List every memory
+    Memories,
+    /// Print one memory
+    Recall { slug: String },
+    /// Delete a memory
+    Forget { slug: String },
     /// Manage what an issue waits on
     Dep {
         #[command(subcommand)]

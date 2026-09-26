@@ -302,3 +302,112 @@ fn actor_falls_back_to_the_environment() {
     let v: serde_json::Value = serde_json::from_str(&json).unwrap();
     assert_eq!(v["assignee"], "env-actor");
 }
+
+fn commit(dir: &Path, msg: &str) {
+    let ok = Command::new("git")
+        .args([
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            msg,
+        ])
+        .current_dir(dir)
+        .status()
+        .unwrap()
+        .success();
+    assert!(ok);
+}
+
+#[test]
+fn notes_search_and_memories() {
+    let dir = repo();
+    commit(dir.path(), "one");
+    foam(dir.path())
+        .args(["init", "--prefix", "t"])
+        .assert()
+        .success();
+    let a = stdout(foam(dir.path()).args(["create", "Wire the parser", "--body", "uses nom"]));
+    let b = stdout(foam(dir.path()).args(["create", "Other"]));
+    stdout(foam(dir.path()).args(["--actor", "ann", "note", &a, "Tried PEG first"]));
+
+    let shown = stdout(foam(dir.path()).args(["show", &a]));
+    assert!(shown.contains("ann] Tried PEG first"), "{shown}");
+    let v: serde_json::Value =
+        serde_json::from_str(&stdout(foam(dir.path()).args(["--json", "show", &a]))).unwrap();
+    assert_eq!(v["notes"][0]["branch"], "main");
+
+    assert!(stdout(foam(dir.path()).args(["search", "peg"])).starts_with(&a));
+    assert!(stdout(foam(dir.path()).args(["search", "NOM"])).starts_with(&a));
+    assert!(stdout(foam(dir.path()).args(["search", "other"])).starts_with(&b));
+    assert_eq!(stdout(foam(dir.path()).args(["search", "zzz"])), "");
+    stdout(foam(dir.path()).args(["close", &b]));
+    assert!(stdout(foam(dir.path()).args(["search", "other"])).contains("closed"));
+
+    stdout(foam(dir.path()).args(["remember", "parser-lib", "we use nom"]));
+    foam(dir.path())
+        .args(["remember", "Bad Slug", "x"])
+        .assert()
+        .code(1);
+    assert_eq!(
+        stdout(foam(dir.path()).args(["recall", "parser-lib"]))
+            .lines()
+            .next(),
+        Some("we use nom")
+    );
+    let listed = stdout(foam(dir.path()).arg("memories"));
+    assert!(listed.contains("this commit"), "{listed}");
+
+    commit(dir.path(), "two");
+    commit(dir.path(), "three");
+    let listed = stdout(foam(dir.path()).arg("memories"));
+    assert!(listed.contains("2 commits ago"), "{listed}");
+
+    // a memory written on a branch that main never merged
+    let ok = Command::new("git")
+        .args(["checkout", "-q", "-b", "side"])
+        .current_dir(dir.path())
+        .status()
+        .unwrap()
+        .success();
+    assert!(ok);
+    commit(dir.path(), "side work");
+    stdout(foam(dir.path()).args(["remember", "side-note", "from side"]));
+    let ok = Command::new("git")
+        .args(["checkout", "-q", "main"])
+        .current_dir(dir.path())
+        .status()
+        .unwrap()
+        .success();
+    assert!(ok);
+    let listed = stdout(foam(dir.path()).arg("memories"));
+    assert!(listed.contains("side-note  from side  (at "), "{listed}");
+    assert!(
+        listed.contains("on side, not in this branch's history"),
+        "{listed}"
+    );
+
+    stdout(foam(dir.path()).args(["remember", "parser-lib", "we use winnow"]));
+    let v: serde_json::Value = serde_json::from_str(&stdout(foam(dir.path()).args([
+        "--json",
+        "recall",
+        "parser-lib",
+    ])))
+    .unwrap();
+    assert_eq!(v["text"], "we use winnow");
+    assert_ne!(v["created_at"], v["updated_at"]);
+
+    stdout(foam(dir.path()).args(["forget", "parser-lib"]));
+    foam(dir.path())
+        .args(["recall", "parser-lib"])
+        .assert()
+        .code(1);
+    foam(dir.path())
+        .args(["forget", "parser-lib"])
+        .assert()
+        .code(1);
+}

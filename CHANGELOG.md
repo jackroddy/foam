@@ -20,3 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in progress under the actor's name with a 15 minute lease; `reclaim`
   reopens every issue whose lease has run out. The actor is `--actor`, then
   `$FOAM_ACTOR`, then git's `user.name`, then `$USER`.
+- `foam note`, `search`, `remember`, `memories`, `recall` and `forget`.
+  Every write records the commit and branch it happened on, and `memories`
+  says how far `HEAD` has moved since each memory was written, or that it
+  was written on a branch this one never merged.

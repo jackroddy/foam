@@ -31,6 +31,17 @@ pub struct Stamp {
     pub branch: String,
 }
 
+/// Where a stamped commit stands relative to `HEAD`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Distance {
+    /// In this branch's history, this many commits back.
+    Behind(u64),
+    /// Not in this branch's history.
+    Elsewhere,
+    /// The commit is not in this repository at all.
+    Unknown,
+}
+
 /// The outcome of a compare-and-swap on a ref.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Swap {
@@ -217,5 +228,33 @@ impl Git {
             .filter(|o| o.status.success())?;
         let value = String::from_utf8_lossy(&out.stdout).trim_end().to_string();
         (!value.is_empty()).then_some(value)
+    }
+
+    pub fn distance(&self, commit: &str) -> Distance {
+        if self
+            .rev_parse(&format!("{commit}^{{commit}}"))
+            .ok()
+            .flatten()
+            .is_none()
+        {
+            return Distance::Unknown;
+        }
+        let ancestor = self
+            .command(&["merge-base", "--is-ancestor", commit, "HEAD"])
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !ancestor {
+            return Distance::Elsewhere;
+        }
+        let range = format!("{commit}..HEAD");
+        self.command(&["rev-list", "--count", &range])
+            .stderr(Stdio::null())
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse().ok())
+            .map(Distance::Behind)
+            .unwrap_or(Distance::Unknown)
     }
 }
