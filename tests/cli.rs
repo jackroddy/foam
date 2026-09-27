@@ -1368,3 +1368,30 @@ fn show_and_pick_take_the_issue_fzf_chooses() {
         assert!(String::from_utf8_lossy(&out.stderr).contains("fzf is not on PATH"));
     }
 }
+
+#[test]
+fn a_milestone_of_milestones_rolls_up_the_leaves() {
+    let dir = repo();
+    stdout(foam(dir.path()).args(["init", "--prefix", "t"]));
+    let rel = stdout(foam(dir.path()).args(["create", "v1", "--type", "milestone"]));
+    let m =
+        stdout(foam(dir.path()).args(["create", "inner", "--type", "milestone", "--parent", &rel]));
+    let a = stdout(foam(dir.path()).args(["create", "a", "--parent", &m]));
+    stdout(foam(dir.path()).args(["create", "b", "--parent", &m]));
+    stdout(foam(dir.path()).args(["create", "c", "--parent", &rel]));
+    stdout(foam(dir.path()).args(["close", &a, "--reason", "done"]));
+    let listed = stdout(foam(dir.path()).arg("list"));
+    assert!(listed.contains("v1  [1/3 closed]"), "{listed}");
+    assert!(listed.contains("inner  [1/2 closed]"), "{listed}");
+    let shown = stdout(foam(dir.path()).args(["show", &rel]));
+    assert!(shown.contains("children (1/3 closed):"), "{shown}");
+    assert!(
+        shown.contains(&format!("{m}  open  inner  [1/2 closed]")),
+        "{shown}"
+    );
+    let blocked = stdout(foam(dir.path()).arg("blocked"));
+    assert!(
+        blocked.contains(&format!("v1  [1/3 closed]  <- {m}")),
+        "{blocked}"
+    );
+}

@@ -80,8 +80,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   P2 soon, P3 when convenient, P4 someday. `create --help` and the prime
   cheat sheet say so.
 - A milestone's line in `list`, `ready`, `blocked`, `search` and `prime` ends
-  with `[closed/total closed]` over its children, and `show` puts the same
-  count on its children heading.
+  with `[closed/total closed]` over the leaves of its tree, the issues at
+  the bottom, so a milestone of milestones counts the work and not the
+  containers. `show` puts the same count on its children heading and on
+  each child that is a milestone.
 - `foam prime` reopens issues whose lease has expired and says which,
   instead of asking the agent to run `foam reclaim`.
 - `foam prime` keeps its memories section under 4 KB, dropping the least

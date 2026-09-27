@@ -43,21 +43,35 @@ pub fn children<'a>(db: &'a Db, id: &str) -> Vec<&'a Issue> {
     out
 }
 
-/// How a milestone is going: `(closed, total)` over its children.
-/// None for anything else, or a milestone with no children.
+/// How a milestone is going: `(closed, total)` over the leaves
+/// below it, the issues at the bottom of its tree, so a milestone
+/// of milestones counts the work and not the containers. None for
+/// anything else, or a milestone with nothing below it.
 pub fn rollup(db: &Db, issue: &Issue) -> Option<(usize, usize)> {
     if issue.kind != Kind::Milestone {
         return None;
     }
-    let children = children(db, &issue.id);
-    if children.is_empty() {
-        return None;
+    let mut seen = HashSet::new();
+    let (mut closed, mut total) = (0, 0);
+    leaves(db, &issue.id, &mut seen, &mut closed, &mut total);
+    (total > 0).then_some((closed, total))
+}
+
+fn leaves(db: &Db, id: &str, seen: &mut HashSet<String>, closed: &mut usize, total: &mut usize) {
+    for c in children(db, id) {
+        // a parent loop would otherwise recurse forever
+        if !seen.insert(c.id.clone()) {
+            continue;
+        }
+        if children(db, &c.id).is_empty() {
+            *total += 1;
+            if c.status == Status::Closed {
+                *closed += 1;
+            }
+        } else {
+            leaves(db, &c.id, seen, closed, total);
+        }
     }
-    let closed = children
-        .iter()
-        .filter(|c| c.status == Status::Closed)
-        .count();
-    Some((closed, children.len()))
 }
 
 /// Everything that holds an issue back: its open blockers,
@@ -228,6 +242,29 @@ mod tests {
         assert!(!is_ready(&db, &db.issues["t-bottom"], now()));
         db.issues.get_mut("t-r").unwrap().status = Status::Closed;
         assert!(is_ready(&db, &db.issues["t-bottom"], now()));
+    }
+
+    #[test]
+    fn a_rollup_counts_the_leaves_of_the_whole_tree() {
+        let mut release = test_issue("t-rel");
+        release.kind = Kind::Milestone;
+        let mut m = test_issue("t-m");
+        m.kind = Kind::Milestone;
+        m.parent = Some("t-rel".into());
+        let mut a = test_issue("t-a");
+        a.parent = Some("t-m".into());
+        a.status = Status::Closed;
+        let mut b = test_issue("t-b");
+        b.parent = Some("t-m".into());
+        let mut c = test_issue("t-c");
+        c.parent = Some("t-rel".into());
+        let mut db = test_db();
+        for i in [release, m, a, b, c] {
+            db.issues.insert(i.id.clone(), i);
+        }
+        assert_eq!(rollup(&db, &db.issues["t-rel"]), Some((1, 3)));
+        assert_eq!(rollup(&db, &db.issues["t-m"]), Some((1, 2)));
+        assert_eq!(rollup(&db, &db.issues["t-c"]), None);
     }
 
     #[test]

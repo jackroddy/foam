@@ -378,7 +378,14 @@ pub fn issue(style: &Style, i: &Issue, db: &Db) -> String {
             None => out.push_str("children:\n"),
         }
         for c in children {
-            let _ = writeln!(out, "  {}  {}  {}", c.id, style.status(c.status), c.title);
+            let _ = writeln!(
+                out,
+                "  {}  {}  {}{}",
+                c.id,
+                style.status(c.status),
+                c.title,
+                rollup_tag(db, c)
+            );
         }
     }
     if let Some(a) = &i.assignee {
