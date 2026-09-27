@@ -39,8 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   does too, with or without the `foam-` part, and so does a word from
   its title when exactly one open issue carries it. Anything that fits
   more than one issue prints them all and exits 1.
-- `foam show` with no id, and the new `foam pick`, put the listing in
-  fzf and take the chosen issue; `pick` prints its id, for
+- `foam show` with no id, and the new `foam pick`, put the open and
+  in-progress issues in fzf and take the chosen one; `pick` prints its id, for
   `foam claim $(foam pick)`. Both need fzf on PATH.
 - `foam setup bash` prints a completion block for `.bashrc` that makes
   `foam show **<TAB>` search the issues in fzf and insert the id.

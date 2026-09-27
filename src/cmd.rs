@@ -742,7 +742,7 @@ const BASH_COMPLETION: &str = "\
 # foam: `foam show **<TAB>` searches the issues in fzf and inserts the id.
 # Load fzf's bash integration first: eval \"$(fzf --bash)\"
 _fzf_complete_foam() {
-  _fzf_complete --reverse -- \"$@\" < <(foam list --all --plain)
+  _fzf_complete --reverse -- \"$@\" < <(foam list --plain)
 }
 _fzf_complete_foam_post() {
   awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^[a-z0-9-]+-[0-9a-f]{6}$/) { print $i; exit } }'
@@ -751,11 +751,15 @@ _fzf_complete_foam_post() {
   && complete -F _fzf_complete_foam -o default -o bashdefault foam
 ";
 
-/// Let the person choose an issue in fzf and return its id; open
-/// issues come first.
+/// Let the person choose among the open and in-progress issues in
+/// fzf and return the id.
 fn pick(db: &Db) -> Result<String> {
-    let mut issues: Vec<&Issue> = db.issues.values().collect();
-    issues.sort_by_key(|i| (i.status == Status::Closed, i.priority, i.created_at));
+    let mut issues: Vec<&Issue> = db
+        .issues
+        .values()
+        .filter(|i| matches!(i.status, Status::Open | Status::InProgress))
+        .collect();
+    issues.sort_by_key(|i| (i.priority, i.created_at));
     let feed = render::listing(&Style::PLAIN, Some(db), &plain_rows(&issues));
     let mut fzf = match std::process::Command::new("fzf")
         .args(["--reverse", "--no-multi", "--prompt", "issue> "])
