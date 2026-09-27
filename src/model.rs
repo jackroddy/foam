@@ -57,7 +57,10 @@ pub enum Kind {
     Bug,
     Feature,
     Chore,
-    Epic,
+    /// An issue whose children are its work
+    #[serde(alias = "epic")]
+    #[clap(alias = "epic")]
+    Milestone,
     Spike,
     Decision,
 }
@@ -152,7 +155,7 @@ impl fmt::Display for Kind {
             Kind::Bug => "bug",
             Kind::Feature => "feature",
             Kind::Chore => "chore",
-            Kind::Epic => "epic",
+            Kind::Milestone => "milestone",
             Kind::Spike => "spike",
             Kind::Decision => "decision",
         })
@@ -310,6 +313,17 @@ mod tests {
         assert_eq!(a, b);
         assert!(a.ends_with(b"}\n"));
         assert!(a.starts_with(b"{\n  \"id\": \"t-000001\",\n"));
+    }
+
+    #[test]
+    fn a_record_written_as_epic_loads_as_a_milestone() {
+        let mut issue = test_issue("t-000001");
+        issue.kind = Kind::Milestone;
+        let text = String::from_utf8(canonical(&issue)).unwrap();
+        assert!(text.contains("\"type\": \"milestone\""), "{text}");
+        let old = text.replace("\"milestone\"", "\"epic\"");
+        let back: Issue = serde_json::from_str(&old).unwrap();
+        assert_eq!(back.kind, Kind::Milestone);
     }
 
     #[test]

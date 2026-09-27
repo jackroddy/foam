@@ -965,10 +965,10 @@ fn board(store: &Store, cli: &Options) -> Result<()> {
     let snap = load(store)?;
     let db = &snap.db;
     let now = Timestamp::now();
-    let epics = by_priority(
+    let milestones = by_priority(
         db.issues
             .values()
-            .filter(|i| i.kind == Kind::Epic && i.status != Status::Closed)
+            .filter(|i| i.kind == Kind::Milestone && i.status != Status::Closed)
             .collect(),
     );
     let in_progress = by_priority(
@@ -994,7 +994,7 @@ fn board(store: &Store, cli: &Options) -> Result<()> {
         println!(
             "{}",
             serde_json::to_string_pretty(&serde_json::json!({
-                "epics": epics,
+                "milestones": milestones,
                 "in_progress": in_progress,
                 "ready": ready,
                 "blocked": blocked,
@@ -1019,9 +1019,12 @@ fn board(store: &Store, cli: &Options) -> Result<()> {
             count(Status::Closed),
         ))
     );
-    if !epics.is_empty() {
-        println!("\n{}", style.bold("Epics"));
-        print!("{}", render::listing(style, Some(db), &plain_rows(&epics)));
+    if !milestones.is_empty() {
+        println!("\n{}", style.bold("Milestones"));
+        print!(
+            "{}",
+            render::listing(style, Some(db), &plain_rows(&milestones))
+        );
     }
     if !in_progress.is_empty() {
         println!("\n{}", style.bold("In progress"));

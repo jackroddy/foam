@@ -32,13 +32,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it still holds, `foam forget` it if not.
 - `foam doctor` reports a memory whose text is also in `CLAUDE.md`,
   `CLAUDE.local.md` or `.claude/CLAUDE.md`, since both reach every session.
-- `foam board` puts the backlog on one screen: open epics with their
+- `foam board` puts the backlog on one screen: open milestones with their
   rollups, what is in progress and how much lease is left, what is ready,
   what is blocked and by what, and the last few log entries. `--json` gives
   the same five lists.
 
 ### Changed
 
+- The `epic` kind is now `milestone`: an issue whose children are its
+  work. `--type epic` is still accepted, and records already written as
+  `epic` load as milestones.
 - `foam close` requires `--reason`, and records a resolution: done, or
   dropped with `--dropped`. `show` prints it on the closed line, listings
   tag a dropped issue, and `update --status closed` now points at `close`.
@@ -54,7 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The priorities have meanings: P0 blocks all other work, P1 this session,
   P2 soon, P3 when convenient, P4 someday. `create --help` and the prime
   cheat sheet say so.
-- An epic's line in `list`, `ready`, `blocked`, `search` and `prime` ends
+- A milestone's line in `list`, `ready`, `blocked`, `search` and `prime` ends
   with `[closed/total closed]` over its children, and `show` puts the same
   count on its children heading.
 - `foam prime` reopens issues whose lease has expired and says which,
@@ -62,7 +65,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `foam prime` keeps its memories section under 4 KB, dropping the least
   recently updated memories first and saying how many it dropped.
 
-- An epic is not ready while any of its children is open. `foam blocked`
+- A milestone is not ready while any of its children is open. `foam blocked`
   lists it with the children holding it.
 - When `foam prime` cuts the ready list short, the heading gives how many
   it shows and how many are ready.

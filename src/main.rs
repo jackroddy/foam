@@ -58,7 +58,7 @@ enum Cmd {
         /// Add a label; repeatable
         #[arg(long = "label")]
         labels: Vec<String>,
-        /// Parent epic
+        /// Parent milestone
         #[arg(long)]
         parent: Option<String>,
         /// Longer description
@@ -92,7 +92,7 @@ enum Cmd {
     },
     /// Open issues that something still blocks
     Blocked,
-    /// One screen: epics, in progress, ready, blocked and the recent log
+    /// One screen: milestones, in progress, ready, blocked and the recent log
     Board,
     /// Change fields of an issue
     Update {

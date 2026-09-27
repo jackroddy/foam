@@ -43,10 +43,10 @@ pub fn children<'a>(db: &'a Db, id: &str) -> Vec<&'a Issue> {
     out
 }
 
-/// How an epic is going: `(closed, total)` over its children.
-/// None for anything else, or an epic with no children.
+/// How a milestone is going: `(closed, total)` over its children.
+/// None for anything else, or a milestone with no children.
 pub fn rollup(db: &Db, issue: &Issue) -> Option<(usize, usize)> {
-    if issue.kind != Kind::Epic {
+    if issue.kind != Kind::Milestone {
         return None;
     }
     let children = children(db, &issue.id);
@@ -61,10 +61,10 @@ pub fn rollup(db: &Db, issue: &Issue) -> Option<(usize, usize)> {
 }
 
 /// Everything that holds an issue back: its open blockers,
-/// and for an epic its children that are not yet closed.
+/// and for a milestone its children that are not yet closed.
 pub fn holders<'a>(db: &'a Db, issue: &'a Issue) -> Vec<&'a str> {
     let mut out = open_blockers(db, issue);
-    if issue.kind == Kind::Epic {
+    if issue.kind == Kind::Milestone {
         out.extend(
             children(db, &issue.id)
                 .into_iter()
@@ -231,33 +231,33 @@ mod tests {
     }
 
     #[test]
-    fn an_epic_waits_on_its_open_children() {
+    fn an_milestone_waits_on_its_open_children() {
         let mut db = test_db();
-        let mut epic = test_issue("t-epic");
-        epic.kind = Kind::Epic;
+        let mut milestone = test_issue("t-milestone");
+        milestone.kind = Kind::Milestone;
         let mut a = test_issue("t-a");
-        a.parent = Some("t-epic".into());
+        a.parent = Some("t-milestone".into());
         let mut b = test_issue("t-b");
-        b.parent = Some("t-epic".into());
+        b.parent = Some("t-milestone".into());
         // a task with children is not held by them
         let mut task = test_issue("t-task");
         task.kind = Kind::Task;
         let mut c = test_issue("t-c");
         c.parent = Some("t-task".into());
-        for i in [epic, a, b, task, c] {
+        for i in [milestone, a, b, task, c] {
             db.issues.insert(i.id.clone(), i);
         }
 
-        assert!(!is_ready(&db, &db.issues["t-epic"], now()));
+        assert!(!is_ready(&db, &db.issues["t-milestone"], now()));
         assert!(is_ready(&db, &db.issues["t-a"], now()));
         assert!(is_ready(&db, &db.issues["t-task"], now()));
         assert_eq!(blocked(&db, now())[0].1, ["t-a", "t-b"]);
 
         db.issues.get_mut("t-a").unwrap().status = Status::Closed;
         db.issues.get_mut("t-b").unwrap().status = Status::InProgress;
-        assert!(!is_ready(&db, &db.issues["t-epic"], now()));
+        assert!(!is_ready(&db, &db.issues["t-milestone"], now()));
         db.issues.get_mut("t-b").unwrap().status = Status::Closed;
-        assert!(is_ready(&db, &db.issues["t-epic"], now()));
+        assert!(is_ready(&db, &db.issues["t-milestone"], now()));
     }
 
     #[test]

@@ -986,31 +986,34 @@ fn a_closed_pipe_ends_the_process_quietly() {
 }
 
 #[test]
-fn an_epic_shows_its_children_and_waits_on_them() {
+fn an_milestone_shows_its_children_and_waits_on_them() {
     let dir = repo();
     commit(dir.path(), "one");
     foam(dir.path())
         .args(["init", "--prefix", "t"])
         .assert()
         .success();
-    let epic = stdout(foam(dir.path()).args(["create", "big", "--type", "epic", "-p", "0"]));
-    let a = stdout(foam(dir.path()).args(["create", "one", "--parent", &epic]));
-    let b = stdout(foam(dir.path()).args(["create", "two", "--parent", &epic]));
+    let milestone =
+        stdout(foam(dir.path()).args(["create", "big", "--type", "milestone", "-p", "0"]));
+    let a = stdout(foam(dir.path()).args(["create", "one", "--parent", &milestone]));
+    let b = stdout(foam(dir.path()).args(["create", "two", "--parent", &milestone]));
 
-    let shown = stdout(foam(dir.path()).args(["show", &epic]));
+    let shown = stdout(foam(dir.path()).args(["show", &milestone]));
     assert!(shown.contains("children (0/2 closed):\n"), "{shown}");
     let listed = stdout(foam(dir.path()).arg("list"));
     assert!(listed.contains("big  [0/2 closed]"), "{listed}");
     assert!(shown.contains(&format!("  {a}  open  one\n")), "{shown}");
-    let v: serde_json::Value =
-        serde_json::from_str(&stdout(foam(dir.path()).args(["--json", "show", &epic]))).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&stdout(
+        foam(dir.path()).args(["--json", "show", &milestone]),
+    ))
+    .unwrap();
     assert_eq!(v["children"], serde_json::json!([a, b]));
 
     let ready = stdout(foam(dir.path()).arg("ready"));
     assert_eq!(ready.lines().count(), 2, "{ready}");
-    assert!(!ready.contains(&epic));
+    assert!(!ready.contains(&milestone));
     let blocked = stdout(foam(dir.path()).arg("blocked"));
-    assert!(blocked.starts_with(&epic), "{blocked}");
+    assert!(blocked.starts_with(&milestone), "{blocked}");
     assert!(blocked.ends_with(&format!("<- {a} {b}")), "{blocked}");
 
     let text = stdout(foam(dir.path()).args(["prime", "--limit", "1"]));
@@ -1028,12 +1031,12 @@ fn an_epic_shows_its_children_and_waits_on_them() {
     stdout(foam(dir.path()).args(["close", &b, "--reason", "done"]));
     let ready = stdout(foam(dir.path()).arg("ready"));
     assert!(
-        ready.starts_with(&epic) && ready.contains("[2/2 closed]"),
+        ready.starts_with(&milestone) && ready.contains("[2/2 closed]"),
         "{ready}"
     );
     assert_eq!(stdout(foam(dir.path()).arg("blocked")), "");
     let text = stdout(foam(dir.path()).arg("prime"));
-    assert!(text.contains("epic  big  [2/2 closed]"), "{text}");
+    assert!(text.contains("milestone  big  [2/2 closed]"), "{text}");
 }
 
 #[test]
@@ -1141,8 +1144,8 @@ fn board_shows_every_section_and_plain_matches_a_pipe() {
         .args(["init", "--prefix", "t"])
         .assert()
         .success();
-    let epic = stdout(foam(dir.path()).args(["create", "big", "--type", "epic"]));
-    let a = stdout(foam(dir.path()).args(["create", "one", "--parent", &epic]));
+    let milestone = stdout(foam(dir.path()).args(["create", "big", "--type", "milestone"]));
+    let a = stdout(foam(dir.path()).args(["create", "one", "--parent", &milestone]));
     let b = stdout(foam(dir.path()).args(["create", "two", "--blocked-by", &a]));
     stdout(foam(dir.path()).args(["claim", &a, "--actor", "ann"]));
 
@@ -1153,7 +1156,7 @@ fn board_shows_every_section_and_plain_matches_a_pipe() {
         "{board}"
     );
     for section in [
-        "\nEpics\n",
+        "\nMilestones\n",
         "\nIn progress\n",
         "\nReady\n",
         "\nBlocked\n",
@@ -1174,7 +1177,7 @@ fn board_shows_every_section_and_plain_matches_a_pipe() {
 
     let v: serde_json::Value =
         serde_json::from_str(&stdout(foam(dir.path()).args(["--json", "board"]))).unwrap();
-    assert_eq!(v["epics"][0]["id"], epic);
+    assert_eq!(v["milestones"][0]["id"], milestone);
     assert_eq!(v["in_progress"][0]["id"], a);
     assert_eq!(v["ready"].as_array().unwrap().len(), 0);
     assert_eq!(v["blocked"][1]["issue"]["id"], b);
@@ -1188,6 +1191,18 @@ fn board_shows_every_section_and_plain_matches_a_pipe() {
     }
     let shown = stdout(foam(dir.path()).args(["--plain", "show", &a]));
     assert!(shown.contains("  on main ("), "{shown}");
+}
+
+#[test]
+fn the_old_epic_name_is_still_accepted() {
+    let dir = repo();
+    stdout(foam(dir.path()).args(["init", "--prefix", "t"]));
+    let m = stdout(foam(dir.path()).args(["create", "old name", "--type", "epic"]));
+    let v: serde_json::Value =
+        serde_json::from_str(&stdout(foam(dir.path()).args(["--json", "show", &m]))).unwrap();
+    assert_eq!(v["type"], "milestone");
+    let listed = stdout(foam(dir.path()).args(["list", "--type", "milestone"]));
+    assert!(listed.contains("old name"), "{listed}");
 }
 
 #[test]

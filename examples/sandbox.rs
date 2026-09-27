@@ -22,7 +22,7 @@ const SCENARIOS: [(&str, Run); 5] = [
     ("one-session", one_session),
     ("two-agents", two_agents),
     ("dead-agent", dead_agent),
-    ("epic-mid-task", epic_mid_task),
+    ("milestone-mid-task", milestone_mid_task),
     ("big-backlog", big_backlog),
 ];
 
@@ -177,21 +177,22 @@ fn dead_agent(s: &mut Scenario) {
     s.note(stdout(foam(&r).args(["show", &a])));
 }
 
-/// An agent working one issue files an epic with children for
-/// what it found, and closes the epic's first child itself.
-fn epic_mid_task(s: &mut Scenario) {
+/// An agent working one issue files a milestone with children for
+/// what it found, and closes the milestone's first child itself.
+fn milestone_mid_task(s: &mut Scenario) {
     let r = s.repo("repo");
     stdout(foam(&r).args(["init", "--prefix", "s"]));
     let a = stdout(foam(&r).args(["create", "Add the export command"]));
     s.session(&r, "ann");
     stdout(actor(&r, "ann").args(["claim", &a]));
-    let epic = stdout(actor(&r, "ann").args(["create", "Export formats", "--type", "epic"]));
-    let csv = stdout(actor(&r, "ann").args(["create", "CSV export", "--parent", &epic]));
-    stdout(actor(&r, "ann").args(["create", "JSON export", "--parent", &epic]));
-    stdout(actor(&r, "ann").args(["dep", "add", &a, &epic]));
+    let milestone =
+        stdout(actor(&r, "ann").args(["create", "Export formats", "--type", "milestone"]));
+    let csv = stdout(actor(&r, "ann").args(["create", "CSV export", "--parent", &milestone]));
+    stdout(actor(&r, "ann").args(["create", "JSON export", "--parent", &milestone]));
+    stdout(actor(&r, "ann").args(["dep", "add", &a, &milestone]));
     stdout(actor(&r, "ann").args(["claim", &csv]));
     stdout(actor(&r, "ann").args(["close", &csv, "--reason", "writes rows"]));
-    stdout(actor(&r, "ann").args(["note", &a, "export waits on the formats epic"]));
+    stdout(actor(&r, "ann").args(["note", &a, "export waits on the formats milestone"]));
     s.session(&r, "ann");
     s.note(stdout(foam(&r).arg("blocked")));
     s.note(stdout(foam(&r).args(["dep", "tree", &a])));

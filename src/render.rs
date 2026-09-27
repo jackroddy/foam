@@ -185,7 +185,7 @@ fn pad(s: &str, width: usize) -> String {
     format!("{s}{}", " ".repeat(width.saturating_sub(n)))
 }
 
-/// The `[closed/total closed]` tag for an epic's line, or nothing.
+/// The `[closed/total closed]` tag for a milestone's line, or nothing.
 pub fn rollup_tag(db: &Db, i: &Issue) -> String {
     match graph::rollup(db, i) {
         Some((closed, total)) => format!("  [{closed}/{total} closed]"),
@@ -210,7 +210,7 @@ pub fn age(stamp: &Stamp, distance: Distance) -> String {
     }
 }
 
-/// What trails an issue's title in a listing: the epic rollup,
+/// What trails an issue's title in a listing: the milestone rollup,
 /// a dropped tag and the assignee.
 fn tags(i: &Issue, db: Option<&Db>) -> String {
     let mut s = String::new();
