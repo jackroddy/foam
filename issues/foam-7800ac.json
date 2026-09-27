@@ -3,26 +3,29 @@
   "title": "update takes several ids",
   "body": "close and reopen take several ids; update takes one, so moving issues between releases is one command per issue. Let update take several, the same change applied to each.",
   "type": "feature",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 1,
   "labels": [],
   "parent": "foam-ef031b",
   "blocked_by": [],
   "related": [],
   "assignee": "Jack Roddy/2ae76934",
-  "lease_expires": "2026-09-27T02:43:35.961121492Z",
+  "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-09-27T02:28:35.943814383Z",
-  "updated_at": "2026-09-27T02:28:35.961121492Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-09-27T02:29:26.647977083Z",
+  "closed_at": "2026-09-27T02:29:26.647977083Z",
+  "close_reason": "update takes several ids; parent loops refused and reported by doctor; committed as 'Let update take several ids, and refuse a parent loop'",
+  "resolution": "done",
   "notes": [],
   "stamps": {
     "created": {
       "commit": "daf45ab",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "a85b0b1",
+      "branch": "dev"
+    }
   }
 }
