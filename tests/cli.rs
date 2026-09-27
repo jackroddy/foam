@@ -990,7 +990,7 @@ fn a_closed_pipe_ends_the_process_quietly() {
 }
 
 #[test]
-fn an_milestone_shows_its_children_and_waits_on_them() {
+fn a_milestone_shows_its_children_and_waits_on_them() {
     let dir = repo();
     commit(dir.path(), "one");
     foam(dir.path())
@@ -1242,6 +1242,13 @@ fn doctor_flags_a_memory_that_repeats_claude_md() {
     .unwrap();
     stdout(foam(dir.path()).args(["remember", "fmt", "run `cargo fmt` before committing"]));
     stdout(foam(dir.path()).args(["remember", "other", "the parser is winnow"]));
+    // too short to mean anything, so not matched though CLAUDE.md has it
+    stdout(foam(dir.path()).args(["remember", "short", "cargo fmt"]));
+    let out = foam(dir.path())
+        .args(["remember", "empty", "  "])
+        .output()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&out.stderr).contains("a memory needs text"));
     let out = foam(dir.path()).arg("doctor").output().unwrap();
     assert_eq!(out.status.code(), Some(1));
     let text = String::from_utf8_lossy(&out.stdout);
@@ -1251,6 +1258,7 @@ fn doctor_flags_a_memory_that_repeats_claude_md() {
     );
     assert!(text.contains("`foam forget fmt`"), "{text}");
     assert!(!text.contains("memory other"), "{text}");
+    assert!(!text.contains("memory short"), "{text}");
     stdout(foam(dir.path()).args(["forget", "fmt"]));
     assert!(stdout(foam(dir.path()).arg("doctor")).starts_with("ok:"));
 }
@@ -1281,6 +1289,16 @@ fn an_id_prefix_or_a_title_word_names_an_issue() {
     assert!(err.contains(&a) && err.contains(&b), "{err}");
     let out = foam(dir.path()).args(["show", "zzz"]).output().unwrap();
     assert!(String::from_utf8_lossy(&out.stderr).contains("no such issue: zzz"));
+    // an uppercase prefix, and an empty query that must not fall
+    // through to the title search
+    assert_eq!(by_prefix(&short.to_uppercase()), a);
+    let out = foam(dir.path()).args(["show", ""]).output().unwrap();
+    assert!(String::from_utf8_lossy(&out.stderr).contains("an issue id is needed"));
+    let out = foam(dir.path())
+        .args(["create", "x", "--parent", ""])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
 
     // a closed issue yields to an open one with the same word
     stdout(foam(dir.path()).args(["close", "wire", "--reason", "done"]));

@@ -126,37 +126,36 @@ pub fn render(db: &Db, git: &Git, actor: &str, limit: usize, reclaimed: &[String
 
     if !db.memories.is_empty() {
         out.push_str("\n## Memories\n\n");
-        let mut lines: Vec<(&str, Timestamp, String)> = db
+        let mut lines: Vec<(&str, Timestamp, bool, String)> = db
             .memories
             .values()
             .map(|m| {
                 let distance = git.distance(&m.stamp.commit);
-                let note = match distance {
-                    Distance::Behind(n) if n < db.meta.stale_after => String::new(),
-                    _ => format!("  [{}]", age(&m.stamp, distance)),
+                let marked = !matches!(distance, Distance::Behind(n) if n < db.meta.stale_after);
+                let note = if marked {
+                    format!("  [{}]", age(&m.stamp, distance))
+                } else {
+                    String::new()
                 };
                 let line = format!("{}: {}{note}\n", m.slug, m.text);
-                (m.slug.as_str(), m.updated_at, line)
+                (m.slug.as_str(), m.updated_at, marked, line)
             })
             .collect();
         // the least recently updated memories are the ones cut
-        lines.sort_by_key(|(_, updated, _)| std::cmp::Reverse(*updated));
-        let marked = lines
-            .iter()
-            .filter(|(_, _, l)| l.contains("  [at "))
-            .count();
+        lines.sort_by_key(|(_, updated, _, _)| std::cmp::Reverse(*updated));
         let mut used = 0;
-        let mut kept: Vec<&(&str, Timestamp, String)> = Vec::new();
+        let mut kept: Vec<&(&str, Timestamp, bool, String)> = Vec::new();
         for entry in &lines {
-            if used + entry.2.len() > MEMORY_BUDGET && !kept.is_empty() {
+            if used + entry.3.len() > MEMORY_BUDGET && !kept.is_empty() {
                 break;
             }
-            used += entry.2.len();
+            used += entry.3.len();
             kept.push(entry);
         }
         let cut = lines.len() - kept.len();
-        kept.sort_by_key(|(slug, _, _)| *slug);
-        for (_, _, line) in kept {
+        let marked = kept.iter().filter(|(_, _, marked, _)| *marked).count();
+        kept.sort_by_key(|(slug, _, _, _)| *slug);
+        for (_, _, _, line) in kept {
             out.push_str(line);
         }
         if cut > 0 {

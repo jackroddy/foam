@@ -28,13 +28,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--plain` gives that text on a terminal, `NO_COLOR` removes only the
   color, and `prime` always prints the plain form.
 - `list`, `ready`, `blocked` and `search` draw an issue under its parent
-  when both are listed, with `├─` and `└─`, so a milestone's open children
-  hang off it.
+  when both are listed, so a milestone's open children hang off it: with
+  `├─` and `└─` on a terminal, and by indentation alone in a pipe, where
+  the id stays the first field.
 - When `foam prime` marks a memory as old or from another branch, it now
   says what to do: check it against the code, `foam remember` it again if
   it still holds, `foam forget` it if not.
 - `foam doctor` reports a memory whose text is also in `CLAUDE.md`,
-  `CLAUDE.local.md` or `.claude/CLAUDE.md`, since both reach every session.
+  `CLAUDE.local.md`, `.claude/CLAUDE.md` or `~/.claude/CLAUDE.md`, since
+  both reach every session. Memories under sixteen characters are not
+  matched, and `foam remember` refuses empty text.
 - Wherever a command takes an issue id, a unique prefix of its hex part
   does too, with or without the `foam-` part, and so does a word from
   its title when exactly one open issue carries it. Anything that fits

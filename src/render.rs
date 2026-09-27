@@ -98,10 +98,13 @@ impl Style {
     /// A future timestamp: the local date and how far off it is
     /// in the terminal, RFC 3339 otherwise.
     pub fn until(&self, t: Timestamp) -> String {
-        if self.human {
-            format!("{} ({})", local_date(t), relative(t, Timestamp::now()))
-        } else {
-            t.to_string()
+        if !self.human {
+            return t.to_string();
+        }
+        let date = local_date(t);
+        match relative(t, Timestamp::now()) {
+            rel if rel == date => date,
+            rel => format!("{date} ({rel})"),
         }
     }
 
@@ -235,10 +238,13 @@ pub fn listing(style: &Style, db: Option<&Db>, rows: &[(&Issue, String)]) -> Str
     let rows = forest(rows);
     let mut out = String::new();
     if !style.human {
-        for (lead, i, suffix) in &rows {
+        // indentation alone, so the id stays the first field
+        // for anything that parses a pipe
+        for (depth, _, i, suffix) in &rows {
             let _ = write!(
                 out,
-                "{lead}{}  P{}  {}  {}{}",
+                "{}{}  P{}  {}  {}{}",
+                "  ".repeat(*depth),
                 i.id,
                 i.priority,
                 i.status,
@@ -254,14 +260,14 @@ pub fn listing(style: &Style, db: Option<&Db>, rows: &[(&Issue, String)]) -> Str
     }
     let width = |f: &dyn Fn(&str, &Issue) -> String| {
         rows.iter()
-            .map(|(lead, i, _)| f(lead, i).chars().count())
+            .map(|(_, lead, i, _)| f(lead, i).chars().count())
             .max()
             .unwrap_or(0)
     };
     let id_w = width(&|lead, i| format!("{lead}{}", i.id));
     let status_w = width(&|_, i| i.status.to_string());
     let kind_w = width(&|_, i| i.kind.to_string());
-    for (lead, i, suffix) in &rows {
+    for (_, lead, i, suffix) in &rows {
         let status = i.status.to_string();
         let _ = write!(
             out,
@@ -282,10 +288,12 @@ pub fn listing(style: &Style, db: Option<&Db>, rows: &[(&Issue, String)]) -> Str
     out
 }
 
-/// The rows in tree order, each with the indent and connector
-/// that lead its line: a row goes under its parent when the
-/// parent is listed too, and keeps its place otherwise.
-fn forest<'a>(rows: &'a [(&'a Issue, String)]) -> Vec<(String, &'a Issue, &'a str)> {
+/// The rows in tree order, each with its depth and the indent
+/// and connector that lead its line: a row goes under its parent
+/// when the parent is listed too, and keeps its place otherwise.
+type Row<'a> = (usize, String, &'a Issue, &'a str);
+
+fn forest<'a>(rows: &'a [(&'a Issue, String)]) -> Vec<Row<'a>> {
     let listed: HashSet<&str> = rows.iter().map(|(i, _)| i.id.as_str()).collect();
     let mut out = Vec::new();
     let mut seen = HashSet::new();
@@ -311,12 +319,12 @@ fn branch<'a>(
     depth: usize,
     lead: String,
     seen: &mut HashSet<&'a str>,
-    out: &mut Vec<(String, &'a Issue, &'a str)>,
+    out: &mut Vec<Row<'a>>,
 ) {
     if !seen.insert(i.id.as_str()) {
         return;
     }
-    out.push((lead, i, suffix));
+    out.push((depth, lead, i, suffix));
     let children: Vec<_> = rows
         .iter()
         .filter(|(c, _)| c.parent.as_deref() == Some(i.id.as_str()))
@@ -555,6 +563,10 @@ mod tests {
         assert_eq!(relative(at(90), now), "1m ago");
         assert_eq!(relative(at(3 * 3600 + 100), now), "3h ago");
         assert_eq!(relative(at(-2 * 86_400), now), "in 2d");
+        let far = now + jiff::SignedDuration::from_hours(24 * 40);
+        let until = HUMAN.until(far);
+        assert_eq!(until.len(), 10, "{until}");
+        assert!(HUMAN.until(at(-2 * 86_400 - 60)).ends_with(" (in 2d)"));
         let old = relative(at(30 * 86_400), now);
         assert_eq!(old.len(), 10, "{old}");
         assert!(old.starts_with("20"), "{old}");
@@ -616,8 +628,8 @@ mod tests {
         assert_eq!(
             listing(&Style::PLAIN, None, &rows),
             "t-000001  P2  open  big\n\
-             \u{20}\u{20}├─ t-000002  P2  open  one\n\
-             \u{20}\u{20}└─ t-000003  P2  open  two\n\
+             \u{20}\u{20}t-000002  P2  open  one\n\
+             \u{20}\u{20}t-000003  P2  open  two\n\
              t-000004  P2  open  alone\n"
         );
         assert_eq!(

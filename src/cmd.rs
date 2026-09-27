@@ -1,4 +1,5 @@
 use std::io::IsTerminal;
+use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
 use jiff::Timestamp;
@@ -48,16 +49,10 @@ pub fn run(cli: Cli) -> Result<()> {
             blocked_by,
         } => {
             let stamp = store.git.head_stamp()?;
-            let db = load(&store)?.db;
-            let blocked_by = resolve_all(&db, &blocked_by)?;
-            let parent = parent.map(|p| resolve(&db, &p)).transpose()?;
             let issue = store.write_named(|db| {
                 let id = fresh_id(db);
-                for other in blocked_by.iter().chain(parent.iter()) {
-                    if !db.issues.contains_key(other) {
-                        bail!("no such issue: {other}");
-                    }
-                }
+                let blocked_by = resolve_all(db, &blocked_by)?;
+                let parent = parent.as_deref().map(|p| resolve(db, p)).transpose()?;
                 let now = Timestamp::now();
                 let issue = Issue {
                     id: id.clone(),
@@ -67,8 +62,8 @@ pub fn run(cli: Cli) -> Result<()> {
                     status: Status::Open,
                     priority,
                     labels: labels.clone(),
-                    parent: parent.clone(),
-                    blocked_by: blocked_by.clone(),
+                    parent,
+                    blocked_by,
                     related: Vec::new(),
                     assignee: None,
                     lease_expires: None,
@@ -194,23 +189,23 @@ pub fn run(cli: Cli) -> Result<()> {
             reason,
         } => {
             let actor = actor(&store, &cli);
-            let db = load(&store)?.db;
-            let id = resolve(&db, &id)?;
-            let parent = parent
-                .map(|p| {
-                    if p.is_empty() {
-                        Ok(p)
-                    } else {
-                        resolve(&db, &p)
-                    }
-                })
-                .transpose()?;
             let defer_until = defer_until
                 .as_deref()
                 .map(parse_when)
                 .transpose()
                 .map_err(anyhow::Error::msg)?;
-            let issue = store.write(&format!("update {id}"), |db| {
+            let issue = store.write_named(|db| {
+                let id = resolve(db, &id)?;
+                let parent = parent
+                    .as_deref()
+                    .map(|p| {
+                        if p.is_empty() {
+                            Ok(String::new())
+                        } else {
+                            resolve(db, p)
+                        }
+                    })
+                    .transpose()?;
                 let lease = db.meta.lease();
                 if let Some(p) = parent.as_ref().filter(|p| !p.is_empty()) {
                     if !db.issues.contains_key(p) {
@@ -274,7 +269,7 @@ pub fn run(cli: Cli) -> Result<()> {
                     }
                 }
                 issue.touch();
-                Ok(issue.clone())
+                Ok((issue.clone(), format!("update {id}")))
             })?;
             print_written(&issue, &cli)
         }
@@ -284,13 +279,13 @@ pub fn run(cli: Cli) -> Result<()> {
             dropped,
         } => {
             let stamp = store.git.head_stamp()?;
-            let ids = resolve_all(&load(&store)?.db, &ids)?;
             let resolution = if dropped {
                 Resolution::Dropped
             } else {
                 Resolution::Done
             };
-            store.write(&format!("close {}", ids.join(" ")), |db| {
+            let ids = store.write_named(|db| {
+                let ids = resolve_all(db, &ids)?;
                 for id in &ids {
                     let issue = get_mut(db, id)?;
                     if issue.status == Status::Closed {
@@ -312,13 +307,13 @@ pub fn run(cli: Cli) -> Result<()> {
                     }
                     get_mut(db, id)?.close(reason.clone(), resolution, &stamp);
                 }
-                Ok(())
+                Ok((ids.clone(), format!("close {}", ids.join(" "))))
             })?;
             done(&ids, "closed", cli.json)
         }
         Cmd::Reopen { ids } => {
-            let ids = resolve_all(&load(&store)?.db, &ids)?;
-            store.write(&format!("reopen {}", ids.join(" ")), |db| {
+            let ids = store.write_named(|db| {
+                let ids = resolve_all(db, &ids)?;
                 for id in &ids {
                     let issue = get_mut(db, id)?;
                     if issue.status != Status::Closed {
@@ -326,14 +321,14 @@ pub fn run(cli: Cli) -> Result<()> {
                     }
                     issue.reopen();
                 }
-                Ok(())
+                Ok((ids.clone(), format!("reopen {}", ids.join(" "))))
             })?;
             done(&ids, "reopened", cli.json)
         }
         Cmd::Claim { id, force } => {
             let actor = actor(&store, &cli);
-            let id = resolve(&load(&store)?.db, &id)?;
-            let issue = store.write(&format!("claim {id} by {actor}"), |db| {
+            let issue = store.write_named(|db| {
+                let id = resolve(db, &id)?;
                 let lease = db.meta.lease();
                 let issue = get_mut(db, &id)?;
                 if issue.status == Status::Closed {
@@ -347,14 +342,14 @@ pub fn run(cli: Cli) -> Result<()> {
                     );
                 }
                 issue.claim(&actor, lease);
-                Ok(issue.clone())
+                Ok((issue.clone(), format!("claim {id} by {actor}")))
             })?;
             print_written(&issue, &cli)
         }
         Cmd::Unclaim { id, force } => {
             let actor = actor(&store, &cli);
-            let id = resolve(&load(&store)?.db, &id)?;
-            let issue = store.write(&format!("unclaim {id}"), |db| {
+            let issue = store.write_named(|db| {
+                let id = resolve(db, &id)?;
                 let issue = get_mut(db, &id)?;
                 if issue.status != Status::InProgress {
                     bail!("{id} is not in progress");
@@ -366,14 +361,14 @@ pub fn run(cli: Cli) -> Result<()> {
                     );
                 }
                 issue.unclaim();
-                Ok(issue.clone())
+                Ok((issue.clone(), format!("unclaim {id}")))
             })?;
             print_written(&issue, &cli)
         }
         Cmd::Heartbeat { id } => {
             let actor = actor(&store, &cli);
-            let id = resolve(&load(&store)?.db, &id)?;
-            let issue = store.write(&format!("heartbeat {id}"), |db| {
+            let issue = store.write_named(|db| {
+                let id = resolve(db, &id)?;
                 let lease = db.meta.lease();
                 let issue = get_mut(db, &id)?;
                 if issue.status != Status::InProgress || issue.assignee.as_deref() != Some(&*actor)
@@ -381,7 +376,7 @@ pub fn run(cli: Cli) -> Result<()> {
                     bail!("{id} is not held by {actor}");
                 }
                 issue.claim(&actor, lease);
-                Ok(issue.clone())
+                Ok((issue.clone(), format!("heartbeat {id}")))
             })?;
             print_written(&issue, &cli)
         }
@@ -398,9 +393,9 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Cmd::Note { id, text } => {
             let actor = actor(&store, &cli);
-            let id = resolve(&load(&store)?.db, &id)?;
             let stamp = store.git.head_stamp()?;
-            let issue = store.write(&format!("note {id}"), |db| {
+            let issue = store.write_named(|db| {
+                let id = resolve(db, &id)?;
                 let issue = get_mut(db, &id)?;
                 issue.notes.push(Note {
                     at: Timestamp::now(),
@@ -410,7 +405,7 @@ pub fn run(cli: Cli) -> Result<()> {
                     branch: stamp.branch.clone(),
                 });
                 issue.touch();
-                Ok(issue.clone())
+                Ok((issue.clone(), format!("note {id}")))
             })?;
             print_written(&issue, &cli)
         }
@@ -447,6 +442,9 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Cmd::Remember { slug, text } => {
             check_slug(&slug).map_err(anyhow::Error::msg)?;
+            if text.trim().is_empty() {
+                bail!("a memory needs text");
+            }
             if text.len() > MEMORY_MAX_BYTES {
                 bail!(
                     "a memory is a fact, not a document: {} bytes, the most is {MEMORY_MAX_BYTES}",
@@ -642,13 +640,9 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Cmd::Dep { command } => match command {
             DepCmd::Add { id, blocker } => {
-                let db = load(&store)?.db;
-                let id = resolve(&db, &id)?;
-                let blocker = resolve(&db, &blocker)?;
-                let issue = store.write(&format!("dep {id} <- {blocker}"), |db| {
-                    if !db.issues.contains_key(&blocker) {
-                        bail!("no such issue: {blocker}");
-                    }
+                let issue = store.write_named(|db| {
+                    let id = resolve(db, &id)?;
+                    let blocker = resolve(db, &blocker)?;
                     if graph::would_cycle(db, &id, &blocker) {
                         bail!("{id} waiting on {blocker} would form a cycle");
                     }
@@ -657,15 +651,14 @@ pub fn run(cli: Cli) -> Result<()> {
                         issue.blocked_by.push(blocker.clone());
                         issue.touch();
                     }
-                    Ok(issue.clone())
+                    Ok((issue.clone(), format!("dep {id} <- {blocker}")))
                 })?;
                 print_written(&issue, &cli)
             }
             DepCmd::Rm { id, blocker } => {
-                let db = load(&store)?.db;
-                let id = resolve(&db, &id)?;
-                let blocker = resolve(&db, &blocker)?;
-                let issue = store.write(&format!("undep {id} <- {blocker}"), |db| {
+                let issue = store.write_named(|db| {
+                    let id = resolve(db, &id)?;
+                    let blocker = resolve(db, &blocker)?;
                     let issue = get_mut(db, &id)?;
                     let before = issue.blocked_by.len();
                     issue.blocked_by.retain(|b| *b != blocker);
@@ -673,7 +666,7 @@ pub fn run(cli: Cli) -> Result<()> {
                         bail!("{id} does not wait on {blocker}");
                     }
                     issue.touch();
-                    Ok(issue.clone())
+                    Ok((issue.clone(), format!("undep {id} <- {blocker}")))
                 })?;
                 print_written(&issue, &cli)
             }
@@ -745,7 +738,7 @@ _fzf_complete_foam() {
   _fzf_complete --reverse -- \"$@\" < <(foam list --plain)
 }
 _fzf_complete_foam_post() {
-  awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^[a-z0-9-]+-[0-9a-f]{6}$/) { print $i; exit } }'
+  awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^[a-z0-9-]+-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]$/) { print $i; exit } }'
 }
 [ -n \"$BASH\" ] && type _fzf_complete >/dev/null 2>&1 \\
   && complete -F _fzf_complete_foam -o default -o bashdefault foam
@@ -998,9 +991,9 @@ fn doctor(store: &Store, json: bool) -> Result<()> {
         if m.updated_at > now + jiff::SignedDuration::from_mins(5) {
             report(format!("memory {}: updated_at is in the future", m.slug));
         }
-        if let Some(file) = rules
-            .iter()
-            .find(|(_, text)| text.contains(&squeeze(&m.text)))
+        let text = squeeze(&m.text);
+        if text.chars().count() >= DUPLICATE_MIN_CHARS
+            && let Some(file) = rules.iter().find(|(_, rule)| rule.contains(&text))
         {
             report(format!(
                 "memory {}: its text is also in {}, so it lands in every session twice; `foam forget {}` drops the copy",
@@ -1167,18 +1160,29 @@ fn board(store: &Store, cli: &Options) -> Result<()> {
     Ok(())
 }
 
-/// The files Claude Code loads as rules at session start, with
-/// whitespace squeezed for matching.
+/// The rule files Claude Code loads at session start, relative
+/// to the repository; the person's own under `~/.claude` joins them.
 const RULE_FILES: [&str; 3] = ["CLAUDE.md", "CLAUDE.local.md", ".claude/CLAUDE.md"];
 
-fn claude_md(store: &Store) -> Result<Vec<(&'static str, String)>> {
+/// A memory shorter than this is a word or two that any rules
+/// file may hold by chance, so doctor does not match it.
+const DUPLICATE_MIN_CHARS: usize = 16;
+
+fn claude_md(store: &Store) -> Result<Vec<(String, String)>> {
     let top = store.git.toplevel()?;
-    Ok(RULE_FILES
+    let mut files: Vec<(String, PathBuf)> = RULE_FILES
         .iter()
-        .filter_map(|name| {
-            std::fs::read_to_string(top.join(name))
+        .map(|name| (name.to_string(), top.join(name)))
+        .collect();
+    if let Some(home) = std::env::home_dir() {
+        files.push(("~/.claude/CLAUDE.md".into(), home.join(".claude/CLAUDE.md")));
+    }
+    Ok(files
+        .into_iter()
+        .filter_map(|(name, path)| {
+            std::fs::read_to_string(path)
                 .ok()
-                .map(|text| (*name, squeeze(&text)))
+                .map(|text| (name, squeeze(&text)))
         })
         .collect())
 }
@@ -1232,12 +1236,17 @@ fn load(store: &Store) -> Result<Snapshot> {
 /// starts with it, or the one issue whose title contains it, open
 /// issues first.
 fn resolve(db: &Db, query: &str) -> Result<String> {
+    if query.is_empty() {
+        bail!("an issue id is needed");
+    }
     if db.issues.contains_key(query) {
         return Ok(query.to_string());
     }
     let hex = query
         .strip_prefix(&format!("{}-", db.meta.prefix))
-        .unwrap_or(query);
+        .unwrap_or(query)
+        .to_lowercase();
+    let hex = hex.as_str();
     let mut found: Vec<&Issue> = if !hex.is_empty() && hex.chars().all(|c| c.is_ascii_hexdigit()) {
         db.issues
             .values()

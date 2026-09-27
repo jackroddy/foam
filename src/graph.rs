@@ -231,7 +231,7 @@ mod tests {
     }
 
     #[test]
-    fn an_milestone_waits_on_its_open_children() {
+    fn a_milestone_waits_on_its_open_children() {
         let mut db = test_db();
         let mut milestone = test_issue("t-milestone");
         milestone.kind = Kind::Milestone;
