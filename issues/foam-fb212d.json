@@ -13,9 +13,9 @@
   "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-09-27T01:58:22.507706917Z",
-  "updated_at": "2026-09-27T06:42:26.953774106Z",
+  "updated_at": "2026-09-27T06:42:34.729894268Z",
   "closed_at": "2026-09-27T06:42:26.953774106Z",
-  "close_reason": "version 0.2.0, changelog dated, tag v0.2.0 at 2a4fbe6, dev merged to main",
+  "close_reason": "version 0.2.0, changelog dated, tag v0.2.0 at abb2b9e, dev merged to main",
   "resolution": "done",
   "notes": [],
   "stamps": {
