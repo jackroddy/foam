@@ -894,9 +894,19 @@ fn doctor(store: &Store, json: bool) -> Result<()> {
             ));
         }
     }
+    let rules = claude_md(store)?;
     for m in db.memories.values() {
         if m.updated_at > now + jiff::SignedDuration::from_mins(5) {
             report(format!("memory {}: updated_at is in the future", m.slug));
+        }
+        if let Some(file) = rules
+            .iter()
+            .find(|(_, text)| text.contains(&squeeze(&m.text)))
+        {
+            report(format!(
+                "memory {}: its text is also in {}, so it lands in every session twice; `foam forget {}` drops the copy",
+                m.slug, file.0, m.slug
+            ));
         }
     }
     if store.git.remote_url("origin").is_some() {
@@ -1053,6 +1063,31 @@ fn board(store: &Store, cli: &Options) -> Result<()> {
         print!("{}", render::log(style, &log));
     }
     Ok(())
+}
+
+/// The files Claude Code loads as rules at session start, with
+/// whitespace squeezed for matching.
+const RULE_FILES: [&str; 3] = ["CLAUDE.md", "CLAUDE.local.md", ".claude/CLAUDE.md"];
+
+fn claude_md(store: &Store) -> Result<Vec<(&'static str, String)>> {
+    let top = store.git.toplevel()?;
+    Ok(RULE_FILES
+        .iter()
+        .filter_map(|name| {
+            std::fs::read_to_string(top.join(name))
+                .ok()
+                .map(|text| (*name, squeeze(&text)))
+        })
+        .collect())
+}
+
+/// Lowercase with every run of whitespace one space, so a memory
+/// matches a rule that was only rewrapped.
+fn squeeze(text: &str) -> String {
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
 }
 
 /// Print what a write did to several ids.

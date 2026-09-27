@@ -130,6 +130,10 @@ pub fn render(db: &Db, git: &Git, actor: &str, limit: usize, reclaimed: &[String
             .collect();
         // the least recently updated memories are the ones cut
         lines.sort_by_key(|(_, updated, _)| std::cmp::Reverse(*updated));
+        let marked = lines
+            .iter()
+            .filter(|(_, _, l)| l.contains("  [at "))
+            .count();
         let mut used = 0;
         let mut kept: Vec<&(&str, Timestamp, String)> = Vec::new();
         for entry in &lines {
@@ -146,6 +150,14 @@ pub fn render(db: &Db, git: &Git, actor: &str, limit: usize, reclaimed: &[String
         }
         if cut > 0 {
             let _ = writeln!(out, "{cut} more not shown; `foam memories` lists all");
+        }
+        if marked > 0 {
+            let _ = writeln!(
+                out,
+                "{marked} marked [at ..] {} old or from another branch: check each against the code, \
+                 `foam remember` it again if it still holds, `foam forget <slug>` if not.",
+                if marked == 1 { "is" } else { "are" }
+            );
         }
     }
     out

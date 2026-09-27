@@ -1189,3 +1189,47 @@ fn board_shows_every_section_and_plain_matches_a_pipe() {
     let shown = stdout(foam(dir.path()).args(["--plain", "show", &a]));
     assert!(shown.contains("  on main ("), "{shown}");
 }
+
+#[test]
+fn prime_says_what_to_do_with_old_memories() {
+    let dir = repo();
+    commit(dir.path(), "one");
+    stdout(foam(dir.path()).args(["init", "--prefix", "t"]));
+    stdout(foam(dir.path()).args(["remember", "fresh", "still true"]));
+    let text = stdout(foam(dir.path()).arg("prime"));
+    assert!(!text.contains("marked [at ..]"), "{text}");
+    stdout(foam(dir.path()).args(["config", "stale-after", "0"]));
+    let text = stdout(foam(dir.path()).arg("prime"));
+    assert!(
+        text.contains("1 marked [at ..] is old or from another branch: check each"),
+        "{text}"
+    );
+    assert!(text.contains("`foam forget <slug>` if not."), "{text}");
+    stdout(foam(dir.path()).args(["remember", "other", "also old"]));
+    let text = stdout(foam(dir.path()).arg("prime"));
+    assert!(text.contains("2 marked [at ..] are old"), "{text}");
+}
+
+#[test]
+fn doctor_flags_a_memory_that_repeats_claude_md() {
+    let dir = repo();
+    stdout(foam(dir.path()).args(["init", "--prefix", "t"]));
+    std::fs::write(
+        dir.path().join("CLAUDE.md"),
+        "# rules\n\nRun `cargo fmt`\nbefore committing.\n",
+    )
+    .unwrap();
+    stdout(foam(dir.path()).args(["remember", "fmt", "run `cargo fmt` before committing"]));
+    stdout(foam(dir.path()).args(["remember", "other", "the parser is winnow"]));
+    let out = foam(dir.path()).arg("doctor").output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("memory fmt: its text is also in CLAUDE.md"),
+        "{text}"
+    );
+    assert!(text.contains("`foam forget fmt`"), "{text}");
+    assert!(!text.contains("memory other"), "{text}");
+    stdout(foam(dir.path()).args(["forget", "fmt"]));
+    assert!(stdout(foam(dir.path()).arg("doctor")).starts_with("ok:"));
+}

@@ -27,6 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stamps on an issue's created and closed lines. A pipe gets the same text
   as before, `--plain` gives that text on a terminal, `NO_COLOR` removes
   only the color, and `prime` always prints the plain form.
+- When `foam prime` marks a memory as old or from another branch, it now
+  says what to do: check it against the code, `foam remember` it again if
+  it still holds, `foam forget` it if not.
+- `foam doctor` reports a memory whose text is also in `CLAUDE.md`,
+  `CLAUDE.local.md` or `.claude/CLAUDE.md`, since both reach every session.
 - `foam board` puts the backlog on one screen: open epics with their
   rollups, what is in progress and how much lease is left, what is ready,
   what is blocked and by what, and the last few log entries. `--json` gives
