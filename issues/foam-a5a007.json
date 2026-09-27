@@ -1,0 +1,28 @@
+{
+  "id": "foam-a5a007",
+  "title": "Pick an issue with fzf: show without an id, foam pick, and setup bash",
+  "body": "",
+  "type": "feature",
+  "status": "open",
+  "priority": 2,
+  "labels": [],
+  "parent": null,
+  "blocked_by": [],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-09-27T01:07:39.000120628Z",
+  "updated_at": "2026-09-27T01:07:39.000120628Z",
+  "closed_at": null,
+  "close_reason": null,
+  "resolution": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "d5db1c6",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
