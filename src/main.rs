@@ -11,7 +11,7 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand, ValueEnum};
 
-use crate::model::{Kind, Status};
+use crate::model::{Kind, Resolution, Status};
 
 /// An issue tracker and agent memory that lives on a git ref
 #[derive(Parser)]
@@ -114,6 +114,12 @@ enum Cmd {
         /// Defer until an RFC 3339 timestamp or a YYYY-MM-DD date (UTC)
         #[arg(long = "defer-until")]
         defer_until: Option<String>,
+        /// Correct a closed issue's resolution
+        #[arg(long, value_enum)]
+        resolution: Option<Resolution>,
+        /// Correct a closed issue's reason
+        #[arg(long, allow_hyphen_values = true)]
+        reason: Option<String>,
     },
     /// Close one or more issues
     Close {

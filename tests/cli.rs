@@ -443,6 +443,22 @@ fn notes_search_and_memories() {
     stdout(foam(dir.path()).args(["close", &b, "--reason", "done after all"]));
     let shown = stdout(foam(dir.path()).args(["show", &b]));
     assert!(shown.contains("  done  done after all"), "{shown}");
+    // a resolution or reason can be corrected after the fact,
+    // but only on a closed issue
+    stdout(foam(dir.path()).args([
+        "update",
+        &b,
+        "--resolution",
+        "dropped",
+        "--reason",
+        "on reflection, no",
+    ]));
+    let shown = stdout(foam(dir.path()).args(["show", &b]));
+    assert!(shown.contains("  dropped  on reflection, no"), "{shown}");
+    foam(dir.path())
+        .args(["update", &a, "--resolution", "done"])
+        .assert()
+        .code(1);
     stdout(foam(dir.path()).args(["remember", "peg-hole", "round pegs only"]));
     let found = stdout(foam(dir.path()).args(["search", "PEG"]));
     assert!(

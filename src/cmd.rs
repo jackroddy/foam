@@ -160,6 +160,8 @@ pub fn run(cli: Cli) -> Result<()> {
             rm_label,
             parent,
             defer_until,
+            resolution,
+            reason,
         } => {
             let actor = actor(&store, &cli);
             let defer_until = defer_until
@@ -218,6 +220,17 @@ pub fn run(cli: Cli) -> Result<()> {
                     }
                     Some(Status::Deferred) => issue.status = Status::Deferred,
                     None => {}
+                }
+                if resolution.is_some() || reason.is_some() {
+                    if issue.status != Status::Closed {
+                        bail!("{id} is not closed; a resolution and reason belong to a close");
+                    }
+                    if let Some(r) = resolution {
+                        issue.resolution = Some(r);
+                    }
+                    if let Some(why) = &reason {
+                        issue.close_reason = Some(why.clone());
+                    }
                 }
                 issue.touch();
                 Ok(issue.clone())

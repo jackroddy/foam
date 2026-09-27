@@ -64,8 +64,9 @@ pub enum Kind {
 
 /// Why a closed issue is closed: the work was done, or it was
 /// given up on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
 #[serde(rename_all = "snake_case")]
+#[clap(rename_all = "snake_case")]
 pub enum Resolution {
     Done,
     Dropped,
