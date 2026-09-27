@@ -36,7 +36,16 @@ Anything that changes what someone using the tool sees goes under
 
 Unit tests live inline in the module they cover, under `#[cfg(test)]`.
 Integration tests in `tests/` run the built binary against a temporary git
-repository.
+repository. `tests/common/mod.rs` holds the repository, clone and actor
+helpers.
+
+## Sandbox
+
+`cargo run --example sandbox <scenario>` builds an agent-usage scenario into
+`.sandbox/<scenario>/` and leaves it there to look at, with the prime text
+each simulated session saw and a `report.txt`. Anything learned there becomes
+a test in `tests/cli.rs`; a scenario never grows an assertion. `all` runs
+every scenario.
 
 ## Platforms
 

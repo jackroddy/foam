@@ -1,41 +1,14 @@
-use std::path::Path;
+mod common;
+
 use std::process::Command;
 
 use assert_cmd::prelude::*;
+use common::*;
 
 fn repo() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
-    let ok = Command::new("git")
-        .args(["init", "-q", "-b", "main"])
-        .current_dir(dir.path())
-        .status()
-        .unwrap()
-        .success();
-    assert!(ok);
+    init_repo(dir.path());
     dir
-}
-
-fn foam(dir: &Path) -> Command {
-    let mut cmd = Command::cargo_bin("foam").unwrap();
-    cmd.current_dir(dir);
-    // the tests may themselves run inside a Claude Code session
-    cmd.env_remove("CLAUDECODE");
-    cmd.env_remove("CLAUDE_CODE_SESSION_ID");
-    cmd.env_remove("FOAM_ACTOR");
-    cmd
-}
-
-fn stdout(cmd: &mut Command) -> String {
-    let out = cmd.output().unwrap();
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    String::from_utf8(out.stdout)
-        .unwrap()
-        .trim_end()
-        .to_string()
 }
 
 #[test]
@@ -414,26 +387,6 @@ fn actor_falls_back_to_the_environment() {
     assert!(stdout(foam(dir.path()).arg("doctor")).starts_with("ok:"));
 }
 
-fn commit(dir: &Path, msg: &str) {
-    let ok = Command::new("git")
-        .args([
-            "-c",
-            "user.name=t",
-            "-c",
-            "user.email=t@t",
-            "commit",
-            "-q",
-            "--allow-empty",
-            "-m",
-            msg,
-        ])
-        .current_dir(dir)
-        .status()
-        .unwrap()
-        .success();
-    assert!(ok);
-}
-
 #[test]
 fn notes_search_and_memories() {
     let dir = repo();
@@ -664,44 +617,10 @@ fn setup_claude_merges_into_settings() {
     foam(dir.path()).args(["setup", "claude"]).assert().code(1);
 }
 
-fn git(dir: &Path, args: &[&str]) -> String {
-    let out = Command::new("git")
-        .args(["-c", "user.name=t", "-c", "user.email=t@t"])
-        .args(args)
-        .current_dir(dir)
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "git {args:?}: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    String::from_utf8(out.stdout)
-        .unwrap()
-        .trim_end()
-        .to_string()
-}
-
 /// A bare remote and two clones of it, each with one commit on main.
 fn two_clones() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
     let root = tempfile::tempdir().unwrap();
-    let bare = root.path().join("remote.git");
-    git(
-        root.path(),
-        &["init", "-q", "--bare", "-b", "main", bare.to_str().unwrap()],
-    );
-    let a = root.path().join("a");
-    let b = root.path().join("b");
-    git(
-        root.path(),
-        &["clone", "-q", bare.to_str().unwrap(), a.to_str().unwrap()],
-    );
-    commit(&a, "one");
-    git(&a, &["push", "-q", "-u", "origin", "main"]);
-    git(
-        root.path(),
-        &["clone", "-q", bare.to_str().unwrap(), b.to_str().unwrap()],
-    );
+    let (a, b) = two_clones_in(root.path());
     (root, a, b)
 }
 
@@ -770,29 +689,8 @@ fn git_push_carries_the_data_ref_through_the_hook() {
     stdout(foam(&a).args(["init", "--prefix", "t"]));
     stdout(foam(&a).args(["create", "hooked"]));
     commit(&a, "two");
-    // the hook runs foam from PATH
-    let bin = Command::cargo_bin("foam").unwrap();
-    let path = format!(
-        "{}:{}",
-        bin.get_program()
-            .to_str()
-            .unwrap()
-            .rsplit_once('/')
-            .unwrap()
-            .0,
-        std::env::var("PATH").unwrap_or_default()
-    );
-    let out = Command::new("git")
-        .args(["push", "-q"])
-        .env("PATH", path)
-        .current_dir(&a)
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+    // the hook runs foam from PATH, which git() sets to this build
+    git(&a, &["push", "-q"]);
     let bare = root.path().join("remote.git");
     git(&bare, &["rev-parse", "refs/foam/data"]);
     stdout(foam(&b).arg("init"));
@@ -1074,14 +972,10 @@ fn a_closed_pipe_ends_the_process_quietly() {
     for i in 0..50 {
         stdout(foam(dir.path()).args(["create", &format!("issue {i}")]));
     }
-    let bin = Command::cargo_bin("foam").unwrap();
     let out = Command::new("bash")
         .args([
             "-c",
-            &format!(
-                "{} list | head -c 1 >/dev/null",
-                bin.get_program().to_str().unwrap()
-            ),
+            &format!("{} list | head -c 1 >/dev/null", foam_bin().display()),
         ])
         .current_dir(dir.path())
         .output()
