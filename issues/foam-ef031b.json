@@ -3,7 +3,7 @@
   "title": "v0.2.0",
   "body": "The first release after 0.1.0. Breaking: the epic kind is now milestone, so the minor bumps.",
   "type": "milestone",
-  "status": "open",
+  "status": "closed",
   "priority": 1,
   "labels": [],
   "parent": null,
@@ -13,16 +13,19 @@
   "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-09-27T01:58:22.484825257Z",
-  "updated_at": "2026-09-27T01:58:22.484825257Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-09-27T06:42:26.964330302Z",
+  "closed_at": "2026-09-27T06:42:26.964330302Z",
+  "close_reason": "tagged v0.2.0 at 2a4fbe6",
+  "resolution": "done",
   "notes": [],
   "stamps": {
     "created": {
       "commit": "bfd6da5",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "abb2b9e",
+      "branch": "dev"
+    }
   }
 }
