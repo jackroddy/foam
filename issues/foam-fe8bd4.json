@@ -13,7 +13,7 @@
   "lease_expires": "2026-09-27T00:30:56.087660904Z",
   "defer_until": null,
   "created_at": "2026-09-26T23:15:38.812465267Z",
-  "updated_at": "2026-09-27T00:15:56.087660904Z",
+  "updated_at": "2026-09-27T00:23:11.805243637Z",
   "closed_at": null,
   "close_reason": null,
   "resolution": null,
@@ -23,6 +23,13 @@
       "author": "Jack Roddy",
       "text": "Options weighed. (1) TTY-aware text layer: color, relative times, aligned columns, wrapped bodies, off when piped; one afternoon, one or two small crates. (2) foam board: a one-screen overview; the seed of a TUI if one is ever wanted. (3) Full TUI with ratatui: most formatting freedom, but a second product with navigation, key bindings, forms and a render loop, for a tool whose value is the agent side, and it would call the same model code the text layer needs anyway. Chosen: 1 then 2, then judge whether anything only a TUI can do remains. Who runs what: humans read (list, ready, blocked, show, log, doctor, memories) and occasionally create, close, update, config; agents run prime, claim, heartbeat, note, remember and --json, and never see a terminal because Claude Code's Bash tool, hooks and JSON callers read a pipe. Caveat: some harnesses run commands under a pseudo-terminal, so an agent could see the human format; NO_COLOR, --plain and prime always emitting plain text cover that.",
       "commit": "ee9471d",
+      "branch": "dev"
+    },
+    {
+      "at": "2026-09-27T00:23:11.805243177Z",
+      "author": "Jack Roddy/2ae76934",
+      "text": "Implemented in src/render.rs: Style detected from isatty, NO_COLOR and TERM; listing, issue, memories, memory, log renderers; foam board in cmd.rs. Plain form kept byte-identical to before (status was never padded: Display ignores width). Awaiting commit approval.",
+      "commit": "3246149",
       "branch": "dev"
     }
   ],
