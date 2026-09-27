@@ -37,7 +37,11 @@ foam prime                         # what an agent should read first
 ```
 
 Every command takes `--json`. `foam --help` lists the rest: `blocked`,
-`dep`, `update`, `search`, `memories`, `reclaim`, `log`, `doctor`.
+`board`, `dep`, `update`, `search`, `memories`, `reclaim`, `log`, `doctor`.
+
+On a terminal the listings come colored and aligned, times are relative
+and long text wraps; `foam board` is the one-screen overview. A pipe gets
+plain text, so does `--plain`, and `NO_COLOR` removes only the color.
 
 Every write records the commit and branch it happened on. `memories` and
 `prime` say how far `HEAD` has moved since a memory was written, or that it

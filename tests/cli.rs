@@ -1238,3 +1238,60 @@ fn concurrent_claims_admit_exactly_one() {
     assert_eq!(v["status"], "in_progress");
     assert!(v["assignee"].as_str().unwrap().starts_with("agent"));
 }
+
+#[test]
+fn board_shows_every_section_and_plain_matches_a_pipe() {
+    let dir = repo();
+    commit(dir.path(), "one");
+    foam(dir.path())
+        .args(["init", "--prefix", "t"])
+        .assert()
+        .success();
+    let epic = stdout(foam(dir.path()).args(["create", "big", "--type", "epic"]));
+    let a = stdout(foam(dir.path()).args(["create", "one", "--parent", &epic]));
+    let b = stdout(foam(dir.path()).args(["create", "two", "--blocked-by", &a]));
+    stdout(foam(dir.path()).args(["claim", &a, "--actor", "ann"]));
+
+    let board = stdout(foam(dir.path()).arg("board"));
+    assert!(board.starts_with("t  on main at "), "{board}");
+    assert!(
+        board.contains("2 open, 1 in progress, 0 deferred, 0 closed"),
+        "{board}"
+    );
+    for section in [
+        "\nEpics\n",
+        "\nIn progress\n",
+        "\nReady\n",
+        "\nBlocked\n",
+        "\nRecent\n",
+    ] {
+        assert!(board.contains(section), "{section:?} missing from {board}");
+    }
+    assert!(
+        board.contains(&format!("{a}  P2  in_progress  one  @ann  lease ")),
+        "{board}"
+    );
+    assert!(
+        board.contains(&format!("{b}  P2  open  two  <- {a}")),
+        "{board}"
+    );
+    assert!(board.contains(&format!("claim {a} by ann")), "{board}");
+    assert!(!board.contains("\x1b["), "{board}");
+
+    let v: serde_json::Value =
+        serde_json::from_str(&stdout(foam(dir.path()).args(["--json", "board"]))).unwrap();
+    assert_eq!(v["epics"][0]["id"], epic);
+    assert_eq!(v["in_progress"][0]["id"], a);
+    assert_eq!(v["ready"].as_array().unwrap().len(), 0);
+    assert_eq!(v["blocked"][1]["issue"]["id"], b);
+    assert!(v["log"].as_array().unwrap().len() >= 4);
+
+    // a pipe already gets the plain form, so --plain changes nothing here
+    for args in [["list"], ["board"], ["memories"]] {
+        let piped = stdout(foam(dir.path()).args(args));
+        let plain = stdout(foam(dir.path()).arg("--plain").args(args));
+        assert_eq!(piped, plain);
+    }
+    let shown = stdout(foam(dir.path()).args(["--plain", "show", &a]));
+    assert!(shown.contains("  on main ("), "{shown}");
+}

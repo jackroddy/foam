@@ -4,6 +4,7 @@ mod graph;
 mod merge;
 mod model;
 mod prime;
+mod render;
 mod store;
 
 use std::path::PathBuf;
@@ -24,6 +25,10 @@ struct Cli {
     /// Print JSON instead of text
     #[arg(long, global = true)]
     json: bool,
+
+    /// Print the plain text a pipe gets: no color, full timestamps, no wrapping
+    #[arg(long, global = true)]
+    plain: bool,
 
     /// Who is acting; defaults to $FOAM_ACTOR, then git user.name or $USER with a Claude Code session suffix
     #[arg(long, global = true)]
@@ -87,6 +92,8 @@ enum Cmd {
     },
     /// Open issues that something still blocks
     Blocked,
+    /// One screen: epics, in progress, ready, blocked and the recent log
+    Board,
     /// Change fields of an issue
     Update {
         id: String,

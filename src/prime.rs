@@ -2,10 +2,10 @@ use std::fmt::Write;
 
 use jiff::Timestamp;
 
-use crate::cmd::{age, rollup_tag};
 use crate::git::{Distance, Git};
 use crate::graph;
 use crate::model::Status;
+use crate::render::{age, rollup_tag};
 use crate::store::Db;
 
 /// The most bytes the memories section may take.

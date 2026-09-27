@@ -20,6 +20,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `foam search` matches memory slugs and texts too, printed after the
   issues. Its `--json` output is now an object with `issues` and
   `memories`.
+- When stdout is a terminal, `list`, `ready`, `blocked`, `search`, `show`,
+  `log`, `memories` and `recall` print for a person: times relative to now,
+  columns aligned and a kind column added, status and priority colored,
+  bodies, notes and memories wrapped to the terminal width, and no commit
+  stamps on an issue's created and closed lines. A pipe gets the same text
+  as before, `--plain` gives that text on a terminal, `NO_COLOR` removes
+  only the color, and `prime` always prints the plain form.
+- `foam board` puts the backlog on one screen: open epics with their
+  rollups, what is in progress and how much lease is left, what is ready,
+  what is blocked and by what, and the last few log entries. `--json` gives
+  the same five lists.
 
 ### Changed
 

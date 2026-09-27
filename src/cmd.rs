@@ -3,13 +3,14 @@ use std::io::IsTerminal;
 use anyhow::{Context, Result, bail};
 use jiff::Timestamp;
 
-use crate::git::{Distance, Git, Push, Stamp};
+use crate::git::Push;
 use crate::graph;
 use crate::model::{
-    Issue, MEMORY_MAX_BYTES, Memory, Note, Resolution, Stamps, Status, check_slug, new_id,
+    Issue, Kind, MEMORY_MAX_BYTES, Memory, Note, Resolution, Stamps, Status, check_slug, new_id,
     parse_when,
 };
 use crate::prime;
+use crate::render::{self, Style};
 use crate::store::{Absorbed, DATA_REF, Db, ORIGIN_REF, Snapshot, Store};
 use crate::{Cli, Cmd, ConfigKey, DepCmd, SetupCmd};
 
@@ -17,6 +18,7 @@ use crate::{Cli, Cmd, ConfigKey, DepCmd, SetupCmd};
 struct Options {
     json: bool,
     actor: Option<String>,
+    style: Style,
 }
 
 pub fn run(cli: Cli) -> Result<()> {
@@ -25,6 +27,7 @@ pub fn run(cli: Cli) -> Result<()> {
     let cli = Options {
         json: cli.json,
         actor: cli.actor,
+        style: Style::detect(cli.plain || cli.json),
     };
     match command {
         Cmd::Init { prefix } => init(&store, prefix),
@@ -93,7 +96,7 @@ pub fn run(cli: Cli) -> Result<()> {
                 v["children"] = serde_json::json!(children);
                 println!("{}", serde_json::to_string_pretty(&v)?);
             } else {
-                print_issue(issue, &snap.db);
+                print!("{}", render::issue(&cli.style, issue, &snap.db));
             }
             Ok(())
         }
@@ -122,7 +125,7 @@ pub fn run(cli: Cli) -> Result<()> {
                 })
                 .collect();
             issues.sort_by_key(|i| (i.priority, i.created_at));
-            print_issues(&issues, &snap.db, cli.json)
+            print_issues(&issues, &snap.db, &cli)
         }
         Cmd::Ready { limit } => {
             let snap = load(&store)?;
@@ -130,7 +133,7 @@ pub fn run(cli: Cli) -> Result<()> {
             if let Some(n) = limit {
                 issues.truncate(n);
             }
-            print_issues(&issues, &snap.db, cli.json)
+            print_issues(&issues, &snap.db, &cli)
         }
         Cmd::Blocked => {
             let snap = load(&store)?;
@@ -142,12 +145,15 @@ pub fn run(cli: Cli) -> Result<()> {
                     .collect();
                 println!("{}", serde_json::to_string_pretty(&rows)?);
             } else {
-                for (i, by) in blocked {
-                    println!("{}  <- {}", line(i, Some(&snap.db)), by.join(" "));
-                }
+                let rows: Vec<(&Issue, String)> = blocked
+                    .iter()
+                    .map(|(i, by)| (*i, format!("<- {}", by.join(" "))))
+                    .collect();
+                print!("{}", render::listing(&cli.style, Some(&snap.db), &rows));
             }
             Ok(())
         }
+        Cmd::Board => board(&store, &cli),
         Cmd::Update {
             id,
             title,
@@ -393,12 +399,8 @@ pub fn run(cli: Cli) -> Result<()> {
                     }))?
                 );
             } else {
-                for i in issues {
-                    println!("{}", line(i, Some(&snap.db)));
-                }
-                for m in memories {
-                    println!("{}", memory_line(m, &store.git));
-                }
+                print_issues(&issues, &snap.db, &cli)?;
+                print!("{}", render::memories(&cli.style, &store.git, &memories));
             }
             Ok(())
         }
@@ -437,9 +439,7 @@ pub fn run(cli: Cli) -> Result<()> {
             if cli.json {
                 println!("{}", serde_json::to_string_pretty(&memories)?);
             } else {
-                for m in memories {
-                    println!("{}", memory_line(m, &store.git));
-                }
+                print!("{}", render::memories(&cli.style, &store.git, &memories));
             }
             Ok(())
         }
@@ -453,8 +453,7 @@ pub fn run(cli: Cli) -> Result<()> {
             if cli.json {
                 println!("{}", serde_json::to_string_pretty(m)?);
             } else {
-                println!("{}", m.text);
-                println!("({})", age(&m.stamp, store.git.distance(&m.stamp.commit)));
+                print!("{}", render::memory(&cli.style, &store.git, m));
             }
             Ok(())
         }
@@ -595,9 +594,7 @@ pub fn run(cli: Cli) -> Result<()> {
                     .collect();
                 println!("{}", serde_json::to_string_pretty(&rows)?);
             } else {
-                for (oid, when, msg) in entries {
-                    println!("{}  {when}  {msg}", &oid[..7]);
-                }
+                print!("{}", render::log(&cli.style, &entries));
             }
             Ok(())
         }
@@ -940,6 +937,124 @@ fn doctor(store: &Store, json: bool) -> Result<()> {
     }
 }
 
+/// The most ready issues and log entries the board shows.
+const BOARD_READY: usize = 10;
+const BOARD_LOG: usize = 8;
+
+fn by_priority(mut v: Vec<&Issue>) -> Vec<&Issue> {
+    v.sort_by_key(|i| (i.priority, i.created_at));
+    v
+}
+
+fn plain_rows<'a>(v: &[&'a Issue]) -> Vec<(&'a Issue, String)> {
+    v.iter().map(|i| (*i, String::new())).collect()
+}
+
+/// One screen of where the backlog stands.
+fn board(store: &Store, cli: &Options) -> Result<()> {
+    let snap = load(store)?;
+    let db = &snap.db;
+    let now = Timestamp::now();
+    let epics = by_priority(
+        db.issues
+            .values()
+            .filter(|i| i.kind == Kind::Epic && i.status != Status::Closed)
+            .collect(),
+    );
+    let in_progress = by_priority(
+        db.issues
+            .values()
+            .filter(|i| i.status == Status::InProgress)
+            .collect(),
+    );
+    let ready = graph::ready(db, now);
+    let blocked = graph::blocked(db, now);
+    let log = store.git.log(DATA_REF, BOARD_LOG, None)?;
+    if cli.json {
+        let blocked: Vec<serde_json::Value> = blocked
+            .iter()
+            .map(|(i, by)| serde_json::json!({ "issue": i, "blocked_by": by }))
+            .collect();
+        let log: Vec<serde_json::Value> = log
+            .iter()
+            .map(
+                |(oid, when, msg)| serde_json::json!({ "commit": oid, "at": when, "message": msg }),
+            )
+            .collect();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "epics": epics,
+                "in_progress": in_progress,
+                "ready": ready,
+                "blocked": blocked,
+                "log": log,
+            }))?
+        );
+        return Ok(());
+    }
+    let style = &cli.style;
+    let count = |s: Status| db.issues.values().filter(|i| i.status == s).count();
+    let stamp = store.git.head_stamp()?;
+    println!(
+        "{}  on {} at {}  {}",
+        style.bold(&db.meta.prefix),
+        stamp.branch,
+        stamp.commit,
+        style.dim(&format!(
+            "{} open, {} in progress, {} deferred, {} closed",
+            count(Status::Open),
+            count(Status::InProgress),
+            count(Status::Deferred),
+            count(Status::Closed),
+        ))
+    );
+    if !epics.is_empty() {
+        println!("\n{}", style.bold("Epics"));
+        print!("{}", render::listing(style, Some(db), &plain_rows(&epics)));
+    }
+    if !in_progress.is_empty() {
+        println!("\n{}", style.bold("In progress"));
+        let rows: Vec<(&Issue, String)> = in_progress
+            .iter()
+            .map(|i| (*i, render::lease_left(i)))
+            .collect();
+        print!("{}", render::listing(style, Some(db), &rows));
+    }
+    if ready.len() > BOARD_READY {
+        println!(
+            "\n{}",
+            style.bold(&format!("Ready ({BOARD_READY} of {})", ready.len()))
+        );
+    } else {
+        println!("\n{}", style.bold("Ready"));
+    }
+    if ready.is_empty() {
+        println!("nothing is ready");
+    }
+    print!(
+        "{}",
+        render::listing(
+            style,
+            Some(db),
+            &plain_rows(&ready[..ready.len().min(BOARD_READY)])
+        )
+    );
+    if !blocked.is_empty() {
+        println!("\n{}", style.bold("Blocked"));
+        let rows: Vec<(&Issue, String)> = blocked
+            .iter()
+            .map(|(i, by)| (*i, format!("<- {}", by.join(" "))))
+            .collect();
+        print!("{}", render::listing(style, Some(db), &rows));
+    }
+    if !log.is_empty() {
+        println!("\n{}", style.bold("Recent"));
+        print!("{}", render::log(style, &log));
+    }
+    Ok(())
+}
+
 /// Print what a write did to several ids.
 fn done(ids: &[String], verb: &str, json: bool) -> Result<()> {
     if json {
@@ -1064,130 +1179,18 @@ fn print_written(issue: &Issue, cli: &Options) -> Result<()> {
     if cli.json {
         println!("{}", serde_json::to_string_pretty(issue)?);
     } else {
-        println!("{}", line(issue, None));
+        let rows = [(issue, String::new())];
+        print!("{}", render::listing(&cli.style, None, &rows));
     }
     Ok(())
 }
 
-fn print_issues(issues: &[&Issue], db: &Db, json: bool) -> Result<()> {
-    if json {
+fn print_issues(issues: &[&Issue], db: &Db, cli: &Options) -> Result<()> {
+    if cli.json {
         println!("{}", serde_json::to_string_pretty(issues)?);
     } else {
-        for i in issues {
-            println!("{}", line(i, Some(db)));
-        }
+        let rows: Vec<(&Issue, String)> = issues.iter().map(|i| (*i, String::new())).collect();
+        print!("{}", render::listing(&cli.style, Some(db), &rows));
     }
     Ok(())
-}
-
-/// The `[closed/total closed]` tag for an epic's line, or nothing.
-pub fn rollup_tag(db: &Db, i: &Issue) -> String {
-    match graph::rollup(db, i) {
-        Some((closed, total)) => format!("  [{closed}/{total} closed]"),
-        None => String::new(),
-    }
-}
-
-/// Describe how far `HEAD` has moved since a stamp was taken.
-pub fn age(stamp: &Stamp, distance: Distance) -> String {
-    match distance {
-        Distance::Behind(0) => format!("at {}, this commit", stamp.commit),
-        Distance::Behind(1) => format!("at {}, 1 commit ago", stamp.commit),
-        Distance::Behind(n) => format!("at {}, {n} commits ago", stamp.commit),
-        Distance::Elsewhere => format!(
-            "at {} on {}, not in this branch's history",
-            stamp.commit, stamp.branch
-        ),
-        Distance::Unknown => format!(
-            "at {} on {}, a commit this clone lacks",
-            stamp.commit, stamp.branch
-        ),
-    }
-}
-
-pub fn memory_line(m: &Memory, git: &Git) -> String {
-    let distance = git.distance(&m.stamp.commit);
-    format!("{}  {}  ({})", m.slug, m.text, age(&m.stamp, distance))
-}
-
-fn line(i: &Issue, db: Option<&Db>) -> String {
-    let mut s = format!("{}  P{}  {:<11}  {}", i.id, i.priority, i.status, i.title);
-    if let Some(db) = db {
-        s.push_str(&rollup_tag(db, i));
-    }
-    if i.resolution == Some(Resolution::Dropped) {
-        s.push_str("  [dropped]");
-    }
-    if let Some(a) = &i.assignee {
-        s.push_str(&format!("  @{a}"));
-    }
-    s
-}
-
-fn print_issue(i: &Issue, db: &Db) {
-    println!("{}  {}", i.id, i.title);
-    println!(
-        "type: {}  status: {}  priority: {}",
-        i.kind, i.status, i.priority
-    );
-    if !i.labels.is_empty() {
-        println!("labels: {}", i.labels.join(", "));
-    }
-    if let Some(p) = &i.parent {
-        println!("parent: {p}");
-    }
-    let children = graph::children(db, &i.id);
-    if !children.is_empty() {
-        match graph::rollup(db, i) {
-            Some((closed, total)) => println!("children ({closed}/{total} closed):"),
-            None => println!("children:"),
-        }
-        for c in children {
-            println!("  {}  {}  {}", c.id, c.status, c.title);
-        }
-    }
-    if let Some(a) = &i.assignee {
-        match i.lease_expires {
-            Some(t) => println!("assignee: {a}  lease until {t}"),
-            None => println!("assignee: {a}"),
-        }
-    }
-    if let Some(t) = i.defer_until {
-        println!("deferred until: {t}");
-    }
-    if !i.blocked_by.is_empty() {
-        println!("blocked by:");
-        for b in &i.blocked_by {
-            let status = db
-                .issues
-                .get(b)
-                .map(|o| o.status.to_string())
-                .unwrap_or_else(|| "missing".to_string());
-            println!("  {b}  {status}");
-        }
-    }
-    println!(
-        "created: {}  on {} ({})",
-        i.created_at, i.stamps.created.branch, i.stamps.created.commit
-    );
-    if let Some(c) = i.closed_at {
-        let mut line = format!("closed: {c}");
-        if let Some(r) = i.resolution {
-            line.push_str(&format!("  {r}"));
-        }
-        if let Some(why) = &i.close_reason {
-            line.push_str(&format!("  {why}"));
-        }
-        println!("{line}");
-    }
-    if !i.body.is_empty() {
-        println!();
-        println!("{}", i.body);
-    }
-    if !i.notes.is_empty() {
-        println!();
-        for n in &i.notes {
-            println!("[{} {}] {}", n.at, n.author, n.text);
-        }
-    }
 }
