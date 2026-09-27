@@ -1,0 +1,28 @@
+{
+  "id": "foam-91fceb",
+  "title": "Rename the epic kind to milestone",
+  "body": "",
+  "type": "chore",
+  "status": "open",
+  "priority": 2,
+  "labels": [],
+  "parent": null,
+  "blocked_by": [],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-09-27T00:49:02.535683325Z",
+  "updated_at": "2026-09-27T00:49:02.535683325Z",
+  "closed_at": null,
+  "close_reason": null,
+  "resolution": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "8fe1a42",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
