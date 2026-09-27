@@ -41,7 +41,10 @@ Every command takes `--json`. `foam --help` lists the rest: `blocked`,
 
 An id can be shortened to any unique prefix of its hex part, `foam show
 c45`, or replaced by a word from the title when one open issue has it,
-`foam show parser`.
+`foam show parser`. With fzf on PATH, `foam show` alone opens a picker and
+`foam pick` prints the chosen id, so `foam claim $(foam pick)` works; put
+`eval "$(foam setup bash)"` in `.bashrc` after fzf's own integration and
+`foam show **<TAB>` searches the issues too.
 
 On a terminal the listings come colored and aligned, times are relative
 and long text wraps; `foam board` is the one-screen overview. A pipe gets

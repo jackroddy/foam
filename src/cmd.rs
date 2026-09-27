@@ -22,6 +22,13 @@ struct Options {
 }
 
 pub fn run(cli: Cli) -> Result<()> {
+    if let Cmd::Setup {
+        command: SetupCmd::Bash,
+    } = cli.command
+    {
+        print!("{BASH_COMPLETION}");
+        return Ok(());
+    }
     let store = Store::open(&cli.directory)?;
     let command = cli.command;
     let cli = Options {
@@ -89,7 +96,10 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Cmd::Show { id } => {
             let snap = load(&store)?;
-            let id = resolve(&snap.db, &id)?;
+            let id = match id {
+                Some(q) => resolve(&snap.db, &q)?,
+                None => pick(&snap.db)?,
+            };
             let issue = get(&snap.db, &id)?;
             if cli.json {
                 let mut v = serde_json::to_value(issue)?;
@@ -158,6 +168,16 @@ pub fn run(cli: Cli) -> Result<()> {
             Ok(())
         }
         Cmd::Board => board(&store, &cli),
+        Cmd::Pick => {
+            let snap = load(&store)?;
+            let id = pick(&snap.db)?;
+            if cli.json {
+                println!("{}", serde_json::to_string_pretty(get(&snap.db, &id)?)?);
+            } else {
+                println!("{id}");
+            }
+            Ok(())
+        }
         Cmd::Update {
             id,
             title,
@@ -597,6 +617,7 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Cmd::Setup { command } => match command {
             SetupCmd::Claude { remove } => setup_claude(&store, remove),
+            SetupCmd::Bash => unreachable!("handled before the store opens"),
         },
         Cmd::Sync { remote, setup } => {
             if setup {
@@ -713,6 +734,53 @@ fn init(store: &Store, prefix: Option<String>) -> Result<()> {
     }
     println!("run `foam setup claude` to load context into Claude Code at session start");
     Ok(())
+}
+
+/// What `setup bash` prints: fzf's own completion hook, fed the
+/// listing, with the id cut out of the chosen line.
+const BASH_COMPLETION: &str = "\
+# foam: `foam show **<TAB>` searches the issues in fzf and inserts the id.
+# Load fzf's bash integration first: eval \"$(fzf --bash)\"
+_fzf_complete_foam() {
+  _fzf_complete --reverse -- \"$@\" < <(foam list --all --plain)
+}
+_fzf_complete_foam_post() {
+  awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^[a-z0-9-]+-[0-9a-f]{6}$/) { print $i; exit } }'
+}
+[ -n \"$BASH\" ] && type _fzf_complete >/dev/null 2>&1 \\
+  && complete -F _fzf_complete_foam -o default -o bashdefault foam
+";
+
+/// Let the person choose an issue in fzf and return its id; open
+/// issues come first.
+fn pick(db: &Db) -> Result<String> {
+    let mut issues: Vec<&Issue> = db.issues.values().collect();
+    issues.sort_by_key(|i| (i.status == Status::Closed, i.priority, i.created_at));
+    let feed = render::listing(&Style::PLAIN, Some(db), &plain_rows(&issues));
+    let mut fzf = match std::process::Command::new("fzf")
+        .args(["--reverse", "--no-multi", "--prompt", "issue> "])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            bail!("fzf is not on PATH, so pass an id")
+        }
+        Err(e) => return Err(e).context("fzf"),
+    };
+    // fzf closes its stdin once the person has chosen, so a
+    // write after that is not a failure
+    let _ = std::io::Write::write_all(&mut fzf.stdin.take().unwrap(), feed.as_bytes());
+    let out = fzf.wait_with_output()?;
+    if !out.status.success() {
+        bail!("nothing picked");
+    }
+    String::from_utf8_lossy(&out.stdout)
+        .split_whitespace()
+        .find(|w| db.issues.contains_key(*w))
+        .map(str::to_string)
+        .context("nothing picked")
 }
 
 /// The hooks `setup claude` installs, by event.

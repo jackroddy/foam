@@ -1287,3 +1287,54 @@ fn an_id_prefix_or_a_title_word_names_an_issue() {
     assert!(shown.contains(&format!("  {a}  closed")), "{shown}");
     assert!(stdout(foam(dir.path()).args(["show", "wire"])).contains("seen"));
 }
+
+#[test]
+fn setup_bash_prints_the_completion_block_anywhere() {
+    let dir = tempfile::tempdir().unwrap();
+    let text = stdout(foam(dir.path()).args(["setup", "bash"]));
+    assert!(text.contains("complete -F _fzf_complete_foam"), "{text}");
+    assert!(text.contains("foam list --all --plain"), "{text}");
+}
+
+#[cfg(unix)]
+#[test]
+fn show_and_pick_take_the_issue_fzf_chooses() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = repo();
+    stdout(foam(dir.path()).args(["init", "--prefix", "t"]));
+    let a = stdout(foam(dir.path()).args(["create", "chosen", "-p", "0"]));
+    stdout(foam(dir.path()).args(["create", "other"]));
+    // a stand-in fzf that picks the first line it is offered
+    let fake = dir.path().join("bin");
+    std::fs::create_dir(&fake).unwrap();
+    std::fs::write(fake.join("fzf"), "#!/bin/sh\nread -r line && echo \"$line\"\n").unwrap();
+    std::fs::set_permissions(fake.join("fzf"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    // foam needs git, and nothing else, so PATH holds git alone
+    // besides the stand-in
+    let tools = dir.path().join("tools");
+    std::fs::create_dir(&tools).unwrap();
+    let git = String::from_utf8(Command::new("which").arg("git").output().unwrap().stdout).unwrap();
+    std::os::unix::fs::symlink(git.trim(), tools.join("git")).unwrap();
+    let bin_dir = foam_bin().parent().unwrap().to_path_buf();
+    let path = format!(
+        "{}:{}:{}",
+        fake.display(),
+        bin_dir.display(),
+        tools.display()
+    );
+    assert_eq!(stdout(foam(dir.path()).env("PATH", &path).arg("pick")), a);
+    let shown = stdout(foam(dir.path()).env("PATH", &path).arg("show"));
+    assert!(shown.starts_with(&format!("{a}  chosen")), "{shown}");
+
+    // without fzf, both say so
+    let bare = format!("{}:{}", bin_dir.display(), tools.display());
+    for args in [vec!["show"], vec!["pick"]] {
+        let out = foam(dir.path())
+            .env("PATH", &bare)
+            .args(&args)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1));
+        assert!(String::from_utf8_lossy(&out.stderr).contains("fzf is not on PATH"));
+    }
+}

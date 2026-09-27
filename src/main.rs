@@ -68,8 +68,10 @@ enum Cmd {
         #[arg(long = "blocked-by")]
         blocked_by: Vec<String>,
     },
-    /// Show one issue in full
-    Show { id: String },
+    /// Show one issue in full; with no id, pick one with fzf
+    Show { id: Option<String> },
+    /// Pick an issue with fzf and print its id, for `foam claim $(foam pick)`
+    Pick,
     /// List issues; open and in progress unless filtered
     List {
         #[arg(long, value_enum)]
@@ -248,6 +250,8 @@ enum SetupCmd {
         #[arg(long)]
         remove: bool,
     },
+    /// Print bash completion that searches issues with fzf; for .bashrc: eval "$(foam setup bash)"
+    Bash,
 }
 
 #[derive(Subcommand)]
