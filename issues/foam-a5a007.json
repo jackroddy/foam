@@ -3,20 +3,20 @@
   "title": "Pick an issue with fzf: show without an id, foam pick, and setup bash",
   "body": "",
   "type": "feature",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 2,
   "labels": [],
   "parent": null,
   "blocked_by": [],
   "related": [],
   "assignee": "Jack Roddy/2ae76934",
-  "lease_expires": "2026-09-27T01:22:39.011105668Z",
+  "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-09-27T01:07:39.000120628Z",
-  "updated_at": "2026-09-27T01:08:54.45021204Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-09-27T01:10:32.144114396Z",
+  "closed_at": "2026-09-27T01:10:32.144114396Z",
+  "close_reason": "show without an id, foam pick and setup bash, all on fzf; committed as 'Pick an issue in fzf: show without an id, foam pick, and setup bash'",
+  "resolution": "done",
   "notes": [
     {
       "at": "2026-09-27T01:08:54.45021144Z",
@@ -31,6 +31,9 @@
       "commit": "d5db1c6",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "bdcdc8a",
+      "branch": "dev"
+    }
   }
 }
