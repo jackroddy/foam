@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-27
+
 ### Added
 
 - A README.
@@ -147,5 +149,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `foam log` shows the data ref's history, optionally only the entries that
   touched one id. Every command accepts `--json`.
 
-[Unreleased]: https://github.com/jackroddy/foam/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/jackroddy/foam/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/jackroddy/foam/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/jackroddy/foam/releases/tag/v0.1.0
