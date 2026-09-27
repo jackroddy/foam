@@ -13,11 +13,19 @@
   "lease_expires": "2026-09-27T01:14:28.324800644Z",
   "defer_until": null,
   "created_at": "2026-09-27T00:59:28.316652925Z",
-  "updated_at": "2026-09-27T00:59:28.324800644Z",
+  "updated_at": "2026-09-27T01:00:33.584537149Z",
   "closed_at": null,
   "close_reason": null,
   "resolution": null,
-  "notes": [],
+  "notes": [
+    {
+      "at": "2026-09-27T01:00:33.584536729Z",
+      "author": "Jack Roddy/2ae76934",
+      "text": "resolve() in cmd.rs: exact id, then unique hex prefix with or without the foam- part, then unique title substring preferring open issues; ambiguity lists the candidates on stderr and exits 1. Applied to every id argument. Awaiting commit approval.",
+      "commit": "4da87ba",
+      "branch": "dev"
+    }
+  ],
   "stamps": {
     "created": {
       "commit": "4da87ba",
