@@ -1,0 +1,28 @@
+{
+  "id": "foam-2636ad",
+  "title": "Any id argument takes a unique prefix or a title word",
+  "body": "",
+  "type": "feature",
+  "status": "open",
+  "priority": 2,
+  "labels": [],
+  "parent": null,
+  "blocked_by": [],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-09-27T00:59:28.316652925Z",
+  "updated_at": "2026-09-27T00:59:28.316652925Z",
+  "closed_at": null,
+  "close_reason": null,
+  "resolution": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "4da87ba",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
