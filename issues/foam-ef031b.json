@@ -1,0 +1,28 @@
+{
+  "id": "foam-ef031b",
+  "title": "v0.2.0",
+  "body": "The first release after 0.1.0. Breaking: the epic kind is now milestone, so the minor bumps.",
+  "type": "milestone",
+  "status": "open",
+  "priority": 1,
+  "labels": [],
+  "parent": null,
+  "blocked_by": [],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-09-27T01:58:22.484825257Z",
+  "updated_at": "2026-09-27T01:58:22.484825257Z",
+  "closed_at": null,
+  "close_reason": null,
+  "resolution": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "bfd6da5",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
