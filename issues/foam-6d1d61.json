@@ -1,0 +1,28 @@
+{
+  "id": "foam-6d1d61",
+  "title": "Review the README before the 0.2.0 release",
+  "body": "Read it top to bottom against the 0.2.0 binary: every command and flag it names exists and behaves as described, the prime sample matches, the sections read in a sensible order for someone arriving cold.",
+  "type": "task",
+  "status": "open",
+  "priority": 1,
+  "labels": [],
+  "parent": "foam-ef031b",
+  "blocked_by": [],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-09-27T01:58:22.496312241Z",
+  "updated_at": "2026-09-27T01:58:22.496312241Z",
+  "closed_at": null,
+  "close_reason": null,
+  "resolution": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "bfd6da5",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
