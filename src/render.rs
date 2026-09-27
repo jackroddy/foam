@@ -214,11 +214,11 @@ pub fn age(stamp: &Stamp, distance: Distance) -> String {
     }
 }
 
-/// What trails an issue's title in a listing: the milestone rollup,
-/// a dropped tag and the assignee.
-fn tags(i: &Issue, db: Option<&Db>) -> String {
+/// What trails an issue's title in a listing: the milestone rollup
+/// when asked for, a dropped tag and the assignee.
+fn tags(i: &Issue, db: Option<&Db>, rollup: bool) -> String {
     let mut s = String::new();
-    if let Some(db) = db {
+    if let Some(db) = db.filter(|_| rollup) {
         s.push_str(&rollup_tag(db, i));
     }
     if i.resolution == Some(Resolution::Dropped) {
@@ -249,7 +249,7 @@ pub fn listing(style: &Style, db: Option<&Db>, rows: &[(&Issue, String)]) -> Str
                 i.priority,
                 i.status,
                 i.title,
-                tags(i, db)
+                tags(i, db, true)
             );
             if !suffix.is_empty() {
                 let _ = write!(out, "  {suffix}");
@@ -267,18 +267,36 @@ pub fn listing(style: &Style, db: Option<&Db>, rows: &[(&Issue, String)]) -> Str
     let id_w = width(&|lead, i| format!("{lead}{}", i.id));
     let status_w = width(&|_, i| i.status.to_string());
     let kind_w = width(&|_, i| i.kind.to_string());
+    // the rollup is a column of its own, right-aligned, and the
+    // column is left out when no row has one
+    let rollup = |i: &Issue| {
+        db.and_then(|db| graph::rollup(db, i))
+            .map(|(closed, total)| format!("{closed}/{total}"))
+            .unwrap_or_default()
+    };
+    let rollup_w = width(&|_, i| rollup(i));
     for (_, lead, i, suffix) in &rows {
         let status = i.status.to_string();
         let _ = write!(
             out,
-            "{}  {}  {}{}  {}  {}{}",
+            "{}  {}  {}{}  {}  {}{}{}",
             pad(&format!("{lead}{}", i.id), id_w),
             style.priority(i.priority),
             style.status(i.status),
             " ".repeat(status_w - status.chars().count()),
             style.dim(&pad(&i.kind.to_string(), kind_w)),
+            if rollup_w > 0 {
+                let r = rollup(i);
+                format!(
+                    "{}{}  ",
+                    " ".repeat(rollup_w - r.chars().count()),
+                    style.dim(&r)
+                )
+            } else {
+                String::new()
+            },
             i.title,
-            style.dim(&tags(i, db)),
+            style.dim(&tags(i, db, false)),
         );
         if !suffix.is_empty() {
             let _ = write!(out, "  {}", style.dim(suffix));
@@ -645,6 +663,26 @@ mod tests {
              \u{20}\u{20}├─ t-000002  P2  open  task       one\n\
              \u{20}\u{20}└─ t-000003  P2  open  task       two\n\
              t-000004       P2  open  task       alone\n"
+        );
+        // with a db the milestone's rollup is a column before the
+        // title, and the plain form keeps it after
+        let mut db = crate::store::test_db();
+        for i in [&m, &a, &b, &orphan] {
+            db.issues.insert(i.id.clone(), (*i).clone());
+        }
+        let human = listing(&HUMAN, Some(&db), &rows);
+        assert!(
+            human.starts_with("t-000001       P2  open  milestone  0/2  big\n"),
+            "{human}"
+        );
+        assert!(
+            human.contains("t-000004       P2  open  task            alone\n"),
+            "{human}"
+        );
+        let plain = listing(&Style::PLAIN, Some(&db), &rows);
+        assert!(
+            plain.starts_with("t-000001  P2  open  big  [0/2 closed]\n"),
+            "{plain}"
         );
     }
 

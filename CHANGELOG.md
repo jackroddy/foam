@@ -23,8 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - When stdout is a terminal, `list`, `ready`, `blocked`, `search`, `show`,
   `log`, `memories` and `recall` print for a person: times relative to now,
   columns aligned and a kind column added, status and priority colored,
-  bodies, notes and memories wrapped to the terminal width, and no commit
-  stamps on an issue's created and closed lines. A pipe gets plain text,
+  bodies, notes and memories wrapped to the terminal width, a milestone's
+  rollup in a column of its own before the title, and no commit stamps on
+  an issue's created and closed lines. A pipe gets plain text,
   `--plain` gives that text on a terminal, `NO_COLOR` removes only the
   color, and `prime` always prints the plain form.
 - `list`, `ready`, `blocked` and `search` draw an issue under its parent
