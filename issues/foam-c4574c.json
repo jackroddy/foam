@@ -2,7 +2,7 @@
   "id": "foam-c4574c",
   "title": "Ergonomics found by dogfooding",
   "body": "Collects what using foam on itself turns up. Add children as they appear.",
-  "type": "epic",
+  "type": "milestone",
   "status": "open",
   "priority": 2,
   "labels": [],

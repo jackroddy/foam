@@ -13,11 +13,19 @@
   "lease_expires": "2026-09-27T01:04:02.544008271Z",
   "defer_until": null,
   "created_at": "2026-09-27T00:49:02.535683325Z",
-  "updated_at": "2026-09-27T00:49:02.544008271Z",
+  "updated_at": "2026-09-27T00:49:35.237535952Z",
   "closed_at": null,
   "close_reason": null,
   "resolution": null,
-  "notes": [],
+  "notes": [
+    {
+      "at": "2026-09-27T00:49:35.237535442Z",
+      "author": "Jack Roddy/2ae76934",
+      "text": "Kind::Milestone with serde alias epic and a hidden clap alias; existing epic records load unchanged. Awaiting commit approval.",
+      "commit": "8fe1a42",
+      "branch": "dev"
+    }
+  ],
   "stamps": {
     "created": {
       "commit": "8fe1a42",
