@@ -54,6 +54,16 @@ Every write records the commit and branch it happened on. `memories` and
 `prime` say how far `HEAD` has moved since a memory was written, or that it
 came from a branch this one never merged.
 
+## json
+
+`--json` output is for scripts and agents, and its shape is kept on the
+same terms as the command line. Within a minor release, keys are only
+added, never removed or renamed, and a value never changes type. Removing
+or renaming a key takes the minor number while the crate is below 1.0 and
+the major after, and the changelog names the command and the key under
+Changed. There is no version key in the output; `foam --version` says
+which shape you have.
+
 ## agents
 
 `foam setup claude` adds a SessionStart hook to `.claude/settings.json`

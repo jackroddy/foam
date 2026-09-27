@@ -65,6 +65,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `--json` output has a stated policy, in the README: within a minor
+  release keys are only added and never change type; a removal or rename
+  takes the minor while below 1.0 and is named here. Two shapes changed
+  in this cycle: `show` gained `children`, and `search` became an object
+  with `issues` and `memories`.
 - The contract at the top of `foam prime` now says where work and facts go
   and where they do not: not a TODO comment, a plan file, a handoff note,
   or the harness's own todo list or memory. It tells the agent to create
