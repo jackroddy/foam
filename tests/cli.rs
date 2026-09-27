@@ -1248,3 +1248,42 @@ fn doctor_flags_a_memory_that_repeats_claude_md() {
     stdout(foam(dir.path()).args(["forget", "fmt"]));
     assert!(stdout(foam(dir.path()).arg("doctor")).starts_with("ok:"));
 }
+
+#[test]
+fn an_id_prefix_or_a_title_word_names_an_issue() {
+    let dir = repo();
+    stdout(foam(dir.path()).args(["init", "--prefix", "t"]));
+    let a = stdout(foam(dir.path()).args(["create", "Wire the parser"]));
+    let b = stdout(foam(dir.path()).args(["create", "Test the parser"]));
+    let hex = &a[2..];
+    let short = &hex[..3];
+    let by_prefix = |q: &str| -> String {
+        let v: serde_json::Value =
+            serde_json::from_str(&stdout(foam(dir.path()).args(["--json", "show", q]))).unwrap();
+        v["id"].as_str().unwrap().to_string()
+    };
+    // the digits, with or without the prefix, and a title word
+    assert_eq!(by_prefix(short), a);
+    assert_eq!(by_prefix(&format!("t-{short}")), a);
+    assert_eq!(by_prefix("wire"), a);
+    assert_eq!(by_prefix("TEST THE"), b);
+
+    let out = foam(dir.path()).args(["show", "parser"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("parser could be any of 2:"), "{err}");
+    assert!(err.contains(&a) && err.contains(&b), "{err}");
+    let out = foam(dir.path()).args(["show", "zzz"]).output().unwrap();
+    assert!(String::from_utf8_lossy(&out.stderr).contains("no such issue: zzz"));
+
+    // a closed issue yields to an open one with the same word
+    stdout(foam(dir.path()).args(["close", "wire", "--reason", "done"]));
+    assert_eq!(by_prefix("parser"), b);
+    // and every other id argument resolves the same way
+    stdout(foam(dir.path()).args(["--actor", "ann", "claim", "test"]));
+    stdout(foam(dir.path()).args(["note", short, "seen"]));
+    stdout(foam(dir.path()).args(["dep", "add", "test", short]));
+    let shown = stdout(foam(dir.path()).args(["show", &b]));
+    assert!(shown.contains(&format!("  {a}  closed")), "{shown}");
+    assert!(stdout(foam(dir.path()).args(["show", "wire"])).contains("seen"));
+}

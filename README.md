@@ -39,6 +39,10 @@ foam prime                         # what an agent should read first
 Every command takes `--json`. `foam --help` lists the rest: `blocked`,
 `board`, `dep`, `update`, `search`, `memories`, `reclaim`, `log`, `doctor`.
 
+An id can be shortened to any unique prefix of its hex part, `foam show
+c45`, or replaced by a word from the title when one open issue has it,
+`foam show parser`.
+
 On a terminal the listings come colored and aligned, times are relative
 and long text wraps; `foam board` is the one-screen overview. A pipe gets
 plain text, so does `--plain`, and `NO_COLOR` removes only the color.

@@ -35,6 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it still holds, `foam forget` it if not.
 - `foam doctor` reports a memory whose text is also in `CLAUDE.md`,
   `CLAUDE.local.md` or `.claude/CLAUDE.md`, since both reach every session.
+- Wherever a command takes an issue id, a unique prefix of its hex part
+  does too, with or without the `foam-` part, and so does a word from
+  its title when exactly one open issue carries it. Anything that fits
+  more than one issue prints them all and exits 1.
 - `foam board` puts the backlog on one screen: open milestones with their
   rollups, what is in progress and how much lease is left, what is ready,
   what is blocked and by what, and the last few log entries. `--json` gives

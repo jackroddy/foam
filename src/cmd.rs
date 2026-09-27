@@ -41,6 +41,9 @@ pub fn run(cli: Cli) -> Result<()> {
             blocked_by,
         } => {
             let stamp = store.git.head_stamp()?;
+            let db = load(&store)?.db;
+            let blocked_by = resolve_all(&db, &blocked_by)?;
+            let parent = parent.map(|p| resolve(&db, &p)).transpose()?;
             let issue = store.write_named(|db| {
                 let id = fresh_id(db);
                 for other in blocked_by.iter().chain(parent.iter()) {
@@ -86,6 +89,7 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Cmd::Show { id } => {
             let snap = load(&store)?;
+            let id = resolve(&snap.db, &id)?;
             let issue = get(&snap.db, &id)?;
             if cli.json {
                 let mut v = serde_json::to_value(issue)?;
@@ -170,6 +174,17 @@ pub fn run(cli: Cli) -> Result<()> {
             reason,
         } => {
             let actor = actor(&store, &cli);
+            let db = load(&store)?.db;
+            let id = resolve(&db, &id)?;
+            let parent = parent
+                .map(|p| {
+                    if p.is_empty() {
+                        Ok(p)
+                    } else {
+                        resolve(&db, &p)
+                    }
+                })
+                .transpose()?;
             let defer_until = defer_until
                 .as_deref()
                 .map(parse_when)
@@ -249,6 +264,7 @@ pub fn run(cli: Cli) -> Result<()> {
             dropped,
         } => {
             let stamp = store.git.head_stamp()?;
+            let ids = resolve_all(&load(&store)?.db, &ids)?;
             let resolution = if dropped {
                 Resolution::Dropped
             } else {
@@ -281,6 +297,7 @@ pub fn run(cli: Cli) -> Result<()> {
             done(&ids, "closed", cli.json)
         }
         Cmd::Reopen { ids } => {
+            let ids = resolve_all(&load(&store)?.db, &ids)?;
             store.write(&format!("reopen {}", ids.join(" ")), |db| {
                 for id in &ids {
                     let issue = get_mut(db, id)?;
@@ -295,6 +312,7 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Cmd::Claim { id, force } => {
             let actor = actor(&store, &cli);
+            let id = resolve(&load(&store)?.db, &id)?;
             let issue = store.write(&format!("claim {id} by {actor}"), |db| {
                 let lease = db.meta.lease();
                 let issue = get_mut(db, &id)?;
@@ -315,6 +333,7 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Cmd::Unclaim { id, force } => {
             let actor = actor(&store, &cli);
+            let id = resolve(&load(&store)?.db, &id)?;
             let issue = store.write(&format!("unclaim {id}"), |db| {
                 let issue = get_mut(db, &id)?;
                 if issue.status != Status::InProgress {
@@ -333,6 +352,7 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Cmd::Heartbeat { id } => {
             let actor = actor(&store, &cli);
+            let id = resolve(&load(&store)?.db, &id)?;
             let issue = store.write(&format!("heartbeat {id}"), |db| {
                 let lease = db.meta.lease();
                 let issue = get_mut(db, &id)?;
@@ -358,6 +378,7 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Cmd::Note { id, text } => {
             let actor = actor(&store, &cli);
+            let id = resolve(&load(&store)?.db, &id)?;
             let stamp = store.git.head_stamp()?;
             let issue = store.write(&format!("note {id}"), |db| {
                 let issue = get_mut(db, &id)?;
@@ -600,6 +621,9 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Cmd::Dep { command } => match command {
             DepCmd::Add { id, blocker } => {
+                let db = load(&store)?.db;
+                let id = resolve(&db, &id)?;
+                let blocker = resolve(&db, &blocker)?;
                 let issue = store.write(&format!("dep {id} <- {blocker}"), |db| {
                     if !db.issues.contains_key(&blocker) {
                         bail!("no such issue: {blocker}");
@@ -617,6 +641,9 @@ pub fn run(cli: Cli) -> Result<()> {
                 print_written(&issue, &cli)
             }
             DepCmd::Rm { id, blocker } => {
+                let db = load(&store)?.db;
+                let id = resolve(&db, &id)?;
+                let blocker = resolve(&db, &blocker)?;
                 let issue = store.write(&format!("undep {id} <- {blocker}"), |db| {
                     let issue = get_mut(db, &id)?;
                     let before = issue.blocked_by.len();
@@ -631,7 +658,7 @@ pub fn run(cli: Cli) -> Result<()> {
             }
             DepCmd::Tree { id } => {
                 let snap = load(&store)?;
-                get(&snap.db, &id)?;
+                let id = resolve(&snap.db, &id)?;
                 if cli.json {
                     println!(
                         "{}",
@@ -1127,6 +1154,57 @@ fn reclaim(store: &Store) -> Result<Vec<String>> {
 
 fn load(store: &Store) -> Result<Snapshot> {
     store.load()?.context("foam is not initialized here")
+}
+
+/// The full id `query` names: itself, the one id whose hex part
+/// starts with it, or the one issue whose title contains it, open
+/// issues first.
+fn resolve(db: &Db, query: &str) -> Result<String> {
+    if db.issues.contains_key(query) {
+        return Ok(query.to_string());
+    }
+    let hex = query
+        .strip_prefix(&format!("{}-", db.meta.prefix))
+        .unwrap_or(query);
+    let mut found: Vec<&Issue> = if !hex.is_empty() && hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        db.issues
+            .values()
+            .filter(|i| {
+                i.id.rsplit_once('-')
+                    .is_some_and(|(_, h)| h.starts_with(hex))
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    if found.is_empty() {
+        let q = query.to_lowercase();
+        found = db
+            .issues
+            .values()
+            .filter(|i| i.title.to_lowercase().contains(&q))
+            .collect();
+        if found.iter().any(|i| i.status != Status::Closed) {
+            found.retain(|i| i.status != Status::Closed);
+        }
+    }
+    match found.as_slice() {
+        [] => bail!("no such issue: {query}"),
+        [one] => Ok(one.id.clone()),
+        _ => {
+            found.sort_by_key(|i| (i.priority, i.created_at));
+            let rows: Vec<(&Issue, String)> = found.iter().map(|i| (*i, String::new())).collect();
+            bail!(
+                "{query} could be any of {}:\n{}",
+                found.len(),
+                render::listing(&Style::PLAIN, Some(db), &rows).trim_end()
+            )
+        }
+    }
+}
+
+fn resolve_all(db: &Db, queries: &[String]) -> Result<Vec<String>> {
+    queries.iter().map(|q| resolve(db, q)).collect()
 }
 
 fn get<'a>(db: &'a Db, id: &str) -> Result<&'a Issue> {
