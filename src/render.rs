@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::io::IsTerminal;
 
@@ -227,15 +228,17 @@ fn tags(i: &Issue, db: Option<&Db>) -> String {
 }
 
 /// One line per issue, each followed by its suffix when that is
-/// not empty. The terminal form aligns the columns over the whole
-/// listing and adds the kind.
+/// not empty. An issue whose parent is also listed sits under it,
+/// drawn as a tree. The terminal form aligns the columns over the
+/// whole listing and adds the kind.
 pub fn listing(style: &Style, db: Option<&Db>, rows: &[(&Issue, String)]) -> String {
+    let rows = forest(rows);
     let mut out = String::new();
     if !style.human {
-        for (i, suffix) in rows {
+        for (lead, i, suffix) in &rows {
             let _ = write!(
                 out,
-                "{}  P{}  {}  {}{}",
+                "{lead}{}  P{}  {}  {}{}",
                 i.id,
                 i.priority,
                 i.status,
@@ -249,21 +252,21 @@ pub fn listing(style: &Style, db: Option<&Db>, rows: &[(&Issue, String)]) -> Str
         }
         return out;
     }
-    let width = |f: &dyn Fn(&Issue) -> String| {
+    let width = |f: &dyn Fn(&str, &Issue) -> String| {
         rows.iter()
-            .map(|(i, _)| f(i).chars().count())
+            .map(|(lead, i, _)| f(lead, i).chars().count())
             .max()
             .unwrap_or(0)
     };
-    let id_w = width(&|i| i.id.clone());
-    let status_w = width(&|i| i.status.to_string());
-    let kind_w = width(&|i| i.kind.to_string());
-    for (i, suffix) in rows {
+    let id_w = width(&|lead, i| format!("{lead}{}", i.id));
+    let status_w = width(&|_, i| i.status.to_string());
+    let kind_w = width(&|_, i| i.kind.to_string());
+    for (lead, i, suffix) in &rows {
         let status = i.status.to_string();
         let _ = write!(
             out,
             "{}  {}  {}{}  {}  {}{}",
-            pad(&i.id, id_w),
+            pad(&format!("{lead}{}", i.id), id_w),
             style.priority(i.priority),
             style.status(i.status),
             " ".repeat(status_w - status.chars().count()),
@@ -277,6 +280,53 @@ pub fn listing(style: &Style, db: Option<&Db>, rows: &[(&Issue, String)]) -> Str
         out.push('\n');
     }
     out
+}
+
+/// The rows in tree order, each with the indent and connector
+/// that lead its line: a row goes under its parent when the
+/// parent is listed too, and keeps its place otherwise.
+fn forest<'a>(rows: &'a [(&'a Issue, String)]) -> Vec<(String, &'a Issue, &'a str)> {
+    let listed: HashSet<&str> = rows.iter().map(|(i, _)| i.id.as_str()).collect();
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    for (i, suffix) in rows {
+        let nested = i.parent.as_deref().is_some_and(|p| listed.contains(p));
+        if !nested {
+            branch(rows, i, suffix, 0, String::new(), &mut seen, &mut out);
+        }
+    }
+    // a parent loop leaves its members unreached above
+    for (i, suffix) in rows {
+        if !seen.contains(i.id.as_str()) {
+            branch(rows, i, suffix, 0, String::new(), &mut seen, &mut out);
+        }
+    }
+    out
+}
+
+fn branch<'a>(
+    rows: &'a [(&'a Issue, String)],
+    i: &'a Issue,
+    suffix: &'a str,
+    depth: usize,
+    lead: String,
+    seen: &mut HashSet<&'a str>,
+    out: &mut Vec<(String, &'a Issue, &'a str)>,
+) {
+    if !seen.insert(i.id.as_str()) {
+        return;
+    }
+    out.push((lead, i, suffix));
+    let children: Vec<_> = rows
+        .iter()
+        .filter(|(c, _)| c.parent.as_deref() == Some(i.id.as_str()))
+        .collect();
+    let last = children.len().saturating_sub(1);
+    for (n, (c, suffix)) in children.into_iter().enumerate() {
+        let connector = if n == last { "└─ " } else { "├─ " };
+        let lead = format!("{}{connector}", "  ".repeat(depth + 1));
+        branch(rows, c, suffix, depth + 1, lead, seen, out);
+    }
 }
 
 /// How much of an in-progress issue's lease is left.
@@ -543,6 +593,40 @@ mod tests {
         let colored = listing(&COLOR, None, &rows[..1]);
         assert!(colored.contains("\x1b[33min_progress\x1b[0m"), "{colored}");
         assert!(colored.contains("\x1b[33mP2\x1b[0m"), "{colored}");
+    }
+
+    #[test]
+    fn listing_nests_children_under_a_listed_parent() {
+        let mut m = test_issue("t-000001");
+        m.title = "big".into();
+        m.kind = crate::model::Kind::Milestone;
+        let mut a = test_issue("t-000002");
+        a.title = "one".into();
+        a.parent = Some("t-000001".into());
+        let mut b = test_issue("t-000003");
+        b.title = "two".into();
+        b.parent = Some("t-000001".into());
+        let mut orphan = test_issue("t-000004");
+        orphan.title = "alone".into();
+        orphan.parent = Some("t-nope".into());
+        let rows: Vec<(&Issue, String)> = [&a, &m, &orphan, &b]
+            .into_iter()
+            .map(|i| (i, String::new()))
+            .collect();
+        assert_eq!(
+            listing(&Style::PLAIN, None, &rows),
+            "t-000001  P2  open  big\n\
+             \u{20}\u{20}├─ t-000002  P2  open  one\n\
+             \u{20}\u{20}└─ t-000003  P2  open  two\n\
+             t-000004  P2  open  alone\n"
+        );
+        assert_eq!(
+            listing(&HUMAN, None, &rows),
+            "t-000001       P2  open  milestone  big\n\
+             \u{20}\u{20}├─ t-000002  P2  open  task       one\n\
+             \u{20}\u{20}└─ t-000003  P2  open  task       two\n\
+             t-000004       P2  open  task       alone\n"
+        );
     }
 
     #[test]

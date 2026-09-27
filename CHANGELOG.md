@@ -24,9 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `log`, `memories` and `recall` print for a person: times relative to now,
   columns aligned and a kind column added, status and priority colored,
   bodies, notes and memories wrapped to the terminal width, and no commit
-  stamps on an issue's created and closed lines. A pipe gets the same text
-  as before, `--plain` gives that text on a terminal, `NO_COLOR` removes
-  only the color, and `prime` always prints the plain form.
+  stamps on an issue's created and closed lines. A pipe gets plain text,
+  `--plain` gives that text on a terminal, `NO_COLOR` removes only the
+  color, and `prime` always prints the plain form.
+- `list`, `ready`, `blocked` and `search` draw an issue under its parent
+  when both are listed, with `├─` and `└─`, so a milestone's open children
+  hang off it.
 - When `foam prime` marks a memory as old or from another branch, it now
   says what to do: check it against the code, `foam remember` it again if
   it still holds, `foam forget` it if not.
