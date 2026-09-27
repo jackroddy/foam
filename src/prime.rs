@@ -26,7 +26,7 @@ foam show <id>                  one issue in full, with notes, blockers and chil
 foam create <title> [--type T] [-p 0-4] [--blocked-by ID] [--parent ID]
 foam claim <id> | unclaim <id> | heartbeat <id>
 foam note <id> <text>           append a note
-foam close <id> --reason <why>  | foam reopen <id>
+foam close <id> --reason <why> [--dropped]  | foam reopen <id>
 foam dep add <id> <blocker>     make <id> wait on <blocker>
 foam blocked                    what is waiting, and on what
 foam search <query>             issue titles, bodies, notes; memories

@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `foam close` requires `--reason`, and records a resolution: done, or
+  dropped with `--dropped`. `show` prints it on the closed line, listings
+  tag a dropped issue, and `update --status closed` now points at `close`.
 - Inside a Claude Code session the default actor is the git user with a
   session suffix, `Jack/1a2b3c4d`, so two sessions of one person hold
   separate claims. `--actor` and `$FOAM_ACTOR` still win. The SessionStart

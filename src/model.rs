@@ -62,6 +62,24 @@ pub enum Kind {
     Decision,
 }
 
+/// Why a closed issue is closed: the work was done, or it was
+/// given up on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Resolution {
+    Done,
+    Dropped,
+}
+
+impl fmt::Display for Resolution {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Resolution::Done => "done",
+            Resolution::Dropped => "dropped",
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Note {
     pub at: Timestamp,
@@ -98,6 +116,9 @@ pub struct Issue {
     pub updated_at: Timestamp,
     pub closed_at: Option<Timestamp>,
     pub close_reason: Option<String>,
+    /// Absent on issues closed before resolutions existed.
+    #[serde(default)]
+    pub resolution: Option<Resolution>,
     pub notes: Vec<Note>,
     pub stamps: Stamps,
 }
@@ -169,11 +190,12 @@ impl Issue {
         self.updated_at = Timestamp::now();
     }
 
-    pub fn close(&mut self, reason: Option<String>, stamp: &Stamp) {
+    pub fn close(&mut self, reason: String, resolution: Resolution, stamp: &Stamp) {
         let now = Timestamp::now();
         self.status = Status::Closed;
         self.closed_at = Some(now);
-        self.close_reason = reason;
+        self.close_reason = Some(reason);
+        self.resolution = Some(resolution);
         self.stamps.closed = Some(stamp.clone());
         self.lease_expires = None;
         self.updated_at = now;
@@ -206,6 +228,7 @@ impl Issue {
         self.status = Status::Open;
         self.closed_at = None;
         self.close_reason = None;
+        self.resolution = None;
         self.stamps.closed = None;
         self.defer_until = None;
         self.touch();
@@ -265,6 +288,7 @@ pub fn test_issue(id: &str) -> Issue {
         updated_at: now,
         closed_at: None,
         close_reason: None,
+        resolution: None,
         notes: vec![],
         stamps: Stamps {
             created: stamp,

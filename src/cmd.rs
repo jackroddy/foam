@@ -6,7 +6,8 @@ use jiff::Timestamp;
 use crate::git::{Distance, Git, Push, Stamp};
 use crate::graph;
 use crate::model::{
-    Issue, MEMORY_MAX_BYTES, Memory, Note, Stamps, Status, check_slug, new_id, parse_when,
+    Issue, MEMORY_MAX_BYTES, Memory, Note, Resolution, Stamps, Status, check_slug, new_id,
+    parse_when,
 };
 use crate::prime;
 use crate::store::{Absorbed, DATA_REF, Db, ORIGIN_REF, Snapshot, Store};
@@ -63,6 +64,7 @@ pub fn run(cli: Cli) -> Result<()> {
                     updated_at: now,
                     closed_at: None,
                     close_reason: None,
+                    resolution: None,
                     notes: Vec::new(),
                     stamps: Stamps {
                         created: stamp.clone(),
@@ -160,7 +162,6 @@ pub fn run(cli: Cli) -> Result<()> {
             defer_until,
         } => {
             let actor = actor(&store, &cli);
-            let stamp = store.git.head_stamp()?;
             let defer_until = defer_until
                 .as_deref()
                 .map(parse_when)
@@ -206,7 +207,7 @@ pub fn run(cli: Cli) -> Result<()> {
                     issue.status = Status::Deferred;
                 }
                 match status {
-                    Some(Status::Closed) => issue.close(None, &stamp),
+                    Some(Status::Closed) => bail!("close it with `foam close {id} --reason ..`"),
                     Some(Status::Open) => {
                         issue.reopen();
                         issue.unclaim();
@@ -223,8 +224,17 @@ pub fn run(cli: Cli) -> Result<()> {
             })?;
             print_written(&issue, &cli)
         }
-        Cmd::Close { ids, reason } => {
+        Cmd::Close {
+            ids,
+            reason,
+            dropped,
+        } => {
             let stamp = store.git.head_stamp()?;
+            let resolution = if dropped {
+                Resolution::Dropped
+            } else {
+                Resolution::Done
+            };
             store.write(&format!("close {}", ids.join(" ")), |db| {
                 for id in &ids {
                     let issue = get_mut(db, id)?;
@@ -245,7 +255,7 @@ pub fn run(cli: Cli) -> Result<()> {
                             open_children.join(" ")
                         );
                     }
-                    get_mut(db, id)?.close(reason.clone(), &stamp);
+                    get_mut(db, id)?.close(reason.clone(), resolution, &stamp);
                 }
                 Ok(())
             })?;
@@ -1051,6 +1061,9 @@ fn line(i: &Issue, db: Option<&Db>) -> String {
     if let Some(db) = db {
         s.push_str(&rollup_tag(db, i));
     }
+    if i.resolution == Some(Resolution::Dropped) {
+        s.push_str("  [dropped]");
+    }
     if let Some(a) = &i.assignee {
         s.push_str(&format!("  @{a}"));
     }
@@ -1104,7 +1117,14 @@ fn print_issue(i: &Issue, db: &Db) {
         i.created_at, i.stamps.created.branch, i.stamps.created.commit
     );
     if let Some(c) = i.closed_at {
-        println!("closed: {c}  {}", i.close_reason.as_deref().unwrap_or(""));
+        let mut line = format!("closed: {c}");
+        if let Some(r) = i.resolution {
+            line.push_str(&format!("  {r}"));
+        }
+        if let Some(why) = &i.close_reason {
+            line.push_str(&format!("  {why}"));
+        }
+        println!("{line}");
     }
     if !i.body.is_empty() {
         println!();

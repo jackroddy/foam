@@ -98,7 +98,7 @@ enum Cmd {
         kind: Option<Kind>,
         #[arg(long, short, value_parser = clap::value_parser!(u8).range(0..=4))]
         priority: Option<u8>,
-        /// open clears any deferral; closed is the same as `close`
+        /// open clears any deferral; use `close` to close
         #[arg(long, value_enum)]
         status: Option<Status>,
         /// Empty string clears
@@ -119,8 +119,12 @@ enum Cmd {
     Close {
         #[arg(required = true)]
         ids: Vec<String>,
+        /// What was done, or why it is being dropped
         #[arg(long, allow_hyphen_values = true)]
-        reason: Option<String>,
+        reason: String,
+        /// Given up on rather than done
+        #[arg(long)]
+        dropped: bool,
     },
     /// Reopen one or more closed issues
     Reopen {

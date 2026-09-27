@@ -195,7 +195,10 @@ fn ready_and_blocked_follow_the_graph() {
     let ready = stdout(foam(dir.path()).arg("ready"));
     assert_eq!(ready.lines().count(), 2);
 
-    foam(dir.path()).args(["close", &a]).assert().code(1);
+    foam(dir.path())
+        .args(["close", &a, "--reason", "again"])
+        .assert()
+        .code(1);
     stdout(foam(dir.path()).args(["reopen", &a]));
     foam(dir.path()).args(["reopen", &a]).assert().code(1);
 }
@@ -295,7 +298,7 @@ fn claims_and_leases() {
     assert_eq!(stdout(foam(dir.path()).arg("ready")).lines().count(), 1);
     foam(dir.path()).args(["unclaim", &a]).assert().code(1);
 
-    stdout(foam(dir.path()).args(["close", &a]));
+    stdout(foam(dir.path()).args(["close", &a, "--reason", "done"]));
     foam(dir.path()).args(["claim", &a]).assert().code(1);
 }
 
@@ -420,8 +423,26 @@ fn notes_search_and_memories() {
     assert!(stdout(foam(dir.path()).args(["search", "NOM"])).starts_with(&a));
     assert!(stdout(foam(dir.path()).args(["search", "other"])).starts_with(&b));
     assert_eq!(stdout(foam(dir.path()).args(["search", "zzz"])), "");
-    stdout(foam(dir.path()).args(["close", &b]));
-    assert!(stdout(foam(dir.path()).args(["search", "other"])).contains("closed"));
+    foam(dir.path()).args(["close", &b]).assert().code(2);
+    stdout(foam(dir.path()).args(["close", &b, "--reason", "no longer wanted", "--dropped"]));
+    let found = stdout(foam(dir.path()).args(["search", "other"]));
+    assert!(
+        found.contains("closed") && found.contains("[dropped]"),
+        "{found}"
+    );
+    let shown = stdout(foam(dir.path()).args(["show", &b]));
+    assert!(shown.contains("  dropped  no longer wanted"), "{shown}");
+    let v: serde_json::Value =
+        serde_json::from_str(&stdout(foam(dir.path()).args(["--json", "show", &b]))).unwrap();
+    assert_eq!(v["resolution"], "dropped");
+    stdout(foam(dir.path()).args(["reopen", &b]));
+    foam(dir.path())
+        .args(["update", &b, "--status", "closed"])
+        .assert()
+        .code(1);
+    stdout(foam(dir.path()).args(["close", &b, "--reason", "done after all"]));
+    let shown = stdout(foam(dir.path()).args(["show", &b]));
+    assert!(shown.contains("  done  done after all"), "{shown}");
     stdout(foam(dir.path()).args(["remember", "peg-hole", "round pegs only"]));
     let found = stdout(foam(dir.path()).args(["search", "PEG"]));
     assert!(
@@ -818,7 +839,7 @@ fn log_and_json_on_writes() {
     let a = stdout(foam(dir.path()).args(["create", "a"]));
     let b = stdout(foam(dir.path()).args(["create", "b"]));
     stdout(foam(dir.path()).args(["dep", "add", &b, &a]));
-    let closed = stdout(foam(dir.path()).args(["--json", "close", &a, &b]));
+    let closed = stdout(foam(dir.path()).args(["--json", "close", &a, &b, "--reason", "done"]));
     assert_eq!(
         serde_json::from_str::<Vec<String>>(&closed).unwrap(),
         [a.clone(), b.clone()]

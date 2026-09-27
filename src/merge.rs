@@ -15,18 +15,27 @@ pub fn issue(base: Option<&Issue>, ours: Option<&Issue>, theirs: Option<&Issue>)
     // status moves with the fields that only mean something
     // alongside it, so a close on one side and a claim on
     // the other cannot leave a closed issue with a lease
-    let (status, closed_at, close_reason, assignee, lease_expires, defer_until, closed_stamp) =
-        field(base, o, t, ours_newer, |i| {
-            (
-                i.status,
-                i.closed_at,
-                i.close_reason.clone(),
-                i.assignee.clone(),
-                i.lease_expires,
-                i.defer_until,
-                i.stamps.closed.clone(),
-            )
-        });
+    let (
+        status,
+        closed_at,
+        close_reason,
+        resolution,
+        assignee,
+        lease_expires,
+        defer_until,
+        closed_stamp,
+    ) = field(base, o, t, ours_newer, |i| {
+        (
+            i.status,
+            i.closed_at,
+            i.close_reason.clone(),
+            i.resolution,
+            i.assignee.clone(),
+            i.lease_expires,
+            i.defer_until,
+            i.stamps.closed.clone(),
+        )
+    });
 
     let mut stamps = field(base, o, t, ours_newer, |i| i.stamps.clone());
     stamps.closed = closed_stamp;
@@ -49,6 +58,7 @@ pub fn issue(base: Option<&Issue>, ours: Option<&Issue>, theirs: Option<&Issue>)
         updated_at: o.updated_at.max(t.updated_at),
         closed_at,
         close_reason,
+        resolution,
         notes: notes(base.map(|b| &b.notes), &o.notes, &t.notes),
         stamps,
     })
@@ -149,7 +159,7 @@ fn notes(base: Option<&Vec<Note>>, ours: &[Note], theirs: &[Note]) -> Vec<Note> 
 mod tests {
     use super::*;
     use crate::git::Stamp;
-    use crate::model::{Status, test_issue};
+    use crate::model::{Resolution, Status, test_issue};
     use jiff::Timestamp;
 
     fn later(i: &mut Issue) {
@@ -199,7 +209,8 @@ mod tests {
         ours.claim("ann", jiff::SignedDuration::from_mins(15));
         let mut theirs = base.clone();
         theirs.close(
-            Some("done".into()),
+            "done".into(),
+            Resolution::Done,
             &Stamp {
                 commit: "c".into(),
                 branch: "b".into(),
