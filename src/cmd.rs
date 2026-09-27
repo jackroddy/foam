@@ -174,7 +174,7 @@ pub fn run(cli: Cli) -> Result<()> {
             Ok(())
         }
         Cmd::Update {
-            id,
+            ids,
             title,
             body,
             kind,
@@ -194,8 +194,8 @@ pub fn run(cli: Cli) -> Result<()> {
                 .map(parse_when)
                 .transpose()
                 .map_err(anyhow::Error::msg)?;
-            let issue = store.write_named(|db| {
-                let id = resolve(db, &id)?;
+            let issues = store.write_named(|db| {
+                let ids = resolve_all(db, &ids)?;
                 let parent = parent
                     .as_deref()
                     .map(|p| {
@@ -207,71 +207,84 @@ pub fn run(cli: Cli) -> Result<()> {
                     })
                     .transpose()?;
                 let lease = db.meta.lease();
-                if let Some(p) = parent.as_ref().filter(|p| !p.is_empty()) {
-                    if !db.issues.contains_key(p) {
-                        bail!("no such issue: {p}");
+                let mut issues = Vec::new();
+                for id in &ids {
+                    if let Some(p) = parent.as_ref().filter(|p| !p.is_empty())
+                        && graph::parent_would_loop(db, id, p)
+                    {
+                        bail!("{p} is {id} or sits under it, so it cannot be its parent");
                     }
-                    if *p == id {
-                        bail!("an issue cannot be its own parent");
+                    let issue = get_mut(db, id)?;
+                    if let Some(t) = &title {
+                        issue.title = t.clone();
                     }
-                }
-                let issue = get_mut(db, &id)?;
-                if let Some(t) = &title {
-                    issue.title = t.clone();
-                }
-                if let Some(b) = &body {
-                    issue.body = b.clone();
-                }
-                if let Some(k) = kind {
-                    issue.kind = k;
-                }
-                if let Some(p) = priority {
-                    issue.priority = p;
-                }
-                if let Some(a) = &assignee {
-                    issue.assignee = Some(a.clone()).filter(|a| !a.is_empty());
-                }
-                for l in &add_label {
-                    if !issue.labels.contains(l) {
-                        issue.labels.push(l.clone());
+                    if let Some(b) = &body {
+                        issue.body = b.clone();
                     }
-                }
-                issue.labels.retain(|l| !rm_label.contains(l));
-                if let Some(p) = &parent {
-                    issue.parent = Some(p.clone()).filter(|p| !p.is_empty());
-                }
-                if let Some(t) = defer_until {
-                    issue.defer_until = Some(t);
-                    issue.status = Status::Deferred;
-                }
-                match status {
-                    Some(Status::Closed) => bail!("close it with `foam close {id} --reason ..`"),
-                    Some(Status::Open) => {
-                        issue.reopen();
-                        issue.unclaim();
+                    if let Some(k) = kind {
+                        issue.kind = k;
                     }
-                    Some(Status::InProgress) => issue.claim(&actor, lease),
-                    Some(Status::Deferred) if issue.defer_until.is_none() => {
-                        bail!("deferring needs --defer-until")
+                    if let Some(p) = priority {
+                        issue.priority = p;
                     }
-                    Some(Status::Deferred) => issue.status = Status::Deferred,
-                    None => {}
+                    if let Some(a) = &assignee {
+                        issue.assignee = Some(a.clone()).filter(|a| !a.is_empty());
+                    }
+                    for l in &add_label {
+                        if !issue.labels.contains(l) {
+                            issue.labels.push(l.clone());
+                        }
+                    }
+                    issue.labels.retain(|l| !rm_label.contains(l));
+                    if let Some(p) = &parent {
+                        issue.parent = Some(p.clone()).filter(|p| !p.is_empty());
+                    }
+                    if let Some(t) = defer_until {
+                        issue.defer_until = Some(t);
+                        issue.status = Status::Deferred;
+                    }
+                    match status {
+                        Some(Status::Closed) => {
+                            bail!("close it with `foam close {id} --reason ..`")
+                        }
+                        Some(Status::Open) => {
+                            issue.reopen();
+                            issue.unclaim();
+                        }
+                        Some(Status::InProgress) => issue.claim(&actor, lease),
+                        Some(Status::Deferred) if issue.defer_until.is_none() => {
+                            bail!("deferring needs --defer-until")
+                        }
+                        Some(Status::Deferred) => issue.status = Status::Deferred,
+                        None => {}
+                    }
+                    if resolution.is_some() || reason.is_some() {
+                        if issue.status != Status::Closed {
+                            bail!("{id} is not closed; a resolution and reason belong to a close");
+                        }
+                        if let Some(r) = resolution {
+                            issue.resolution = Some(r);
+                        }
+                        if let Some(why) = &reason {
+                            issue.close_reason = Some(why.clone());
+                        }
+                    }
+                    issue.touch();
+                    issues.push(issue.clone());
                 }
-                if resolution.is_some() || reason.is_some() {
-                    if issue.status != Status::Closed {
-                        bail!("{id} is not closed; a resolution and reason belong to a close");
-                    }
-                    if let Some(r) = resolution {
-                        issue.resolution = Some(r);
-                    }
-                    if let Some(why) = &reason {
-                        issue.close_reason = Some(why.clone());
-                    }
-                }
-                issue.touch();
-                Ok((issue.clone(), format!("update {id}")))
+                Ok((issues, format!("update {}", ids.join(" "))))
             })?;
-            print_written(&issue, &cli)
+            if cli.json {
+                match issues.as_slice() {
+                    [one] => println!("{}", serde_json::to_string_pretty(one)?),
+                    many => println!("{}", serde_json::to_string_pretty(many)?),
+                }
+            } else {
+                let rows: Vec<(&Issue, String)> =
+                    issues.iter().map(|i| (i, String::new())).collect();
+                print!("{}", render::listing(&cli.style, None, &rows));
+            }
+            Ok(())
         }
         Cmd::Close {
             ids,
@@ -972,6 +985,13 @@ fn doctor(store: &Store, json: bool) -> Result<()> {
         if let Some(p) = i.parent.as_ref().filter(|p| !db.issues.contains_key(*p)) {
             report(format!("{}: parent {p} does not exist", i.id));
         }
+    }
+    for id in graph::parent_loops(db) {
+        report(format!(
+            "{id}: its parent chain loops back to it; `foam update {id} --parent \"\"` breaks it"
+        ));
+    }
+    for i in db.issues.values() {
         if i.status == Status::InProgress && i.lease_expires.is_none_or(|t| t <= now) {
             report(format!(
                 "{}: in progress with an expired lease; `foam reclaim` reopens it",

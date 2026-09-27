@@ -118,6 +118,36 @@ pub fn blocked(db: &Db, now: Timestamp) -> Vec<(&Issue, Vec<&str>)> {
     out
 }
 
+/// Whether making `parent` the parent of `issue` would close a
+/// loop: `parent` is `issue`, or sits below it.
+pub fn parent_would_loop(db: &Db, issue: &str, parent: &str) -> bool {
+    let mut seen = HashSet::new();
+    let mut at = Some(parent);
+    while let Some(id) = at {
+        if id == issue {
+            return true;
+        }
+        if !seen.insert(id) {
+            return false;
+        }
+        at = db.issues.get(id).and_then(|i| i.parent.as_deref());
+    }
+    false
+}
+
+/// The issues whose parent chain never reaches the top.
+pub fn parent_loops(db: &Db) -> Vec<&str> {
+    db.issues
+        .values()
+        .filter(|i| {
+            i.parent
+                .as_deref()
+                .is_some_and(|p| parent_would_loop(db, &i.id, p))
+        })
+        .map(|i| i.id.as_str())
+        .collect()
+}
+
 /// Whether making `issue` depend on `blocker` would close a loop.
 pub fn would_cycle(db: &Db, issue: &str, blocker: &str) -> bool {
     if issue == blocker {
@@ -242,6 +272,27 @@ mod tests {
         assert!(!is_ready(&db, &db.issues["t-bottom"], now()));
         db.issues.get_mut("t-r").unwrap().status = Status::Closed;
         assert!(is_ready(&db, &db.issues["t-bottom"], now()));
+    }
+
+    #[test]
+    fn a_parent_loop_is_refused_and_found() {
+        let mut a = test_issue("t-a");
+        let mut b = test_issue("t-b");
+        b.parent = Some("t-a".into());
+        let c = test_issue("t-c");
+        let mut db = test_db();
+        for i in [a.clone(), b, c] {
+            db.issues.insert(i.id.clone(), i);
+        }
+        assert!(parent_would_loop(&db, "t-a", "t-b"));
+        assert!(parent_would_loop(&db, "t-a", "t-a"));
+        assert!(!parent_would_loop(&db, "t-c", "t-b"));
+        assert!(parent_loops(&db).is_empty());
+        a.parent = Some("t-b".into());
+        db.issues.insert("t-a".into(), a);
+        let mut looped = parent_loops(&db);
+        looped.sort();
+        assert_eq!(looped, ["t-a", "t-b"]);
     }
 
     #[test]

@@ -1395,3 +1395,43 @@ fn a_milestone_of_milestones_rolls_up_the_leaves() {
         "{blocked}"
     );
 }
+
+#[test]
+fn update_moves_several_issues_and_refuses_a_parent_loop() {
+    let dir = repo();
+    stdout(foam(dir.path()).args(["init", "--prefix", "t"]));
+    let v2 = stdout(foam(dir.path()).args(["create", "v0.2.0", "--type", "milestone"]));
+    let v3 = stdout(foam(dir.path()).args(["create", "v0.3.0", "--type", "milestone"]));
+    let a = stdout(foam(dir.path()).args(["create", "a", "--parent", &v2]));
+    let b = stdout(foam(dir.path()).args(["create", "b", "--parent", &v2]));
+    let c = stdout(foam(dir.path()).args(["create", "c", "--parent", &v2]));
+    let moved = stdout(foam(dir.path()).args(["update", &a, &b, "--parent", &v3]));
+    assert_eq!(moved.lines().count(), 2, "{moved}");
+    let v: serde_json::Value =
+        serde_json::from_str(&stdout(foam(dir.path()).args(["--json", "show", &v3]))).unwrap();
+    assert_eq!(v["children"], serde_json::json!([a, b]));
+    let v: serde_json::Value = serde_json::from_str(&stdout(
+        foam(dir.path()).args(["--json", "update", &a, &b, "-p", "1"]),
+    ))
+    .unwrap();
+    assert_eq!(v.as_array().unwrap().len(), 2);
+    let v: serde_json::Value = serde_json::from_str(&stdout(
+        foam(dir.path()).args(["--json", "update", &c, "-p", "1"]),
+    ))
+    .unwrap();
+    assert_eq!(v["id"], c);
+
+    // v0.3.0 under a, which is under v0.3.0, would loop
+    let out = foam(dir.path())
+        .args(["update", &v3, "--parent", &a])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("cannot be its parent"));
+    let out = foam(dir.path())
+        .args(["update", &a, "--parent", &a])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(stdout(foam(dir.path()).arg("doctor")).starts_with("ok:"));
+}

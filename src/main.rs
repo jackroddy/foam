@@ -96,9 +96,10 @@ enum Cmd {
     Blocked,
     /// One screen: milestones, in progress, ready, blocked and the recent log
     Board,
-    /// Change fields of an issue
+    /// Change fields of one or more issues
     Update {
-        id: String,
+        #[arg(required = true)]
+        ids: Vec<String>,
         #[arg(long, allow_hyphen_values = true)]
         title: Option<String>,
         #[arg(long, allow_hyphen_values = true)]

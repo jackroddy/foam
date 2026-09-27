@@ -48,6 +48,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `foam claim $(foam pick)`. Both need fzf on PATH.
 - `foam setup bash` prints a completion block for `.bashrc` that makes
   `foam show **<TAB>` search the issues in fzf and insert the id.
+- `foam update` takes several ids and applies the same change to each,
+  so `foam update a b c --parent <milestone>` moves three issues at once.
+  With `--json` it prints the one issue as before, or an array for
+  several.
+- `foam update --parent` refuses a parent that is the issue itself or
+  sits under it, and `foam doctor` reports a parent loop already in the
+  data.
 - `foam board` puts the backlog on one screen: open milestones with their
   rollups, what is in progress and how much lease is left, what is ready,
   what is blocked and by what, and the last few log entries. `--json` gives
