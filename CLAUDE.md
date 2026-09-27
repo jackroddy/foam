@@ -17,10 +17,21 @@ and leave it alone the rest of the time.
 ## Releases
 
 foam follows [semantic versioning](https://semver.org/spec/v2.0.0.html). While
-the crate is below 1.0, a breaking change takes the minor number.
+the crate is below 1.0, a breaking change takes the minor number. Tag every
+release, annotated, as `vMAJOR.MINOR.PATCH`, on the commit that was published.
 
-Tag every release, annotated, as `vMAJOR.MINOR.PATCH`, on the commit that was
-published.
+A release is a milestone titled `vX.Y.Z`, priority 1. Its children are the
+milestones and issues that ship in it, plus two standing chores: review the
+README against the binary, and cut the release (version in Cargo.toml, the
+changelog's Unreleased section dated, an annotated tag, dev merged to main;
+I push). The release is ready when every leaf below it is closed, and it is
+closed with the reason "tagged vX.Y.Z at <commit>".
+
+When the number changes, retitle the milestone: `foam update <id> --title
+vX.Y.Z`. When issues slip, create the next release and move them:
+`foam update <ids> --parent <next>`. When two planned releases merge, move
+one's children into the other and close the empty one as dropped. Add the
+next release's milestone as soon as something is known to belong to it.
 
 ## Formatting
 
