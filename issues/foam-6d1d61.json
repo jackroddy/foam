@@ -3,7 +3,7 @@
   "title": "Review the README before the 0.2.0 release",
   "body": "Read it top to bottom against the 0.2.0 binary: every command and flag it names exists and behaves as described, the prime sample matches, the sections read in a sensible order for someone arriving cold.",
   "type": "task",
-  "status": "open",
+  "status": "closed",
   "priority": 1,
   "labels": [],
   "parent": "foam-ef031b",
@@ -13,16 +13,19 @@
   "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-09-27T01:58:22.496312241Z",
-  "updated_at": "2026-09-27T05:01:19.31857153Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-09-27T06:41:25.956017352Z",
+  "closed_at": "2026-09-27T06:41:25.956017352Z",
+  "close_reason": "README rewritten and reviewed; landed as 'Rewrite the README' (671051b)",
+  "resolution": "done",
   "notes": [],
   "stamps": {
     "created": {
       "commit": "bfd6da5",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "671051b",
+      "branch": "dev"
+    }
   }
 }
