@@ -1,0 +1,28 @@
+{
+  "id": "foam-7800ac",
+  "title": "update takes several ids",
+  "body": "close and reopen take several ids; update takes one, so moving issues between releases is one command per issue. Let update take several, the same change applied to each.",
+  "type": "feature",
+  "status": "open",
+  "priority": 1,
+  "labels": [],
+  "parent": "foam-ef031b",
+  "blocked_by": [],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-09-27T02:28:35.943814383Z",
+  "updated_at": "2026-09-27T02:28:35.943814383Z",
+  "closed_at": null,
+  "close_reason": null,
+  "resolution": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "daf45ab",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
