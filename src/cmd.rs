@@ -479,15 +479,7 @@ pub fn run(cli: Cli) -> Result<()> {
             // the hook pipes in JSON with the session id; the
             // Bash tool exports the same id, so the actor prime
             // names is the one later commands resolve to
-            let session = if hook_json && !std::io::stdin().is_terminal() {
-                let mut raw = String::new();
-                let _ = std::io::Read::read_to_string(&mut std::io::stdin(), &mut raw);
-                serde_json::from_str::<serde_json::Value>(&raw)
-                    .ok()
-                    .and_then(|v| v["session_id"].as_str().map(str::to_string))
-            } else {
-                None
-            };
+            let session = if hook_json { hook_session_id() } else { None };
             if hook_json && session.is_none() {
                 eprintln!("foam: the SessionStart hook input carried no session_id");
             }
@@ -554,6 +546,34 @@ pub fn run(cli: Cli) -> Result<()> {
                 (key, None) => show(&load(&store)?.db.meta, key, cli.json),
                 (None, Some(_)) => bail!("a value needs a key"),
             }
+        }
+        Cmd::SessionEnd => {
+            if !store.exists()? {
+                return Ok(());
+            }
+            let session = hook_session_id();
+            let actor = actor_in_session(&store, &cli, session.as_deref());
+            let stamp = store.git.head_stamp()?;
+            let released = store.write(&format!("session end {actor}"), |db| {
+                let mut released = Vec::new();
+                for issue in db.issues.values_mut() {
+                    if issue.status == Status::InProgress
+                        && issue.assignee.as_deref() == Some(&*actor)
+                    {
+                        issue.notes.push(Note {
+                            at: Timestamp::now(),
+                            author: actor.clone(),
+                            text: "released at session end".into(),
+                            commit: stamp.commit.clone(),
+                            branch: stamp.branch.clone(),
+                        });
+                        issue.unclaim();
+                        released.push(issue.id.clone());
+                    }
+                }
+                Ok(released)
+            })?;
+            done(&released, "released", cli.json)
         }
         Cmd::Setup { command } => match command {
             SetupCmd::Claude { remove } => setup_claude(&store, remove),
@@ -671,7 +691,11 @@ fn init(store: &Store, prefix: Option<String>) -> Result<()> {
     Ok(())
 }
 
-const HOOK_COMMAND: &str = "foam prime --hook-json";
+/// The hooks `setup claude` installs, by event.
+const CLAUDE_HOOKS: [(&str, &str); 2] = [
+    ("SessionStart", "foam prime --hook-json"),
+    ("SessionEnd", "foam session-end"),
+];
 
 /// Add or remove the SessionStart hook in `.claude/settings.json`,
 /// leaving everything else in the file as it was.
@@ -694,38 +718,42 @@ fn setup_claude(store: &Store, remove: bool) -> Result<()> {
     if !hooks.is_object() {
         bail!("{}: \"hooks\" is not an object", path.display());
     }
-    let session_start = hooks
-        .as_object_mut()
-        .unwrap()
-        .entry("SessionStart")
-        .or_insert_with(|| serde_json::json!([]));
-    let Some(entries) = session_start.as_array_mut() else {
-        bail!("{}: \"SessionStart\" is not an array", path.display());
-    };
-    let is_ours = |entry: &serde_json::Value| {
-        entry["hooks"].as_array().is_some_and(|hs| {
-            hs.iter()
-                .any(|h| h["command"].as_str() == Some(HOOK_COMMAND))
-        })
-    };
-    let present = entries.iter().any(is_ours);
-    if remove {
-        entries.retain(|e| !is_ours(e));
-    } else if !present {
-        entries.push(serde_json::json!({
-            "matcher": "",
-            "hooks": [{ "type": "command", "command": HOOK_COMMAND }],
-        }));
+    let mut changed = false;
+    for (event, command) in CLAUDE_HOOKS {
+        let entries = hooks
+            .as_object_mut()
+            .unwrap()
+            .entry(event)
+            .or_insert_with(|| serde_json::json!([]));
+        let Some(entries) = entries.as_array_mut() else {
+            bail!("{}: \"{event}\" is not an array", path.display());
+        };
+        let is_ours = |entry: &serde_json::Value| {
+            entry["hooks"]
+                .as_array()
+                .is_some_and(|hs| hs.iter().any(|h| h["command"].as_str() == Some(command)))
+        };
+        let present = entries.iter().any(is_ours);
+        if remove && present {
+            entries.retain(|e| !is_ours(e));
+            changed = true;
+        } else if !remove && !present {
+            entries.push(serde_json::json!({
+                "matcher": "",
+                "hooks": [{ "type": "command", "command": command }],
+            }));
+            changed = true;
+        }
     }
     std::fs::create_dir_all(path.parent().unwrap())?;
     let mut bytes = serde_json::to_vec_pretty(&settings)?;
     bytes.push(b'\n');
     std::fs::write(&path, bytes)?;
-    match (remove, present) {
-        (true, true) => println!("removed the foam hook from {}", path.display()),
-        (true, false) => println!("no foam hook in {}", path.display()),
-        (false, true) => println!("the foam hook is already in {}", path.display()),
-        (false, false) => println!("added the foam hook to {}", path.display()),
+    match (remove, changed) {
+        (true, true) => println!("removed the foam hooks from {}", path.display()),
+        (true, false) => println!("no foam hooks in {}", path.display()),
+        (false, true) => println!("added the foam hooks to {}", path.display()),
+        (false, false) => println!("the foam hooks are already in {}", path.display()),
     }
     Ok(())
 }
@@ -958,6 +986,19 @@ fn get_mut<'a>(db: &'a mut Db, id: &str) -> Result<&'a mut Issue> {
     db.issues
         .get_mut(id)
         .with_context(|| format!("no such issue: {id}"))
+}
+
+/// The session id from a Claude Code hook's JSON on stdin, when
+/// stdin is a pipe and carries one.
+fn hook_session_id() -> Option<String> {
+    if std::io::stdin().is_terminal() {
+        return None;
+    }
+    let mut raw = String::new();
+    std::io::Read::read_to_string(&mut std::io::stdin(), &mut raw).ok()?;
+    serde_json::from_str::<serde_json::Value>(&raw)
+        .ok()
+        .and_then(|v| v["session_id"].as_str().map(str::to_string))
 }
 
 /// Set in every process Claude Code's Bash tool runs.

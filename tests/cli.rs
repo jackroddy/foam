@@ -361,6 +361,39 @@ fn actor_falls_back_to_the_environment() {
         "{text}"
     );
 
+    // the SessionEnd hook releases what the session held and
+    // leaves a note saying so; other holders are untouched
+    let b = stdout(foam(dir.path()).args(["create", "b"]));
+    stdout(foam(dir.path()).args(["--actor", "ann", "claim", &b]));
+    let mut child = foam(dir.path())
+        .arg("session-end")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    std::io::Write::write_all(
+        child.stdin.as_mut().unwrap(),
+        br#"{"session_id":"11111111-2222","hook_event_name":"SessionEnd","reason":"other"}"#,
+    )
+    .unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        format!("released {a}")
+    );
+    let shown = stdout(foam(dir.path()).args(["show", &a]));
+    assert!(
+        shown.contains("status: open") && shown.contains("released at session end"),
+        "{shown}"
+    );
+    assert!(stdout(foam(dir.path()).args(["show", &b])).contains("assignee: ann"));
+    let plain = repo();
+    foam(plain.path())
+        .arg("session-end")
+        .assert()
+        .success()
+        .stdout("");
+
     // inside Claude Code with no session id, foam says so rather
     // than silently letting every session share one actor
     let out = foam(dir.path())
@@ -601,6 +634,10 @@ fn setup_claude_merges_into_settings() {
         v["hooks"]["SessionStart"][0]["hooks"][0]["command"],
         "foam prime --hook-json"
     );
+    assert_eq!(
+        v["hooks"]["SessionEnd"][0]["hooks"][0]["command"],
+        "foam session-end"
+    );
 
     // adding again is a no-op; other settings survive both ways
     std::fs::write(
@@ -616,6 +653,7 @@ fn setup_claude_merges_into_settings() {
     stdout(foam(dir.path()).args(["setup", "claude", "--remove"]));
     let v: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
     assert_eq!(v["hooks"]["SessionStart"].as_array().unwrap().len(), 1);
+    assert_eq!(v["hooks"]["SessionEnd"].as_array().unwrap().len(), 0);
     assert_eq!(
         v["hooks"]["SessionStart"][0]["hooks"][0]["command"],
         "echo hi"

@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - A README.
+- `foam session-end` releases every claim the session holds and notes
+  "released at session end" on each. `foam setup claude` installs it as a
+  SessionEnd hook beside the SessionStart one.
 - `foam show` lists an issue's children, and `--json` output carries them
   under `children`.
 - `foam config` shows and sets `lease-minutes` and `stale-after`. Both live

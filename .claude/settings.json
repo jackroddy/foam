@@ -1,5 +1,16 @@
 {
   "hooks": {
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "command": "foam session-end",
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      }
+    ],
     "SessionStart": [
       {
         "hooks": [

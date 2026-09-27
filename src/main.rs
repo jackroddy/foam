@@ -184,6 +184,9 @@ enum Cmd {
         #[arg(long, default_value_t = 10)]
         limit: usize,
     },
+    /// Release every claim this session holds; the SessionEnd hook runs it
+    #[command(name = "session-end")]
+    SessionEnd,
     /// Install or remove an editor integration
     Setup {
         #[command(subcommand)]
