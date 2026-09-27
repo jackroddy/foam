@@ -3,20 +3,20 @@
   "title": "Any id argument takes a unique prefix or a title word",
   "body": "",
   "type": "feature",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 2,
   "labels": [],
   "parent": null,
   "blocked_by": [],
   "related": [],
   "assignee": "Jack Roddy/2ae76934",
-  "lease_expires": "2026-09-27T01:14:28.324800644Z",
+  "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-09-27T00:59:28.316652925Z",
-  "updated_at": "2026-09-27T01:00:33.584537149Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-09-27T01:07:38.988447301Z",
+  "closed_at": "2026-09-27T01:07:38.988447301Z",
+  "close_reason": "resolve() on every id argument; committed as 'Let any id argument take a unique prefix or a title word'",
+  "resolution": "done",
   "notes": [
     {
       "at": "2026-09-27T01:00:33.584536729Z",
@@ -31,6 +31,9 @@
       "commit": "4da87ba",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "d5db1c6",
+      "branch": "dev"
+    }
   }
 }
