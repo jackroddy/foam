@@ -13,10 +13,10 @@
   "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-09-26T22:21:19.267993259Z",
-  "updated_at": "2026-09-26T22:42:17.483251427Z",
+  "updated_at": "2026-09-27T00:07:37.765995034Z",
   "closed_at": "2026-09-26T22:42:17.483251427Z",
   "close_reason": "non-goal",
-  "resolution": null,
+  "resolution": "dropped",
   "notes": [],
   "stamps": {
     "created": {
