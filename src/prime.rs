@@ -54,7 +54,7 @@ pub fn render(db: &Db, git: &Git, actor: &str, limit: usize, reclaimed: &[String
         .unwrap_or(("?", "?"));
     let _ = write!(
         out,
-        "\n## Status\n\n{} open, {} in progress, {} deferred, {} closed; on {branch} at {commit}\n",
+        "\n## Status\n\n{} open, {} in progress, {} deferred, {} closed; on {branch} at {commit}\nacting as {actor}\n",
         count(Status::Open),
         count(Status::InProgress),
         count(Status::Deferred),

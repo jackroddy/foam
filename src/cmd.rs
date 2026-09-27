@@ -1,3 +1,5 @@
+use std::io::IsTerminal;
+
 use anyhow::{Context, Result, bail};
 use jiff::Timestamp;
 
@@ -451,7 +453,22 @@ pub fn run(cli: Cli) -> Result<()> {
                 }
                 bail!("foam is not initialized here");
             };
-            let actor = actor(&store, &cli);
+            // the hook pipes in JSON with the session id; the
+            // Bash tool exports the same id, so the actor prime
+            // names is the one later commands resolve to
+            let session = if hook_json && !std::io::stdin().is_terminal() {
+                let mut raw = String::new();
+                let _ = std::io::Read::read_to_string(&mut std::io::stdin(), &mut raw);
+                serde_json::from_str::<serde_json::Value>(&raw)
+                    .ok()
+                    .and_then(|v| v["session_id"].as_str().map(str::to_string))
+            } else {
+                None
+            };
+            if hook_json && session.is_none() {
+                eprintln!("foam: the SessionStart hook input carried no session_id");
+            }
+            let actor = actor_in_session(&store, &cli, session.as_deref());
             let mut snap = snap;
             let reclaimed = if snap
                 .db
@@ -846,6 +863,11 @@ fn doctor(store: &Store, json: bool) -> Result<()> {
             report("no foam pre-push hook; `foam sync --setup` installs it".into());
         }
     }
+    if session_gap() {
+        report(format!(
+            "{CLAUDE_MARK} is set but {CLAUDE_SESSION} is not; every Claude Code session gets the same actor"
+        ));
+    }
     if json {
         println!("{}", serde_json::to_string_pretty(&problems)?);
     } else if problems.is_empty() {
@@ -915,13 +937,53 @@ fn get_mut<'a>(db: &'a mut Db, id: &str) -> Result<&'a mut Issue> {
         .with_context(|| format!("no such issue: {id}"))
 }
 
+/// Set in every process Claude Code's Bash tool runs.
+//
+// both names were read off a live session's environment,
+// not from documentation; if a Claude Code release drops
+// or renames one, session_gap() is what notices
+const CLAUDE_MARK: &str = "CLAUDECODE";
+const CLAUDE_SESSION: &str = "CLAUDE_CODE_SESSION_ID";
+
+/// Whether this is a Claude Code session with no session id,
+/// which would give every session the same actor.
+fn session_gap() -> bool {
+    std::env::var_os(CLAUDE_MARK).is_some() && std::env::var_os(CLAUDE_SESSION).is_none()
+}
+
 fn actor(store: &Store, cli: &Options) -> String {
-    cli.actor
+    let actor = actor_in_session(store, cli, None);
+    if cli.actor.is_none() && std::env::var_os("FOAM_ACTOR").is_none() && session_gap() {
+        eprintln!(
+            "foam: no session id from Claude Code; acting as {actor}, pass --actor to keep sessions apart"
+        );
+    }
+    actor
+}
+
+/// Who is acting. An explicit `--actor` or `$FOAM_ACTOR` is taken
+/// whole; otherwise the git user gets a session suffix, so two
+/// sessions of one person do not share their claims.
+fn actor_in_session(store: &Store, cli: &Options, session: Option<&str>) -> String {
+    if let Some(a) = cli
+        .actor
         .clone()
         .or_else(|| std::env::var("FOAM_ACTOR").ok())
-        .or_else(|| store.git.config("user.name"))
+    {
+        return a;
+    }
+    let base = store
+        .git
+        .config("user.name")
         .or_else(|| std::env::var("USER").ok())
-        .unwrap_or_else(|| "unknown".to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let session = std::env::var(CLAUDE_SESSION)
+        .ok()
+        .or_else(|| session.map(str::to_string));
+    match session {
+        Some(s) if !s.is_empty() => format!("{base}/{}", s.chars().take(8).collect::<String>()),
+        _ => base,
+    }
 }
 
 fn fresh_id(db: &Db) -> String {

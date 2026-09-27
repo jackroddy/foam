@@ -20,6 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Inside a Claude Code session the default actor is the git user with a
+  session suffix, `Jack/1a2b3c4d`, so two sessions of one person hold
+  separate claims. `--actor` and `$FOAM_ACTOR` still win. The SessionStart
+  hook reads the session id from its stdin, and `prime` now says who it is
+  acting as. If Claude Code is present but the session id is not, every
+  command warns on stderr and `doctor` reports it.
 - A body, title, note, memory or close reason may start with a dash.
 - `foam remember` refuses a text over 512 bytes.
 - The priorities have meanings: P0 blocks all other work, P1 this session,

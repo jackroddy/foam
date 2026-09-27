@@ -18,6 +18,10 @@ fn repo() -> tempfile::TempDir {
 fn foam(dir: &Path) -> Command {
     let mut cmd = Command::cargo_bin("foam").unwrap();
     cmd.current_dir(dir);
+    // the tests may themselves run inside a Claude Code session
+    cmd.env_remove("CLAUDECODE");
+    cmd.env_remove("CLAUDE_CODE_SESSION_ID");
+    cmd.env_remove("FOAM_ACTOR");
     cmd
 }
 
@@ -310,6 +314,68 @@ fn actor_falls_back_to_the_environment() {
     );
     let v: serde_json::Value = serde_json::from_str(&json).unwrap();
     assert_eq!(v["assignee"], "env-actor");
+
+    // a Claude Code session suffixes the git user, so two sessions
+    // of one person hold separate claims
+    let session = |id: &str| {
+        let mut c = foam(dir.path());
+        c.env("CLAUDE_CODE_SESSION_ID", id);
+        c
+    };
+    stdout(foam(dir.path()).args(["--actor", "env-actor", "unclaim", &a]));
+    let v: serde_json::Value = serde_json::from_str(&stdout(
+        session("11111111-2222").args(["--json", "claim", &a]),
+    ))
+    .unwrap();
+    let assignee = v["assignee"].as_str().unwrap().to_string();
+    assert!(assignee.ends_with("/11111111"), "{assignee}");
+    session("33333333-4444")
+        .args(["claim", &a])
+        .assert()
+        .code(1);
+    session("11111111-2222")
+        .args(["heartbeat", &a])
+        .assert()
+        .success();
+
+    // prime under the hook reads the session id from stdin
+    let mut child = foam(dir.path())
+        .args(["prime", "--hook-json"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    std::io::Write::write_all(
+        child.stdin.as_mut().unwrap(),
+        br#"{"session_id":"11111111-2222","hook_event_name":"SessionStart"}"#,
+    )
+    .unwrap();
+    let out = child.wait_with_output().unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains(&format!("acting as {assignee}")), "{text}");
+    assert!(
+        text.contains(&format!("## In progress for {assignee}")),
+        "{text}"
+    );
+
+    // inside Claude Code with no session id, foam says so rather
+    // than silently letting every session share one actor
+    let out = foam(dir.path())
+        .env("CLAUDECODE", "1")
+        .args(["note", &a, "hello"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("no session id from Claude Code"), "{err}");
+    let out = foam(dir.path())
+        .env("CLAUDECODE", "1")
+        .arg("doctor")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("CLAUDE_CODE_SESSION_ID is not"));
+    assert!(stdout(foam(dir.path()).arg("doctor")).starts_with("ok:"));
 }
 
 fn commit(dir: &Path, msg: &str) {

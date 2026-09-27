@@ -25,7 +25,7 @@ struct Cli {
     #[arg(long, global = true)]
     json: bool,
 
-    /// Who is acting; defaults to $FOAM_ACTOR, then git user.name, then $USER
+    /// Who is acting; defaults to $FOAM_ACTOR, then git user.name or $USER with a Claude Code session suffix
     #[arg(long, global = true)]
     actor: Option<String>,
 
