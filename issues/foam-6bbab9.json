@@ -1,0 +1,28 @@
+{
+  "id": "foam-6bbab9",
+  "title": "Refuse a parent loop and have doctor report one",
+  "body": "update --parent refuses only an issue as its own parent; a under b under a is accepted. Refuse it the way dep add refuses a blocker cycle, and have doctor report a loop already in the data.",
+  "type": "bug",
+  "status": "open",
+  "priority": 1,
+  "labels": [],
+  "parent": "foam-ef031b",
+  "blocked_by": [],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-09-27T02:28:35.952852267Z",
+  "updated_at": "2026-09-27T02:28:35.952852267Z",
+  "closed_at": null,
+  "close_reason": null,
+  "resolution": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "daf45ab",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
