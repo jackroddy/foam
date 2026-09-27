@@ -16,6 +16,7 @@
   "updated_at": "2026-09-26T22:34:03.579994782Z",
   "closed_at": "2026-09-26T22:34:03.579994782Z",
   "close_reason": "commit b107e0c; tests in graph.rs and tests/cli.rs",
+  "resolution": null,
   "notes": [],
   "stamps": {
     "created": {

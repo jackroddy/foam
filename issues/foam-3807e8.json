@@ -16,6 +16,7 @@
   "updated_at": "2026-09-26T22:21:48.480852678Z",
   "closed_at": "2026-09-26T22:21:48.480852678Z",
   "close_reason": "main resets SIGPIPE to SIG_DFL; tests/cli.rs pipes list into head -c 1",
+  "resolution": null,
   "notes": [],
   "stamps": {
     "created": {

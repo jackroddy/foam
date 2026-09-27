@@ -16,6 +16,7 @@
   "updated_at": "2026-09-26T23:00:08.532155024Z",
   "closed_at": "2026-09-26T23:00:08.532155024Z",
   "close_reason": "commit 08151e5; config lives in meta.json, test in tests/cli.rs",
+  "resolution": null,
   "notes": [],
   "stamps": {
     "created": {

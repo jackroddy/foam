@@ -16,6 +16,7 @@
   "updated_at": "2026-09-26T23:07:47.019760488Z",
   "closed_at": "2026-09-26T23:07:47.019760488Z",
   "close_reason": "non-goal; stamps on create and close already tie issues to code commits",
+  "resolution": null,
   "notes": [],
   "stamps": {
     "created": {

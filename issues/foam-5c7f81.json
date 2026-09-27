@@ -16,6 +16,7 @@
   "updated_at": "2026-09-26T22:36:58.727720978Z",
   "closed_at": "2026-09-26T22:36:58.727720978Z",
   "close_reason": "committed in e695a89; a missing foam binary is a non-blocking hook error",
+  "resolution": null,
   "notes": [],
   "stamps": {
     "created": {
