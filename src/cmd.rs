@@ -156,7 +156,7 @@ pub fn run(cli: Cli) -> Result<()> {
             } else {
                 let rows: Vec<(&Issue, String)> = blocked
                     .iter()
-                    .map(|(i, by)| (*i, format!("<- {}", by.join(" "))))
+                    .map(|(i, by)| (*i, format!("waits on {}", by.join(" "))))
                     .collect();
                 print!("{}", render::listing(&cli.style, Some(&snap.db), &rows));
             }
@@ -1169,7 +1169,7 @@ fn board(store: &Store, cli: &Options) -> Result<()> {
         println!("\n{}", style.bold("Blocked"));
         let rows: Vec<(&Issue, String)> = blocked
             .iter()
-            .map(|(i, by)| (*i, format!("<- {}", by.join(" "))))
+            .map(|(i, by)| (*i, format!("waits on {}", by.join(" "))))
             .collect();
         print!("{}", render::listing(style, Some(db), &rows));
     }
@@ -1402,11 +1402,24 @@ fn print_written(issue: &Issue, cli: &Options) -> Result<()> {
     Ok(())
 }
 
+/// Print issues, each held one trailing `<- a b` for its open
+/// blockers, so a listing shows the whole graph.
 fn print_issues(issues: &[&Issue], db: &Db, cli: &Options) -> Result<()> {
     if cli.json {
         println!("{}", serde_json::to_string_pretty(issues)?);
     } else {
-        let rows: Vec<(&Issue, String)> = issues.iter().map(|i| (*i, String::new())).collect();
+        let rows: Vec<(&Issue, String)> = issues
+            .iter()
+            .map(|i| {
+                let by = graph::open_blockers(db, i);
+                let suffix = if by.is_empty() {
+                    String::new()
+                } else {
+                    format!("waits on {}", by.join(" "))
+                };
+                (*i, suffix)
+            })
+            .collect();
         print!("{}", render::listing(&cli.style, Some(db), &rows));
     }
     Ok(())

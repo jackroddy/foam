@@ -152,7 +152,7 @@ fn ready_and_blocked_follow_the_graph() {
     assert!(ready.starts_with(&a));
     let blocked = stdout(foam(dir.path()).arg("blocked"));
     assert_eq!(blocked.lines().count(), 2);
-    assert!(blocked.contains(&format!("<- {a}")));
+    assert!(blocked.contains(&format!("waits on {a}")));
 
     stdout(foam(dir.path()).args(["close", &a, "--reason", "done"]));
     let ready = stdout(foam(dir.path()).arg("ready"));
@@ -1018,7 +1018,7 @@ fn a_milestone_shows_its_children_and_waits_on_them() {
     assert!(!ready.contains(&milestone));
     let blocked = stdout(foam(dir.path()).arg("blocked"));
     assert!(blocked.starts_with(&milestone), "{blocked}");
-    assert!(blocked.ends_with(&format!("<- {a} {b}")), "{blocked}");
+    assert!(blocked.ends_with(&format!("waits on {a} {b}")), "{blocked}");
 
     let text = stdout(foam(dir.path()).args(["prime", "--limit", "1"]));
     assert!(
@@ -1031,7 +1031,7 @@ fn a_milestone_shows_its_children_and_waits_on_them() {
 
     stdout(foam(dir.path()).args(["close", &a, "--reason", "done"]));
     let blocked = stdout(foam(dir.path()).arg("blocked"));
-    assert!(blocked.contains("big  [1/2 closed]  <-"), "{blocked}");
+    assert!(blocked.contains("big  [1/2 closed]  waits on"), "{blocked}");
     stdout(foam(dir.path()).args(["close", &b, "--reason", "done"]));
     let ready = stdout(foam(dir.path()).arg("ready"));
     assert!(
@@ -1173,7 +1173,7 @@ fn board_shows_every_section_and_plain_matches_a_pipe() {
         "{board}"
     );
     assert!(
-        board.contains(&format!("{b}  P2  open  two  <- {a}")),
+        board.contains(&format!("{b}  P2  open  two  waits on {a}")),
         "{board}"
     );
     assert!(board.contains(&format!("claim {a} by ann")), "{board}");
@@ -1391,7 +1391,7 @@ fn a_milestone_of_milestones_rolls_up_the_leaves() {
     );
     let blocked = stdout(foam(dir.path()).arg("blocked"));
     assert!(
-        blocked.contains(&format!("v1  [1/3 closed]  <- {m}")),
+        blocked.contains(&format!("v1  [1/3 closed]  waits on {m}")),
         "{blocked}"
     );
 }
@@ -1434,4 +1434,20 @@ fn update_moves_several_issues_and_refuses_a_parent_loop() {
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
     assert!(stdout(foam(dir.path()).arg("doctor")).starts_with("ok:"));
+}
+
+#[test]
+fn list_shows_open_blockers_as_a_suffix() {
+    let dir = repo();
+    stdout(foam(dir.path()).args(["init", "--prefix", "t"]));
+    let a = stdout(foam(dir.path()).args(["create", "first"]));
+    let b = stdout(foam(dir.path()).args(["create", "second", "--blocked-by", &a]));
+    let listed = stdout(foam(dir.path()).arg("list"));
+    assert!(
+        listed.contains(&format!("{b}  P2  open  second  waits on {a}")),
+        "{listed}"
+    );
+    stdout(foam(dir.path()).args(["close", &a, "--reason", "done"]));
+    let listed = stdout(foam(dir.path()).arg("list"));
+    assert!(!listed.contains("waits on"), "{listed}");
 }

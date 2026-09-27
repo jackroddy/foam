@@ -55,6 +55,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `foam update --parent` refuses a parent that is the issue itself or
   sits under it, and `foam doctor` reports a parent loop already in the
   data.
+- `list` and `search` end a held issue's line with `waits on <ids>`, its
+  open blockers, so a listing shows the whole graph: parents by nesting,
+  blockers by suffix. `blocked` and `board` say `waits on` instead of `<-`.
 - `foam board` puts the backlog on one screen: open milestones with their
   rollups, what is in progress and how much lease is left, what is ready,
   what is blocked and by what, and the last few log entries. `--json` gives
