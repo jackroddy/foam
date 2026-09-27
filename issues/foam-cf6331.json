@@ -3,20 +3,20 @@
   "title": "list nests a milestone's children under it",
   "body": "",
   "type": "feature",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 2,
   "labels": [],
   "parent": null,
   "blocked_by": [],
   "related": [],
   "assignee": "Jack Roddy/2ae76934",
-  "lease_expires": "2026-09-27T01:08:22.882970897Z",
+  "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-09-27T00:53:22.874828897Z",
-  "updated_at": "2026-09-27T00:53:38.750299606Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-09-27T00:54:32.696536659Z",
+  "closed_at": "2026-09-27T00:54:32.696536659Z",
+  "close_reason": "render::forest nests listed children under a listed parent; committed as 'Draw a milestone's listed children under it in list, ready, blocked and search'",
+  "resolution": "done",
   "notes": [
     {
       "at": "2026-09-27T00:53:38.750299206Z",
@@ -31,6 +31,9 @@
       "commit": "37cfd60",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "4da87ba",
+      "branch": "dev"
+    }
   }
 }
