@@ -11,16 +11,27 @@ use crate::store::Db;
 /// The most bytes the memories section may take.
 const MEMORY_BUDGET: usize = 4096;
 
-const CONTRACT: &str = "\
+/// What every session reads first: the one rule foam itself owns.
+pub const CONTRACT: &str = "\
 foam tracks this repository's issues and memories on a git ref; nothing is \
-checked out and nothing here is a file to edit. Start with `foam ready` and \
-`foam claim <id>` before working on an issue. Record progress with \
-`foam note <id> <text>`, finish with `foam close <id> --reason <why>`, and \
-`foam unclaim <id>` anything you stop working on. Store facts the next \
-session needs with `foam remember <slug> <text>`; check `foam memories` \
-before relying on one that is marked as old or from another branch.";
+checked out and nothing here is a file to edit. It is the one place work and \
+facts go: not a TODO comment, a plan file, a handoff note, a todo list in the \
+harness, or the harness's own memory.
 
-const CHEAT_SHEET: &str = "\
+Work: `foam ready`, then `foam claim <id>` before touching code. When you find \
+work that has no issue, including anything noticed on the way, `foam create` \
+it and keep going. `foam note <id> <text>` when you decide something or hit a \
+dead end, so the next session does not retry it. `foam close <id> --reason \
+<why>` once it is done, and `foam unclaim <id>` anything you stop working on.
+
+Memories are facts about the code or the world that a next session would \
+otherwise rediscover: `foam remember <slug> <text>`. Remember facts, never \
+rules; a rule is something a person decided and belongs in CLAUDE.md. When a \
+fact would serve better as a rule or an issue, say so in your reply. A memory \
+marked old or from another branch may no longer hold: check it against the \
+code, `foam remember` it again if it still holds, `foam forget <slug>` if not.";
+
+pub const CHEAT_SHEET: &str = "\
 foam ready [--limit N]          issues that can be worked now
 foam show <id>                  one issue in full, with notes, blockers and children
 foam create <title> [--type T] [-p 0-4] [--blocked-by ID] [--parent ID]
@@ -154,9 +165,7 @@ pub fn render(db: &Db, git: &Git, actor: &str, limit: usize, reclaimed: &[String
         if marked > 0 {
             let _ = writeln!(
                 out,
-                "{marked} marked [at ..] {} old or from another branch: check each against the code, \
-                 `foam remember` it again if it still holds, `foam forget <slug>` if not.",
-                if marked == 1 { "is" } else { "are" }
+                "{marked} marked [at ..] may no longer hold: confirm or forget each, as above."
             );
         }
     }
@@ -172,4 +181,27 @@ pub fn hook_json(context: &str) -> String {
         }
     })
     .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_readme_shows_the_contract_and_cheat_sheet_as_prime_prints_them() {
+        let readme = include_str!("../README.md");
+        let sample = readme
+            .split("```text\n")
+            .nth(1)
+            .and_then(|s| s.split("```").next())
+            .expect("the README has a text block with a prime sample");
+        assert!(
+            sample.contains(CONTRACT),
+            "the README's prime sample is stale"
+        );
+        assert!(
+            sample.contains(CHEAT_SHEET),
+            "the README's prime sample is stale"
+        );
+    }
 }

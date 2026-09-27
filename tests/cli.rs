@@ -547,6 +547,10 @@ fn prime_reports_state_and_wraps_as_hook_json() {
     let text = stdout(foam(dir.path()).args(["--actor", "ann", "prime"]));
     assert!(text.starts_with("# foam\n"), "{text}");
     assert!(text.contains("## Commands"));
+    // the contract: precedence, the create trigger, facts not rules
+    assert!(text.contains("or the harness's own memory."), "{text}");
+    assert!(text.contains("`foam create` it and keep going."), "{text}");
+    assert!(text.contains("Remember facts, never rules;"), "{text}");
     assert!(text.contains("2 open, 1 in progress, 0 deferred, 0 closed; on main at "));
     assert!(text.contains(&format!("{c}  P2  mine  (lease 1")), "{text}");
     assert!(text.contains("## Ready (1 total)"));
@@ -1216,13 +1220,15 @@ fn prime_says_what_to_do_with_old_memories() {
     stdout(foam(dir.path()).args(["config", "stale-after", "0"]));
     let text = stdout(foam(dir.path()).arg("prime"));
     assert!(
-        text.contains("1 marked [at ..] is old or from another branch: check each"),
+        text.contains("1 marked [at ..] may no longer hold: confirm or forget each, as above."),
         "{text}"
     );
-    assert!(text.contains("`foam forget <slug>` if not."), "{text}");
     stdout(foam(dir.path()).args(["remember", "other", "also old"]));
     let text = stdout(foam(dir.path()).arg("prime"));
-    assert!(text.contains("2 marked [at ..] are old"), "{text}");
+    assert!(
+        text.contains("2 marked [at ..] may no longer hold"),
+        "{text}"
+    );
 }
 
 #[test]

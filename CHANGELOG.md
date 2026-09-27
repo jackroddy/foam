@@ -51,6 +51,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The contract at the top of `foam prime` now says where work and facts go
+  and where they do not: not a TODO comment, a plan file, a handoff note,
+  or the harness's own todo list or memory. It tells the agent to create
+  an issue for work it finds, to note decisions and dead ends, and to
+  remember facts and never rules, saying so when a fact would serve better
+  as a rule or an issue. The old-memory line under the memories section is
+  shorter and points at the contract.
 - The `epic` kind is now `milestone`: an issue whose children are its
   work. `--type epic` is still accepted, and records already written as
   `epic` load as milestones.
