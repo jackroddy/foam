@@ -1,0 +1,28 @@
+{
+  "id": "foam-692473",
+  "title": "Report how big refs/foam/data has grown",
+  "body": "Every write is a commit on refs/foam/data and the chain goes back to init, so the ref only grows, and today nothing shows by how much. A person who wants to know whether foam is bloating the repository has to hand-roll rev-list and cat-file.\n\nAdd a report, either as foam stats or as lines in foam doctor:\n\n- commits on the ref, and when the chain started\n- objects reachable from the ref and their size on disk (git rev-list --objects refs/foam/data | git cat-file --batch-check='%(objectsize:disk)'), split into what only the ref holds versus what the branches share\n- issue and memory counts, and the largest records\n- with --json, the same numbers for scripts\n\nCompaction (squashing old history) is a separate decision and not part of this; the report is what would tell us whether it is ever needed.",
+  "type": "feature",
+  "status": "open",
+  "priority": 3,
+  "labels": [],
+  "parent": null,
+  "blocked_by": [],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-09-28T23:48:21.725991955Z",
+  "updated_at": "2026-09-28T23:48:21.725991955Z",
+  "closed_at": null,
+  "close_reason": null,
+  "resolution": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "abb2b9e",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
