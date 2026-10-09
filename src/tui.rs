@@ -220,8 +220,14 @@ enum Row<'a> {
         /// How many rows under this one are folded away.
         hidden: usize,
     },
-    Log(String),
+    Log {
+        oid: String,
+        when: String,
+        msg: String,
+    },
     Note(&'static str),
+    /// The bottom edge of a section's box on the board.
+    End,
 }
 
 impl Row<'_> {
@@ -483,8 +489,13 @@ fn build<'a>(
                     .parse::<Timestamp>()
                     .map(|t| style.when(t))
                     .unwrap_or_else(|_| when.clone());
-                rows.push(Row::Log(format!("{}  {when}  {msg}", &oid[..7])));
+                rows.push(Row::Log {
+                    oid: oid[..7].to_string(),
+                    when,
+                    msg: msg.clone(),
+                });
             }
+            rows.push(Row::End);
         }
     }
     let widths = widths(&rows);
@@ -617,6 +628,7 @@ fn board_rows(db: &Db, now: Timestamp) -> Vec<Row<'_>> {
                 .into_iter()
                 .map(|i| issue(i, String::new())),
         );
+        rows.push(Row::End);
     }
     if !board.in_progress.is_empty() {
         rows.push(Row::Header("In progress"));
@@ -626,12 +638,14 @@ fn board_rows(db: &Db, now: Timestamp) -> Vec<Row<'_>> {
                 .into_iter()
                 .map(|i| issue(i, render::lease_left(i))),
         );
+        rows.push(Row::End);
     }
     rows.push(Row::Header("Ready"));
     if board.ready.is_empty() {
         rows.push(Row::Note("nothing is ready"));
     }
     rows.extend(board.ready.into_iter().map(|i| issue(i, String::new())));
+    rows.push(Row::End);
     if !board.blocked.is_empty() {
         rows.push(Row::Header("Blocked"));
         rows.extend(
@@ -640,6 +654,7 @@ fn board_rows(db: &Db, now: Timestamp) -> Vec<Row<'_>> {
                 .into_iter()
                 .map(|(i, by)| issue(i, waits_on(by))),
         );
+        rows.push(Row::End);
     }
     rows
 }
@@ -765,11 +780,16 @@ fn draw_rows(
     };
     // the gutter takes two columns from every row
     let width = usize::from(rows_area.width.saturating_sub(2));
-    let columns = Columns::at(width);
+    let boxed = screen.view == View::Board;
+    let columns = Columns::at(if boxed {
+        width.saturating_sub(4)
+    } else {
+        width
+    });
     let items: Vec<ListItem> = screen
         .rows
         .iter()
-        .map(|row| ListItem::new(line(row, &screen.widths, width, columns)))
+        .map(|row| ListItem::new(line(row, &screen.widths, width, columns, boxed)))
         .collect();
     let list = List::new(items)
         .highlight_style(CHOSEN)
@@ -1237,11 +1257,48 @@ impl Columns {
 }
 
 /// A row as one line of `width` columns, the title cut to fit.
-fn line<'a>(row: &'a Row, widths: &Widths, width: usize, columns: Columns) -> Line<'a> {
+/// On the board the rows are `boxed`: each section's header and
+/// end draw its edges and the rows between sit inside them.
+fn line<'a>(
+    row: &'a Row,
+    widths: &Widths,
+    width: usize,
+    columns: Columns,
+    boxed: bool,
+) -> Line<'a> {
+    let edge = |s: String| Span::styled(s, Style::new().add_modifier(Modifier::DIM));
+    let inside = |spans: Vec<Span<'a>>| -> Line<'a> {
+        if !boxed {
+            return Line::from(spans);
+        }
+        let used: usize = spans.iter().map(|s| s.content.chars().count()).sum();
+        let mut out = vec![edge("│ ".into())];
+        out.extend(spans);
+        out.push(edge(format!(
+            "{} │",
+            " ".repeat(width.saturating_sub(4 + used))
+        )));
+        Line::from(out)
+    };
     match row {
+        Row::Header(h) if boxed => Line::from(vec![
+            edge("╭─ ".into()),
+            Span::raw(*h).bold().cyan(),
+            edge(format!(
+                " {}╮",
+                "─".repeat(width.saturating_sub(h.chars().count() + 5))
+            )),
+        ]),
         Row::Header(h) => Line::from(Span::raw(*h).bold().cyan()),
-        Row::Note(n) => Line::from(Span::raw(*n).dim()),
-        Row::Log(l) => Line::from(Span::raw(l.as_str())),
+        Row::End => Line::from(edge(format!("╰{}╯", "─".repeat(width.saturating_sub(2))))),
+        Row::Note(n) => inside(vec![Span::raw(*n).dim()]),
+        Row::Log { oid, when, msg } => inside(vec![
+            Span::raw(oid.as_str()).dim(),
+            Span::raw("  "),
+            Span::raw(when.as_str()).dim(),
+            Span::raw("  "),
+            Span::raw(msg.as_str()),
+        ]),
         Row::Issue {
             lead,
             issue,
@@ -1292,12 +1349,17 @@ fn line<'a>(row: &'a Row, widths: &Widths, width: usize, columns: Columns) -> Li
             if *hidden > 0 {
                 tail.push(Span::raw(format!("  ▸ {hidden} folded")).dim());
             }
-            let room = width.saturating_sub(used);
+            let room = if boxed {
+                width.saturating_sub(4)
+            } else {
+                width
+            }
+            .saturating_sub(used);
             let tail_len: usize = tail.iter().map(|s| s.content.chars().count()).sum();
             let (title_room, tail_room) = split(issue.title.chars().count(), tail_len, room);
             spans.push(Span::raw(cut(&issue.title, title_room)));
             spans.extend(cut_spans(tail, tail_room));
-            Line::from(spans)
+            inside(spans)
         }
     }
 }
@@ -1422,30 +1484,30 @@ mod tests {
             kind: 9,
             rollup: 3,
         };
-        let child = line(&rows[2], &widths, 80, Columns::ALL);
+        let child = line(&rows[2], &widths, 80, Columns::ALL, false);
         assert_eq!(child.spans[0].content, "  └─ ");
         assert!(child.spans[0].style.add_modifier.contains(Modifier::DIM));
         assert_eq!(child.spans[1].content, "t-000002");
         assert_eq!(child.spans[1].style.fg, Some(Color::Cyan));
-        let held = line(&rows[0], &widths, 80, Columns::ALL);
+        let held = line(&rows[0], &widths, 80, Columns::ALL, false);
         let last = held.spans.last().unwrap();
         assert_eq!(last.content, "t-000002");
         assert_eq!(last.style.fg, Some(Color::Cyan));
         assert_eq!(
-            line(&rows[1], &widths, 80, Columns::ALL)
+            line(&rows[1], &widths, 80, Columns::ALL, false)
                 .to_string()
                 .trim_end(),
             "t-000001       P2  open  milestone  0/1  t"
         );
         // a narrow terminal drops the kind, then the status
         assert_eq!(
-            line(&rows[1], &widths, 70, Columns::at(70))
+            line(&rows[1], &widths, 70, Columns::at(70), false)
                 .to_string()
                 .trim_end(),
             "t-000001       P2  open  0/1  t"
         );
         assert_eq!(
-            line(&rows[1], &widths, 50, Columns::at(50))
+            line(&rows[1], &widths, 50, Columns::at(50), false)
                 .to_string()
                 .trim_end(),
             "t-000001       P2  0/1  t"
@@ -1456,7 +1518,7 @@ mod tests {
     }
 
     #[test]
-    fn board_rows_follow_the_sections_and_the_cursor_skips_headers() {
+    fn board_rows_follow_the_sections_and_the_cursor_skips_the_edges() {
         let mut m = test_issue("t-000001");
         m.kind = Kind::Milestone;
         let mut busy = test_issue("t-000002");
@@ -1473,17 +1535,20 @@ mod tests {
             ids(&rows),
             ["t-000001", "t-000002", "t-000001", "t-000003", "t-000004"]
         );
+        // each section closes its box
+        assert_eq!(rows.iter().filter(|r| matches!(r, Row::End)).count(), 4);
+        assert_eq!(rows.len(), 13);
 
-        // headers are never selected and the ends hold
+        // edges are never selected and the ends hold
         let first = step(&rows, None, 1).unwrap();
         assert!(rows[first].selectable() && first == 1);
         let second = step(&rows, Some(first), 1).unwrap();
-        assert_eq!(second, 3);
+        assert_eq!(second, 4);
         assert_eq!(step(&rows, Some(second), -1), Some(first));
         assert_eq!(step(&rows, Some(first), -1), Some(first));
         let last = step(&rows, None, -1).unwrap();
+        assert_eq!(last, 11);
         assert_eq!(step(&rows, Some(last), 1), Some(last));
-        assert_eq!(rows.len(), 9);
 
         // a reload keeps the cursor on an issue row and nowhere else
         let mut state = ListState::default();
@@ -1496,6 +1561,20 @@ mod tests {
         state.select(Some(99));
         keep(&mut state, &rows);
         assert_eq!(state.selected(), Some(first));
+
+        // boxed, every line is exactly as wide as the screen
+        let widths = widths(&rows);
+        let lines: Vec<String> = rows
+            .iter()
+            .map(|r| line(r, &widths, 40, Columns::at(36), true).to_string())
+            .collect();
+        assert!(lines.iter().all(|l| l.chars().count() == 40), "{lines:#?}");
+        assert!(lines[0].starts_with("╭─ Milestones ─"), "{}", lines[0]);
+        assert!(lines[0].ends_with("─╮"), "{}", lines[0]);
+        assert!(lines[1].starts_with("│ t-000001  P2  "), "{}", lines[1]);
+        assert!(lines[1].ends_with(" │"), "{}", lines[1]);
+        assert!(lines[2].starts_with("╰─"), "{}", lines[2]);
+        assert!(lines[2].ends_with("─╯"), "{}", lines[2]);
     }
 
     #[test]
@@ -1504,8 +1583,9 @@ mod tests {
         busy.status = Status::InProgress;
         let db = db(vec![busy]);
         let rows = board_rows(&db, Timestamp::now());
-        assert!(matches!(rows[2], Row::Header("Ready")));
-        assert!(matches!(rows[3], Row::Note("nothing is ready")));
+        assert!(matches!(rows[3], Row::Header("Ready")));
+        assert!(matches!(rows[4], Row::Note("nothing is ready")));
+        assert!(matches!(rows[5], Row::End));
         assert_eq!(step(&rows, None, 1), Some(1));
     }
 
@@ -1606,7 +1686,7 @@ mod tests {
         let rows = list_rows(&db, &Filter::default(), "ann", &top);
         assert_eq!(hidden(&rows), [("t-000001".to_string(), 2)]);
         let widths = widths(&rows);
-        let text = line(&rows[0], &widths, 80, Columns::ALL).to_string();
+        let text = line(&rows[0], &widths, 80, Columns::ALL, false).to_string();
         assert!(text.trim_end().ends_with("t  ▸ 2 folded"), "{text}");
         let middle: HashSet<String> = ["t-000002".to_string()].into();
         let rows = list_rows(&db, &Filter::default(), "ann", &middle);
