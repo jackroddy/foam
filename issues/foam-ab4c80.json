@@ -13,11 +13,19 @@
   "lease_expires": "2026-10-09T21:46:01.344196438Z",
   "defer_until": null,
   "created_at": "2026-10-09T21:31:01.333804904Z",
-  "updated_at": "2026-10-09T21:31:01.344196438Z",
+  "updated_at": "2026-10-09T21:34:34.845929219Z",
   "closed_at": null,
   "close_reason": null,
   "resolution": null,
-  "notes": [],
+  "notes": [
+    {
+      "at": "2026-10-09T21:34:34.845928749Z",
+      "author": "Jack Roddy/6de6737a",
+      "text": "Done: View::List is the default, View::Board on Tab, both from the same snapshot. list_rows goes through render::forest, now pub(crate) with separate lifetimes for the issues and the row slice, so the tree leads, rollups and 'waits on' match foam list exactly. Every list row is selectable; headers only exist on the board.",
+      "commit": "9964bca",
+      "branch": "dev"
+    }
+  ],
   "stamps": {
     "created": {
       "commit": "9964bca",
