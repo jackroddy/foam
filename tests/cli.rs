@@ -69,6 +69,17 @@ fn nothing_touches_the_working_tree() {
 }
 
 #[test]
+fn bare_foam_under_a_pipe_prints_the_usage() {
+    let dir = repo();
+    stdout(foam(dir.path()).args(["init", "--prefix", "t"]));
+    // stdout is a pipe here, so no screen opens, with or
+    // without the tui feature
+    let out = foam(dir.path()).output().unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("Usage: foam"));
+}
+
+#[test]
 fn exit_codes() {
     let dir = repo();
     let out = foam(dir.path()).arg("list").output().unwrap();

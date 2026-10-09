@@ -102,7 +102,8 @@ board, open an issue now and then, and step in with `foam create`,
 
 `foam board` puts everything on one screen, with milestones, what's in
 progress, what's ready, what's blocked and by what, and the recent
-history.
+history. Plain `foam` in a terminal opens the same board as a screen
+you can move around in: j and k move, r reloads, q quits.
 
 ```
 foam  on main at 9f25882  5 open, 1 in progress, 0 deferred, 2 closed
@@ -349,6 +350,7 @@ You need git 2.38 or newer and a Rust toolchain.
 git clone https://github.com/jackroddy/foam
 cd foam
 cargo install --path .        # installs foam into ~/.cargo/bin
+cargo install --path . --no-default-features   # without the screen
 cargo build --release         # or just build it: target/release/foam
 cargo test                    # unit tests and the integration tests
 ```

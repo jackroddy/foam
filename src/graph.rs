@@ -5,6 +5,44 @@ use jiff::Timestamp;
 use crate::model::{Issue, Kind, Status};
 use crate::store::Db;
 
+/// How many ready issues the board prints.
+pub const BOARD_READY: usize = 10;
+
+/// How many log entries the board shows.
+pub const BOARD_LOG: usize = 8;
+
+/// What the board shows: open milestones, issues in progress,
+/// ready and blocked, each highest priority first.
+pub struct Board<'a> {
+    pub milestones: Vec<&'a Issue>,
+    pub in_progress: Vec<&'a Issue>,
+    pub ready: Vec<&'a Issue>,
+    pub blocked: Vec<(&'a Issue, Vec<&'a str>)>,
+}
+
+pub fn board(db: &Db, now: Timestamp) -> Board<'_> {
+    fn by_priority(mut v: Vec<&Issue>) -> Vec<&Issue> {
+        v.sort_by_key(|i| (i.priority, i.created_at));
+        v
+    }
+    Board {
+        milestones: by_priority(
+            db.issues
+                .values()
+                .filter(|i| i.kind == Kind::Milestone && i.status != Status::Closed)
+                .collect(),
+        ),
+        in_progress: by_priority(
+            db.issues
+                .values()
+                .filter(|i| i.status == Status::InProgress)
+                .collect(),
+        ),
+        ready: ready(db, now),
+        blocked: blocked(db, now),
+    }
+}
+
 /// Whether an issue is waiting to be worked: open, or deferred
 /// to a time that has passed.
 pub fn is_pending(issue: &Issue, now: Timestamp) -> bool {

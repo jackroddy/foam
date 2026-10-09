@@ -7,7 +7,7 @@ use jiff::Timestamp;
 use crate::git::Push;
 use crate::graph;
 use crate::model::{
-    Issue, Kind, MEMORY_MAX_BYTES, Memory, Note, Resolution, Stamps, Status, check_slug, new_id,
+    Issue, MEMORY_MAX_BYTES, Memory, Note, Resolution, Stamps, Status, check_slug, new_id,
     parse_when,
 };
 use crate::prime;
@@ -22,16 +22,22 @@ struct Options {
     style: Style,
 }
 
-pub fn run(cli: Cli) -> Result<()> {
+/// Open the board as a screen in this terminal.
+#[cfg(feature = "tui")]
+pub fn tui(cli: Cli) -> Result<()> {
+    let store = Store::open(&cli.directory)?;
+    crate::tui::run(&store)
+}
+
+pub fn run(cli: Cli, command: Cmd) -> Result<()> {
     if let Cmd::Setup {
         command: SetupCmd::Bash,
-    } = cli.command
+    } = command
     {
         print!("{BASH_COMPLETION}");
         return Ok(());
     }
     let store = Store::open(&cli.directory)?;
-    let command = cli.command;
     let cli = Options {
         json: cli.json,
         actor: cli.actor,
@@ -1118,14 +1124,6 @@ fn doctor(store: &Store, json: bool) -> Result<()> {
 }
 
 /// The most ready issues and log entries the board shows.
-const BOARD_READY: usize = 10;
-const BOARD_LOG: usize = 8;
-
-fn by_priority(mut v: Vec<&Issue>) -> Vec<&Issue> {
-    v.sort_by_key(|i| (i.priority, i.created_at));
-    v
-}
-
 fn plain_rows<'a>(v: &[&'a Issue]) -> Vec<(&'a Issue, String)> {
     v.iter().map(|i| (*i, String::new())).collect()
 }
@@ -1134,22 +1132,13 @@ fn plain_rows<'a>(v: &[&'a Issue]) -> Vec<(&'a Issue, String)> {
 fn board(store: &Store, cli: &Options) -> Result<()> {
     let snap = load(store)?;
     let db = &snap.db;
-    let now = Timestamp::now();
-    let milestones = by_priority(
-        db.issues
-            .values()
-            .filter(|i| i.kind == Kind::Milestone && i.status != Status::Closed)
-            .collect(),
-    );
-    let in_progress = by_priority(
-        db.issues
-            .values()
-            .filter(|i| i.status == Status::InProgress)
-            .collect(),
-    );
-    let ready = graph::ready(db, now);
-    let blocked = graph::blocked(db, now);
-    let log = store.git.log(DATA_REF, BOARD_LOG, None)?;
+    let graph::Board {
+        milestones,
+        in_progress,
+        ready,
+        blocked,
+    } = graph::board(db, Timestamp::now());
+    let log = store.git.log(DATA_REF, graph::BOARD_LOG, None)?;
     if cli.json {
         let blocked: Vec<serde_json::Value> = blocked
             .iter()
@@ -1204,10 +1193,14 @@ fn board(store: &Store, cli: &Options) -> Result<()> {
             .collect();
         print!("{}", render::listing(style, Some(db), &rows));
     }
-    if ready.len() > BOARD_READY {
+    if ready.len() > graph::BOARD_READY {
         println!(
             "\n{}",
-            style.bold(&format!("Ready ({BOARD_READY} of {})", ready.len()))
+            style.bold(&format!(
+                "Ready ({} of {})",
+                graph::BOARD_READY,
+                ready.len()
+            ))
         );
     } else {
         println!("\n{}", style.bold("Ready"));
@@ -1220,7 +1213,7 @@ fn board(store: &Store, cli: &Options) -> Result<()> {
         render::listing(
             style,
             Some(db),
-            &plain_rows(&ready[..ready.len().min(BOARD_READY)])
+            &plain_rows(&ready[..ready.len().min(graph::BOARD_READY)])
         )
     );
     if !blocked.is_empty() {

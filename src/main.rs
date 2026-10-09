@@ -6,16 +6,24 @@ mod model;
 mod prime;
 mod render;
 mod store;
+#[cfg(feature = "tui")]
+mod tui;
 
+#[cfg(feature = "tui")]
+use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 
 use crate::model::{Kind, Resolution, Status};
 
 /// An issue tracker and agent memory that lives on a git ref
 #[derive(Parser)]
+#[cfg_attr(
+    feature = "tui",
+    command(after_help = "With no command, in a terminal, foam opens the board as a screen.")
+)]
 #[command(name = "foam", version)]
 struct Cli {
     /// Run as if started in this directory
@@ -35,7 +43,7 @@ struct Cli {
     actor: Option<String>,
 
     #[command(subcommand)]
-    command: Cmd,
+    command: Option<Cmd>,
 }
 
 #[derive(Subcommand)]
@@ -276,8 +284,22 @@ fn main() -> ExitCode {
         // any other thread exists
         libc::signal(libc::SIGPIPE, libc::SIG_DFL);
     }
-    let cli = Cli::parse();
-    match cmd::run(cli) {
+    let mut cli = Cli::parse();
+    let Some(command) = cli.command.take() else {
+        // a pipe, a hook or an agent gets the usage, never a
+        // screen
+        #[cfg(feature = "tui")]
+        if std::io::stdin().is_terminal() && std::io::stdout().is_terminal() {
+            return exit(cmd::tui(cli));
+        }
+        let _ = Cli::command().print_help();
+        return ExitCode::from(2);
+    };
+    exit(cmd::run(cli, command))
+}
+
+fn exit(result: anyhow::Result<()>) -> ExitCode {
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
             eprintln!("foam: {err:#}");

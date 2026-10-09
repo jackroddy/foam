@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A board screen. `foam` with no command, in a terminal, opens what
+  `foam board` prints as a screen with a cursor: j and k move, g and G
+  jump to the ends, r reloads, q quits. It sits behind the `tui` cargo
+  feature, on by default; `cargo install --no-default-features` builds
+  without it. Under a pipe or a hook, bare `foam` prints the usage as
+  before.
+
 ## [0.2.1] - 2026-10-09
 
 ### Changed
