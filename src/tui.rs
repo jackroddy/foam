@@ -163,6 +163,7 @@ fn screen(terminal: &mut DefaultTerminal, store: &Store) -> Result<()> {
     let mut view = View::List;
     let mut mode = Mode::Rows;
     let mut state = ListState::default();
+    let mut preview = true;
     loop {
         let snap = store
             .load()?
@@ -180,7 +181,8 @@ fn screen(terminal: &mut DefaultTerminal, store: &Store) -> Result<()> {
             let mut limits = Limits::default();
             match &mode {
                 Mode::Rows => {
-                    terminal.draw(|frame| draw_rows(frame, &screen, &mut state))?;
+                    terminal
+                        .draw(|frame| draw_rows(frame, &screen, &mut state, &snap.db, preview))?;
                 }
                 Mode::Detail(page) => {
                     let issue = &snap.db.issues[page.id()];
@@ -205,6 +207,7 @@ fn screen(terminal: &mut DefaultTerminal, store: &Store) -> Result<()> {
             match &mut mode {
                 Mode::Rows => match key.code {
                     KeyCode::Esc => return Ok(()),
+                    KeyCode::Char('p') => preview = !preview,
                     KeyCode::Tab | KeyCode::BackTab => {
                         view = view.other();
                         screen = build(store, &snap.db, view)?;
@@ -326,8 +329,18 @@ fn build<'a>(store: &Store, db: &'a Db, view: View) -> Result<Screen<'a>> {
             }
         }
     }
+    let widths = widths(&rows);
+    Ok(Screen {
+        view,
+        strip,
+        rows,
+        widths,
+    })
+}
+
+fn widths(rows: &[Row]) -> Widths {
     let mut widths = Widths::default();
-    for row in &rows {
+    for row in rows {
         if let Row::Issue {
             lead,
             issue,
@@ -343,12 +356,7 @@ fn build<'a>(store: &Store, db: &'a Db, view: View) -> Result<Screen<'a>> {
             widths.rollup = widths.rollup.max(rollup_text(*rollup).len());
         }
     }
-    Ok(Screen {
-        view,
-        strip,
-        rows,
-        widths,
-    })
+    widths
 }
 
 /// The bar above the rows: the prefix, where HEAD is, and the
@@ -546,11 +554,34 @@ fn frame_areas(frame: &Frame) -> [Rect; 3] {
     .areas(frame.area())
 }
 
-fn draw_rows(frame: &mut Frame, screen: &Screen, state: &mut ListState) {
+/// The preview pane's width, borders included, when it stands
+/// beside the rows.
+const PREVIEW_WIDTH: u16 = 44;
+
+fn draw_rows(frame: &mut Frame, screen: &Screen, state: &mut ListState, db: &Db, preview: bool) {
     let [top, body, foot] = frame_areas(frame);
     draw_strip(frame, top, &screen.strip, screen.view.name());
+    let chosen = match state.selected().map(|i| &screen.rows[i]) {
+        Some(Row::Issue { issue, .. }) if preview => Some(*issue),
+        _ => None,
+    };
+    let (rows_area, preview_area) = match chosen {
+        None => (body, None),
+        Some(_) if body.width >= WIDE => {
+            let [rows, preview] =
+                Layout::horizontal([Constraint::Min(0), Constraint::Length(PREVIEW_WIDTH)])
+                    .areas(body);
+            (rows, Some(preview))
+        }
+        Some(_) => {
+            let [rows, preview] =
+                Layout::vertical([Constraint::Min(0), Constraint::Length(body.height / 2)])
+                    .areas(body);
+            (rows, Some(preview))
+        }
+    };
     // the gutter takes two columns from every row
-    let width = usize::from(body.width.saturating_sub(2));
+    let width = usize::from(rows_area.width.saturating_sub(2));
     let columns = Columns::at(width);
     let items: Vec<ListItem> = screen
         .rows
@@ -561,8 +592,38 @@ fn draw_rows(frame: &mut Frame, screen: &Screen, state: &mut ListState) {
         .highlight_style(CHOSEN)
         .highlight_symbol("› ")
         .highlight_spacing(HighlightSpacing::Always);
-    frame.render_stateful_widget(list, body, state);
-    frame.render_widget(Paragraph::new(screen.view.keys()).dim(), foot);
+    frame.render_stateful_widget(list, rows_area, state);
+    if let (Some(issue), Some(area)) = (chosen, preview_area) {
+        let lines = preview_lines(db, issue, inner(area.width));
+        frame.render_widget(
+            Paragraph::new(lines).block(pane(Span::raw(format!(" {} ", issue.id)).cyan(), false)),
+            area,
+        );
+    }
+    let keys = format!(
+        "{}   p {}",
+        screen.view.keys(),
+        if preview { "no preview" } else { "preview" }
+    );
+    frame.render_widget(Paragraph::new(keys).dim(), foot);
+}
+
+/// What the preview shows of an issue: the title, the about
+/// block, and as much of the body as fits.
+fn preview_lines(db: &Db, issue: &Issue, width: usize) -> Vec<Line<'static>> {
+    let mut lines = heading(issue, width);
+    lines.push(Line::default());
+    lines.extend(about(db, issue, width, None).lines);
+    if !issue.body.is_empty() {
+        lines.push(Line::default());
+        let wide = width.max(10);
+        lines.extend(
+            render::wrap_at(&issue.body, wide, wide)
+                .into_iter()
+                .map(|l| Line::from(Span::raw(l))),
+        );
+    }
+    lines
 }
 
 /// The row under the cursor: a background under its colours,
@@ -1288,6 +1349,59 @@ mod tests {
 
     fn strings(lines: &[Line]) -> Vec<String> {
         lines.iter().map(Line::to_string).collect()
+    }
+
+    #[test]
+    fn the_preview_stands_beside_the_rows_or_under_them() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+        let (db, _) = fixture();
+        let rows = list_rows(&db);
+        let screen = Screen {
+            view: View::List,
+            strip: Line::from("t"),
+            widths: widths(&rows),
+            rows,
+        };
+        let render = |width: u16, height: u16, preview: bool| {
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            let mut state = ListState::default();
+            // the second row is the issue with the body
+            state.select(Some(1));
+            terminal
+                .draw(|f| draw_rows(f, &screen, &mut state, &db, preview))
+                .unwrap();
+            let buffer = terminal.backend().buffer().clone();
+            (0..height)
+                .map(|y| {
+                    (0..width)
+                        .map(|x| buffer[(x, y)].symbol().to_string())
+                        .collect::<String>()
+                })
+                .collect::<Vec<String>>()
+        };
+        let at = |rows: &[String], needle: &str| rows.iter().position(|r| r.contains(needle));
+        // beside: the pane starts where the rows end, and shows the
+        // title, the badges and the body
+        let wide = render(120, 30, true);
+        let col = wide[1]
+            .find("╭ t-000002 ")
+            .map(|b| wide[1][..b].chars().count());
+        assert_eq!(col, Some(76), "{}", wide[1]);
+        assert!(
+            at(&wide, "│ a title that is long enough").is_some(),
+            "{wide:#?}"
+        );
+        assert!(at(&wide, "│  P2   task   open ").is_some(), "{wide:#?}");
+        assert!(at(&wide, "│ one paragraph").is_some(), "{wide:#?}");
+        // the rows keep their columns at the narrower width
+        assert!(wide[1].starts_with("  t-000001"), "{}", wide[1]);
+        // under: the pane takes the lower half
+        let narrow = render(70, 30, true);
+        assert!(narrow[15].starts_with("╭ t-000002 "), "{}", narrow[15]);
+        // off: no pane at all
+        let off = render(120, 30, false);
+        assert!(at(&off, "╭ t-000002 ").is_none(), "{off:#?}");
     }
 
     #[test]
