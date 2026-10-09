@@ -16,11 +16,19 @@
   "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-09T21:04:30.494099642Z",
-  "updated_at": "2026-10-09T23:27:55.272335494Z",
+  "updated_at": "2026-10-09T23:44:36.029077169Z",
   "closed_at": "2026-10-09T23:27:55.272335494Z",
   "close_reason": "m/u/n/x/X act through ops with a footer prompt; the helper is tested against a temporary repository",
   "resolution": "done",
-  "notes": [],
+  "notes": [
+    {
+      "at": "2026-10-09T23:44:36.029076559Z",
+      "author": "Jack Roddy/6de6737a",
+      "text": "Reverted after use: m/u/n/x/X on single unmodified keys did more harm than good, since a slip while moving writes to the shared ref. Jack's call. ops.rs stays. Any future writes from the screen need a deliberate entry, a command line or a confirmation, not a bare key.",
+      "commit": "34d8e13",
+      "branch": "dev"
+    }
+  ],
   "stamps": {
     "created": {
       "commit": "e11ec98",
