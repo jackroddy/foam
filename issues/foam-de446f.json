@@ -1,0 +1,28 @@
+{
+  "id": "foam-de446f",
+  "title": "tui: drop columns as the terminal narrows",
+  "body": "Below a width the rows drop the kind column, then the status, and keep id, priority and title, instead of cutting the title to nothing.",
+  "type": "task",
+  "status": "open",
+  "priority": 2,
+  "labels": [],
+  "parent": "foam-08d750",
+  "blocked_by": [],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-10-09T23:09:15.678292604Z",
+  "updated_at": "2026-10-09T23:09:15.678292604Z",
+  "closed_at": null,
+  "close_reason": null,
+  "resolution": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "2c6b49f",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
