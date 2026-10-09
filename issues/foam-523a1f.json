@@ -3,20 +3,20 @@
   "title": "tui: the issue as the first post on the detail screen",
   "body": "Title block with the id dim and the title bold; one badge line with priority, kind, status, assignee and lease; a dim dates line; a small labelled table of parent, children, blockers and labels, only the rows that apply; then the body as the first box, with the creation time, branch and commit in its borders, and the notes below as now.",
   "type": "task",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 2,
   "labels": [],
   "parent": "foam-08d750",
   "blocked_by": [],
   "related": [],
   "assignee": "Jack Roddy/6de6737a",
-  "lease_expires": "2026-10-09T22:47:25.613140089Z",
+  "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-09T22:32:25.602622998Z",
-  "updated_at": "2026-10-09T22:33:22.70832229Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-10-09T22:33:22.717292291Z",
+  "closed_at": "2026-10-09T22:33:22.717292291Z",
+  "close_reason": "header built as proposed; detail unit test checks every line at width 40",
+  "resolution": "done",
   "notes": [
     {
       "at": "2026-10-09T22:33:22.70832179Z",
@@ -31,6 +31,9 @@
       "commit": "7ba3629",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "7ba3629",
+      "branch": "dev"
+    }
   }
 }
