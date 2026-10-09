@@ -13,11 +13,19 @@
   "lease_expires": "2026-10-09T22:47:25.613140089Z",
   "defer_until": null,
   "created_at": "2026-10-09T22:32:25.602622998Z",
-  "updated_at": "2026-10-09T22:32:25.613140089Z",
+  "updated_at": "2026-10-09T22:33:22.70832229Z",
   "closed_at": null,
   "close_reason": null,
   "resolution": null,
-  "notes": [],
+  "notes": [
+    {
+      "at": "2026-10-09T22:33:22.70832179Z",
+      "author": "Jack Roddy/6de6737a",
+      "text": "Done as proposed: id dim and title bold, one badge line, a dim dates line with deferral and close resolution/reason, a ten-column labelled ties table (parent with title, children with the rollup or count, blockers with status, labels), the body as the first box with the creation stamp in its borders and no author since the record has none, notes below. post_box() replaced note_box() and serves both.",
+      "commit": "7ba3629",
+      "branch": "dev"
+    }
+  ],
   "stamps": {
     "created": {
       "commit": "7ba3629",
