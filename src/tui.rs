@@ -17,73 +17,11 @@ use ratatui::{DefaultTerminal, Frame};
 use crate::git::Stamp;
 use crate::graph::{self, BOARD_LOG};
 use crate::model::{Issue, Kind, Status};
-use crate::ops;
 use crate::render;
 use crate::store::{DATA_REF, Db, Store};
 
 pub fn run(store: &Store, actor: &str) -> Result<()> {
     ratatui::run(|terminal| screen(terminal, store, actor))
-}
-
-/// A write a key asks for.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Act {
-    Claim,
-    Unclaim,
-    Note,
-    Close,
-    Drop,
-}
-
-impl Act {
-    fn name(self) -> &'static str {
-        match self {
-            Act::Claim => "claim",
-            Act::Unclaim => "unclaim",
-            Act::Note => "note",
-            Act::Close => "close",
-            Act::Drop => "drop",
-        }
-    }
-
-    /// What the act needs typed first, if anything.
-    fn asks(self) -> Option<&'static str> {
-        match self {
-            Act::Note => Some("note"),
-            Act::Close | Act::Drop => Some("reason"),
-            Act::Claim | Act::Unclaim => None,
-        }
-    }
-
-    fn key(code: KeyCode) -> Option<Act> {
-        match code {
-            KeyCode::Char('m') => Some(Act::Claim),
-            KeyCode::Char('u') => Some(Act::Unclaim),
-            KeyCode::Char('n') => Some(Act::Note),
-            KeyCode::Char('x') => Some(Act::Close),
-            KeyCode::Char('X') => Some(Act::Drop),
-            _ => None,
-        }
-    }
-}
-
-/// Do `act` on `id`, with `input` as the note or the reason, and
-/// say what happened.
-fn act(store: &Store, actor: &str, act: Act, id: &str, input: &str) -> Result<String> {
-    Ok(match act {
-        Act::Claim => format!("claimed {}", ops::claim(store, id, actor, false)?.id),
-        Act::Unclaim => format!("unclaimed {}", ops::unclaim(store, id, actor, false)?.id),
-        Act::Note => format!("noted on {}", ops::note(store, id, actor, input)?.id),
-        Act::Close | Act::Drop => {
-            let done = ops::close(store, &[id.to_string()], input, act == Act::Drop)?;
-            let (issue, open) = &done[0];
-            if open.is_empty() {
-                format!("closed {}", issue.id)
-            } else {
-                format!("closed {} with open children: {}", issue.id, open.join(" "))
-            }
-        }
-    })
 }
 
 /// What narrows the listed rows.
@@ -324,10 +262,6 @@ fn screen(terminal: &mut DefaultTerminal, store: &Store, actor: &str) -> Result<
     // whether keys go into the filter's text
     let mut typing = false;
     let mut folded: HashSet<String> = HashSet::new();
-    // an act waiting for its text: which, on what, typed so far
-    let mut prompt: Option<(Act, String, String)> = None;
-    // what the last act said, and whether it failed
-    let mut notice: Option<(String, bool)> = None;
     loop {
         let snap = store
             .load()?
@@ -343,19 +277,6 @@ fn screen(terminal: &mut DefaultTerminal, store: &Store, actor: &str) -> Result<
         }
         loop {
             let mut limits = Limits::default();
-            let status = match (&prompt, &notice) {
-                (Some((a, id, typed)), _) => Some(Line::from(vec![
-                    Span::raw(format!("{} ", a.name())).bold(),
-                    Span::raw(id.clone()).cyan(),
-                    Span::raw(format!(" · {}: {typed}▏", a.asks().unwrap_or(""))),
-                ])),
-                (None, Some((text, failed))) => Some(Line::from(if *failed {
-                    Span::raw(text.clone()).red()
-                } else {
-                    Span::raw(text.clone()).green()
-                })),
-                (None, None) => None,
-            };
             match &mode {
                 Mode::Rows => {
                     let right = match (typing, filter.describe()) {
@@ -364,15 +285,13 @@ fn screen(terminal: &mut DefaultTerminal, store: &Store, actor: &str) -> Result<
                         (false, on) => format!("{on}   {}", view.name()),
                     };
                     terminal.draw(|frame| {
-                        draw_rows(
-                            frame, &screen, &mut state, &snap.db, preview, &right, status,
-                        )
+                        draw_rows(frame, &screen, &mut state, &snap.db, preview, &right)
                     })?;
                 }
                 Mode::Detail(page) => {
                     let issue = &snap.db.issues[page.id()];
                     terminal.draw(|frame| {
-                        limits = draw_detail(frame, &screen.strip, &snap.db, issue, page, status);
+                        limits = draw_detail(frame, &screen.strip, &snap.db, issue, page);
                     })?;
                 }
             }
@@ -383,36 +302,6 @@ fn screen(terminal: &mut DefaultTerminal, store: &Store, actor: &str) -> Result<
                 continue;
             }
             let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-            notice = None;
-            if let Some((a, id, typed)) = &mut prompt {
-                match key.code {
-                    KeyCode::Esc => prompt = None,
-                    KeyCode::Char('c') if ctrl => return Ok(()),
-                    KeyCode::Backspace => {
-                        typed.pop();
-                    }
-                    KeyCode::Char(c) => typed.push(c),
-                    KeyCode::Enter if typed.trim().is_empty() => {
-                        notice = Some((
-                            format!("type the {} first", a.asks().unwrap_or("text")),
-                            true,
-                        ));
-                    }
-                    KeyCode::Enter => {
-                        let outcome = act(store, actor, *a, id, typed.trim());
-                        prompt = None;
-                        match outcome {
-                            Ok(said) => {
-                                notice = Some((said, false));
-                                break;
-                            }
-                            Err(e) => notice = Some((format!("{e:#}"), true)),
-                        }
-                    }
-                    _ => {}
-                }
-                continue;
-            }
             if typing {
                 match key.code {
                     KeyCode::Esc | KeyCode::Enter => typing = false,
@@ -432,28 +321,6 @@ fn screen(terminal: &mut DefaultTerminal, store: &Store, actor: &str) -> Result<
                 KeyCode::Char('c') if ctrl => return Ok(()),
                 KeyCode::Char('r') => break,
                 _ => {}
-            }
-            if let Some(a) = Act::key(key.code) {
-                let id = match &mode {
-                    Mode::Rows => match state.selected().map(|i| &screen.rows[i]) {
-                        Some(Row::Issue { issue, .. }) => Some(issue.id.clone()),
-                        _ => None,
-                    },
-                    Mode::Detail(page) => Some(page.id().to_string()),
-                };
-                let Some(id) = id else { continue };
-                if a.asks().is_some() {
-                    prompt = Some((a, id, String::new()));
-                    continue;
-                }
-                match act(store, actor, a, &id, "") {
-                    Ok(said) => {
-                        notice = Some((said, false));
-                        break;
-                    }
-                    Err(e) => notice = Some((format!("{e:#}"), true)),
-                }
-                continue;
             }
             match &mut mode {
                 Mode::Rows => match key.code {
@@ -889,7 +756,6 @@ fn draw_rows(
     db: &Db,
     preview: bool,
     right: &str,
-    status: Option<Line<'static>>,
 ) {
     let [top, body, foot] = frame_areas(frame);
     draw_strip(frame, top, &screen.strip, right);
@@ -938,11 +804,11 @@ fn draw_rows(
         );
     }
     let keys = format!(
-        "{}   Space fold   p {}   s/t/a/c / filter   m/u/n/x act",
+        "{}   Space fold   p {}   s/t/a/c / filter",
         screen.view.keys(),
         if preview { "no preview" } else { "preview" }
     );
-    frame.render_widget(footer(status, &keys), foot);
+    frame.render_widget(Paragraph::new(keys).dim(), foot);
 }
 
 /// What the preview shows of an issue: the title, the about
@@ -977,14 +843,7 @@ const WIDE: u16 = 90;
 
 /// Draw an issue's page: the header card, the about pane and the
 /// posts, side by side or stacked.
-fn draw_detail(
-    frame: &mut Frame,
-    strip: &Line,
-    db: &Db,
-    issue: &Issue,
-    page: &Page,
-    status: Option<Line<'static>>,
-) -> Limits {
+fn draw_detail(frame: &mut Frame, strip: &Line, db: &Db, issue: &Issue, page: &Page) -> Limits {
     let [top, body, foot] = frame_areas(frame);
     draw_strip(frame, top, strip, "issue");
     let wide = body.width >= WIDE;
@@ -1052,23 +911,14 @@ fn draw_detail(
     let keys = if page.tie.is_some() {
         "j/k pick   Enter follow   Tab posts   Esc back   q quit"
     } else if about.ties.is_empty() {
-        "j/k scroll   g/G ends   m/u/n/x act   Esc back   r reload   q quit"
+        "j/k scroll   g/G ends   Esc back   r reload   q quit"
     } else {
-        "j/k scroll   Tab ties   m/u/n/x act   Esc back   r reload   q quit"
+        "j/k scroll   Tab ties   Esc back   r reload   q quit"
     };
-    frame.render_widget(footer(status, keys), foot);
+    frame.render_widget(Paragraph::new(keys).dim(), foot);
     Limits {
         scroll: max,
         ties: about.ties,
-    }
-}
-
-/// The footer: a prompt or a notice when there is one, else the
-/// keys.
-fn footer(status: Option<Line<'static>>, keys: &str) -> Paragraph<'static> {
-    match status {
-        Some(line) => Paragraph::new(line),
-        None => Paragraph::new(keys.to_string()).dim(),
     }
 }
 
@@ -1786,7 +1636,7 @@ mod tests {
             // the second row is the issue with the body
             state.select(Some(1));
             terminal
-                .draw(|f| draw_rows(f, &screen, &mut state, &db, preview, "list", None))
+                .draw(|f| draw_rows(f, &screen, &mut state, &db, preview, "list"))
                 .unwrap();
             let buffer = terminal.backend().buffer().clone();
             (0..height)
@@ -1894,55 +1744,6 @@ mod tests {
         }
         assert_eq!(seen.len(), 4);
         assert_eq!(cycle::<Kind>(None), Some(Kind::Task));
-    }
-
-    #[test]
-    fn the_keys_act_through_the_same_ops_as_the_commands() {
-        let dir = tempfile::tempdir().unwrap();
-        let ok = std::process::Command::new("git")
-            .args(["init", "-q", "-b", "main"])
-            .current_dir(dir.path())
-            .status()
-            .unwrap()
-            .success();
-        assert!(ok);
-        let store = Store::open(dir.path()).unwrap();
-        store.init("t").unwrap();
-        let issue = ops::create(
-            &store,
-            &ops::NewIssue {
-                title: "one".into(),
-                body: String::new(),
-                kind: Kind::Task,
-                priority: 2,
-                labels: Vec::new(),
-                parent: None,
-                blocked_by: Vec::new(),
-            },
-        )
-        .unwrap();
-        let id = issue.id.as_str();
-        assert_eq!(
-            act(&store, "ann", Act::Claim, id, "").unwrap(),
-            format!("claimed {id}")
-        );
-        // another person cannot take a held issue
-        assert!(act(&store, "bob", Act::Claim, id, "").is_err());
-        assert_eq!(
-            act(&store, "ann", Act::Note, id, "seen").unwrap(),
-            format!("noted on {id}")
-        );
-        assert_eq!(
-            act(&store, "ann", Act::Close, id, "fixed").unwrap(),
-            format!("closed {id}")
-        );
-        let db = store.load().unwrap().unwrap().db;
-        let closed = &db.issues[id];
-        assert_eq!(closed.status, Status::Closed);
-        assert_eq!(closed.close_reason.as_deref(), Some("fixed"));
-        assert_eq!(closed.notes[0].text, "seen");
-        assert!(Act::key(KeyCode::Char('X')) == Some(Act::Drop));
-        assert_eq!(Act::Drop.asks(), Some("reason"));
     }
 
     #[test]
@@ -2059,7 +1860,7 @@ mod tests {
             page.tie = tie;
             terminal
                 .draw(|f| {
-                    draw_detail(f, &title, &db, &i, &page, None);
+                    draw_detail(f, &title, &db, &i, &page);
                 })
                 .unwrap();
             terminal.backend().buffer().clone()
