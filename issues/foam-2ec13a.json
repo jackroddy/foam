@@ -3,7 +3,7 @@
   "title": "Review the README before the 0.2.1 release",
   "body": "Check every command and flag the README names against the binary's --help, and the storage and sync section against what init and sync now do.",
   "type": "chore",
-  "status": "open",
+  "status": "closed",
   "priority": 1,
   "labels": [],
   "parent": "foam-a39387",
@@ -13,16 +13,19 @@
   "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-09T20:53:52.232393706Z",
-  "updated_at": "2026-10-09T20:53:52.232393706Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-10-09T20:55:09.144351208Z",
+  "closed_at": "2026-10-09T20:55:09.144351208Z",
+  "close_reason": "every command and flag the README names matches --help; sync section matches init and sync; one stale help string fixed in the binary; the commands it leaves out are foam's next README issue",
+  "resolution": "done",
   "notes": [],
   "stamps": {
     "created": {
       "commit": "a374b57",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "8cd8812",
+      "branch": "dev"
+    }
   }
 }
