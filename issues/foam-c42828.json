@@ -3,26 +3,29 @@
   "title": "tui: filters from keys",
   "body": "s cycles status, t cycles kind, a toggles mine, / types a match on title and id, c shows closed; the strip says what is on and Esc clears.",
   "type": "task",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 2,
   "labels": [],
   "parent": "foam-08d750",
   "blocked_by": [],
   "related": [],
   "assignee": "Jack Roddy/6de6737a",
-  "lease_expires": "2026-10-09T23:27:01.245016095Z",
+  "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-09T23:09:15.69620891Z",
-  "updated_at": "2026-10-09T23:12:01.245016095Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-10-09T23:13:54.338727477Z",
+  "closed_at": "2026-10-09T23:13:54.338727477Z",
+  "close_reason": "s, t, a, c and / filters with the strip naming what is on; unit test on matching, describing and cycling",
+  "resolution": "done",
   "notes": [],
   "stamps": {
     "created": {
       "commit": "2c6b49f",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "87fabd2",
+      "branch": "dev"
+    }
   }
 }
