@@ -245,7 +245,7 @@ pub enum ConfigKey {
 
 #[derive(Subcommand)]
 enum SetupCmd {
-    /// A SessionStart hook in .claude/settings.json that runs `foam prime --hook-json`
+    /// SessionStart and SessionEnd hooks in .claude/settings.json: `foam prime --hook-json` and `foam session-end`
     Claude {
         /// Take the hook out again
         #[arg(long)]
