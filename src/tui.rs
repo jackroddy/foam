@@ -1,5 +1,5 @@
-//! The board as a screen: what `foam board` prints, with a
-//! cursor over the issues.
+//! The listing and the board as screens, with a cursor over the
+//! issues.
 
 use anyhow::Result;
 use jiff::Timestamp;
@@ -19,10 +19,39 @@ pub fn run(store: &Store) -> Result<()> {
     ratatui::run(|terminal| screen(terminal, store))
 }
 
-/// One line of the board.
+/// Which screen is up.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum View {
+    /// What `foam list` prints: open and in-progress issues as
+    /// a tree.
+    List,
+    /// What `foam board` prints: milestones, in progress, ready,
+    /// blocked and the recent log.
+    Board,
+}
+
+impl View {
+    fn other(self) -> View {
+        match self {
+            View::List => View::Board,
+            View::Board => View::List,
+        }
+    }
+
+    fn keys(self) -> &'static str {
+        match self {
+            View::List => "j/k move   g/G ends   Tab board   r reload   q quit",
+            View::Board => "j/k move   g/G ends   Tab list   r reload   q quit",
+        }
+    }
+}
+
+/// One line of a screen.
 enum Row<'a> {
     Header(&'static str),
     Issue {
+        /// The indent and connector of a row under its parent.
+        lead: String,
         issue: &'a Issue,
         rollup: String,
         suffix: String,
@@ -38,7 +67,7 @@ impl Row<'_> {
 }
 
 /// The widest id, status, kind and rollup among the issue rows,
-/// so the columns line up down the whole board.
+/// so the columns line up down the whole screen.
 #[derive(Default)]
 struct Widths {
     id: usize,
@@ -47,22 +76,24 @@ struct Widths {
     rollup: usize,
 }
 
-struct Board<'a> {
+struct Screen<'a> {
+    view: View,
     title: Line<'static>,
     rows: Vec<Row<'a>>,
     widths: Widths,
 }
 
 fn screen(terminal: &mut DefaultTerminal, store: &Store) -> Result<()> {
+    let mut view = View::List;
     loop {
         let snap = store
             .load()?
             .ok_or_else(|| anyhow::anyhow!("{}", crate::store::NOT_INITIALIZED))?;
-        let board = build(store, &snap.db)?;
+        let mut screen = build(store, &snap.db, view)?;
         let mut state = ListState::default();
-        state.select(step(&board.rows, None, 1));
+        state.select(step(&screen.rows, None, 1));
         loop {
-            terminal.draw(|frame| draw(frame, &board, &mut state))?;
+            terminal.draw(|frame| draw(frame, &screen, &mut state))?;
             let Event::Key(key) = event::read()? else {
                 continue;
             };
@@ -74,17 +105,22 @@ fn screen(terminal: &mut DefaultTerminal, store: &Store) -> Result<()> {
                 KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
                 KeyCode::Char('c') if ctrl => return Ok(()),
                 KeyCode::Char('r') => break,
+                KeyCode::Tab | KeyCode::BackTab => {
+                    view = view.other();
+                    screen = build(store, &snap.db, view)?;
+                    state.select(step(&screen.rows, None, 1));
+                }
                 KeyCode::Char('j') | KeyCode::Down => {
-                    state.select(step(&board.rows, state.selected(), 1));
+                    state.select(step(&screen.rows, state.selected(), 1));
                 }
                 KeyCode::Char('k') | KeyCode::Up => {
-                    state.select(step(&board.rows, state.selected(), -1));
+                    state.select(step(&screen.rows, state.selected(), -1));
                 }
                 KeyCode::Char('g') | KeyCode::Home => {
-                    state.select(step(&board.rows, None, 1));
+                    state.select(step(&screen.rows, None, 1));
                 }
                 KeyCode::Char('G') | KeyCode::End => {
-                    state.select(step(&board.rows, None, -1));
+                    state.select(step(&screen.rows, None, -1));
                 }
                 _ => {}
             }
@@ -104,7 +140,7 @@ fn step(rows: &[Row], from: Option<usize>, by: isize) -> Option<usize> {
     }
 }
 
-fn build<'a>(store: &Store, db: &'a Db) -> Result<Board<'a>> {
+fn build<'a>(store: &Store, db: &'a Db, view: View) -> Result<Screen<'a>> {
     let now = Timestamp::now();
     let stamp = store.git.head_stamp()?;
     let count = |s: Status| db.issues.values().filter(|i| i.status == s).count();
@@ -120,78 +156,132 @@ fn build<'a>(store: &Store, db: &'a Db) -> Result<Board<'a>> {
         ))
         .dim(),
     ]);
-    let mut rows = rows(db, now);
-    let log = store.git.log(DATA_REF, BOARD_LOG, None)?;
-    if !log.is_empty() {
-        rows.push(Row::Header("Recent"));
-        let style = render::Style {
-            human: true,
-            color: false,
-            width: 80,
-        };
-        for (oid, when, msg) in &log {
-            let when = when
-                .parse::<Timestamp>()
-                .map(|t| style.when(t))
-                .unwrap_or_else(|_| when.clone());
-            rows.push(Row::Log(format!("{}  {when}  {msg}", &oid[..7])));
+    let mut rows = match view {
+        View::List => list_rows(db),
+        View::Board => board_rows(db, now),
+    };
+    if view == View::Board {
+        let log = store.git.log(DATA_REF, BOARD_LOG, None)?;
+        if !log.is_empty() {
+            rows.push(Row::Header("Recent"));
+            let style = render::Style {
+                human: true,
+                color: false,
+                width: 80,
+            };
+            for (oid, when, msg) in &log {
+                let when = when
+                    .parse::<Timestamp>()
+                    .map(|t| style.when(t))
+                    .unwrap_or_else(|_| when.clone());
+                rows.push(Row::Log(format!("{}  {when}  {msg}", &oid[..7])));
+            }
         }
     }
     let mut widths = Widths::default();
     for row in &rows {
-        if let Row::Issue { issue, rollup, .. } = row {
-            widths.id = widths.id.max(issue.id.chars().count());
+        if let Row::Issue {
+            lead,
+            issue,
+            rollup,
+            ..
+        } = row
+        {
+            widths.id = widths
+                .id
+                .max(lead.chars().count() + issue.id.chars().count());
             widths.status = widths.status.max(issue.status.to_string().len());
             widths.kind = widths.kind.max(issue.kind.to_string().len());
             widths.rollup = widths.rollup.max(rollup.len());
         }
     }
-    Ok(Board {
+    Ok(Screen {
+        view,
         title,
         rows,
         widths,
     })
 }
 
+/// What `foam list` prints: open and in-progress issues by
+/// priority, each under its parent when the parent is listed.
+fn list_rows(db: &Db) -> Vec<Row<'_>> {
+    let mut issues: Vec<&Issue> = db
+        .issues
+        .values()
+        .filter(|i| matches!(i.status, Status::Open | Status::InProgress))
+        .collect();
+    issues.sort_by_key(|i| (i.priority, i.created_at));
+    let rows: Vec<(&Issue, String)> = issues
+        .into_iter()
+        .map(|i| (i, waits_on(graph::open_blockers(db, i))))
+        .collect();
+    render::forest(&rows)
+        .into_iter()
+        .map(|(_, lead, issue, suffix)| Row::Issue {
+            lead,
+            issue,
+            rollup: rollup(db, issue),
+            suffix: suffix.to_string(),
+        })
+        .collect()
+}
+
 /// The issue sections of the board, in the order `foam board`
 /// prints them.
-fn rows(db: &Db, now: Timestamp) -> Vec<Row<'_>> {
+fn board_rows(db: &Db, now: Timestamp) -> Vec<Row<'_>> {
+    fn row<'a>(db: &Db, issue: &'a Issue, suffix: String) -> Row<'a> {
+        Row::Issue {
+            lead: String::new(),
+            issue,
+            rollup: rollup(db, issue),
+            suffix,
+        }
+    }
     let board = graph::board(db, now);
+    let issue = |issue, suffix| row(db, issue, suffix);
     let mut rows = Vec::new();
     if !board.milestones.is_empty() {
         rows.push(Row::Header("Milestones"));
-        rows.extend(board.milestones.into_iter().map(|issue| Row::Issue {
-            issue,
-            rollup: rollup(db, issue),
-            suffix: String::new(),
-        }));
+        rows.extend(
+            board
+                .milestones
+                .into_iter()
+                .map(|i| issue(i, String::new())),
+        );
     }
     if !board.in_progress.is_empty() {
         rows.push(Row::Header("In progress"));
-        rows.extend(board.in_progress.into_iter().map(|issue| Row::Issue {
-            issue,
-            rollup: rollup(db, issue),
-            suffix: render::lease_left(issue),
-        }));
+        rows.extend(
+            board
+                .in_progress
+                .into_iter()
+                .map(|i| issue(i, render::lease_left(i))),
+        );
     }
     rows.push(Row::Header("Ready"));
     if board.ready.is_empty() {
         rows.push(Row::Note("nothing is ready"));
     }
-    rows.extend(board.ready.into_iter().map(|issue| Row::Issue {
-        issue,
-        rollup: rollup(db, issue),
-        suffix: String::new(),
-    }));
+    rows.extend(board.ready.into_iter().map(|i| issue(i, String::new())));
     if !board.blocked.is_empty() {
         rows.push(Row::Header("Blocked"));
-        rows.extend(board.blocked.into_iter().map(|(issue, by)| Row::Issue {
-            issue,
-            rollup: rollup(db, issue),
-            suffix: format!("waits on {}", by.join(" ")),
-        }));
+        rows.extend(
+            board
+                .blocked
+                .into_iter()
+                .map(|(i, by)| issue(i, waits_on(by))),
+        );
     }
     rows
+}
+
+fn waits_on(by: Vec<&str>) -> String {
+    if by.is_empty() {
+        String::new()
+    } else {
+        format!("waits on {}", by.join(" "))
+    }
 }
 
 fn rollup(db: &Db, issue: &Issue) -> String {
@@ -200,25 +290,22 @@ fn rollup(db: &Db, issue: &Issue) -> String {
         .unwrap_or_default()
 }
 
-fn draw(frame: &mut Frame, board: &Board, state: &mut ListState) {
+fn draw(frame: &mut Frame, screen: &Screen, state: &mut ListState) {
     let [top, body, foot] = Layout::vertical([
         Constraint::Length(1),
         Constraint::Min(0),
         Constraint::Length(1),
     ])
     .areas(frame.area());
-    frame.render_widget(Paragraph::new(board.title.clone()), top);
-    let items: Vec<ListItem> = board
+    frame.render_widget(Paragraph::new(screen.title.clone()), top);
+    let items: Vec<ListItem> = screen
         .rows
         .iter()
-        .map(|row| ListItem::new(line(row, &board.widths, usize::from(body.width))))
+        .map(|row| ListItem::new(line(row, &screen.widths, usize::from(body.width))))
         .collect();
     let list = List::new(items).highlight_style(Style::new().add_modifier(Modifier::REVERSED));
     frame.render_stateful_widget(list, body, state);
-    frame.render_widget(
-        Paragraph::new("j/k move   g/G ends   r reload   q quit").dim(),
-        foot,
-    );
+    frame.render_widget(Paragraph::new(screen.view.keys()).dim(), foot);
 }
 
 /// A row as one line of `width` columns, the title cut to fit.
@@ -228,12 +315,13 @@ fn line<'a>(row: &'a Row, widths: &Widths, width: usize) -> Line<'a> {
         Row::Note(n) => Line::from(Span::raw(*n).dim()),
         Row::Log(l) => Line::from(Span::raw(l.as_str())),
         Row::Issue {
+            lead,
             issue,
             rollup,
             suffix,
         } => {
             let mut spans = vec![
-                Span::raw(pad(&issue.id, widths.id)),
+                Span::raw(pad(&format!("{lead}{}", issue.id), widths.id)),
                 Span::raw("  "),
                 priority(issue.priority),
                 Span::raw("  "),
@@ -340,8 +428,53 @@ mod tests {
         }
     }
 
+    fn ids<'a>(rows: &'a [Row]) -> Vec<&'a str> {
+        rows.iter()
+            .filter_map(|r| match r {
+                Row::Issue { issue, .. } => Some(issue.id.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn parts<'r>(row: &'r Row<'_>) -> (&'r str, &'r str, &'r str) {
+        match row {
+            Row::Issue {
+                lead,
+                rollup,
+                suffix,
+                ..
+            } => (lead, rollup, suffix),
+            _ => panic!("an issue row"),
+        }
+    }
+
     #[test]
-    fn rows_follow_the_board_sections_and_the_cursor_skips_headers() {
+    fn list_rows_nest_children_and_say_what_a_row_waits_on() {
+        let mut m = test_issue("t-000001");
+        m.kind = Kind::Milestone;
+        let mut child = test_issue("t-000002");
+        child.parent = Some("t-000001".into());
+        let mut held = test_issue("t-000003");
+        held.blocked_by = vec!["t-000002".into()];
+        held.priority = 1;
+        let mut done = test_issue("t-000004");
+        done.status = Status::Closed;
+        let db = db(vec![m, child, held, done]);
+        let rows = list_rows(&db);
+        // priority first, then the child under its parent; the
+        // closed issue is not listed
+        assert_eq!(ids(&rows), ["t-000003", "t-000001", "t-000002"]);
+        assert_eq!(parts(&rows[0]), ("", "", "waits on t-000002"));
+        assert_eq!(parts(&rows[1]), ("", "0/1", ""));
+        assert_eq!(parts(&rows[2]), ("  └─ ", "", ""));
+        // every list row takes the cursor
+        assert_eq!(step(&rows, None, 1), Some(0));
+        assert_eq!(step(&rows, Some(0), 1), Some(1));
+    }
+
+    #[test]
+    fn board_rows_follow_the_sections_and_the_cursor_skips_headers() {
         let mut m = test_issue("t-000001");
         m.kind = Kind::Milestone;
         let mut busy = test_issue("t-000002");
@@ -350,19 +483,12 @@ mod tests {
         let mut held = test_issue("t-000004");
         held.blocked_by = vec!["t-000003".into()];
         let db = db(vec![m, busy, free, held]);
-        let rows = rows(&db, Timestamp::now());
+        let rows = board_rows(&db, Timestamp::now());
         let headers: Vec<&str> = rows.iter().filter_map(header).collect();
         assert_eq!(headers, ["Milestones", "In progress", "Ready", "Blocked"]);
         // the milestone waits on nothing listed, so it is ready too
-        let ids: Vec<&str> = rows
-            .iter()
-            .filter_map(|r| match r {
-                Row::Issue { issue, .. } => Some(issue.id.as_str()),
-                _ => None,
-            })
-            .collect();
         assert_eq!(
-            ids,
+            ids(&rows),
             ["t-000001", "t-000002", "t-000001", "t-000003", "t-000004"]
         );
 
@@ -383,7 +509,7 @@ mod tests {
         let mut busy = test_issue("t-000001");
         busy.status = Status::InProgress;
         let db = db(vec![busy]);
-        let rows = rows(&db, Timestamp::now());
+        let rows = board_rows(&db, Timestamp::now());
         assert!(matches!(rows[2], Row::Header("Ready")));
         assert!(matches!(rows[3], Row::Note("nothing is ready")));
         assert_eq!(step(&rows, None, 1), Some(1));

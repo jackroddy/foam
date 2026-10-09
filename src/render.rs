@@ -335,9 +335,9 @@ pub fn listing(style: &Style, db: Option<&Db>, rows: &[(&Issue, String)]) -> Str
 /// The rows in tree order, each with its depth and the indent
 /// and connector that lead its line: a row goes under its parent
 /// when the parent is listed too, and keeps its place otherwise.
-type Row<'a> = (usize, String, &'a Issue, &'a str);
+pub type Row<'a, 'r> = (usize, String, &'a Issue, &'r str);
 
-fn forest<'a>(rows: &'a [(&'a Issue, String)]) -> Vec<Row<'a>> {
+pub fn forest<'a, 'r>(rows: &'r [(&'a Issue, String)]) -> Vec<Row<'a, 'r>> {
     let listed: HashSet<&str> = rows.iter().map(|(i, _)| i.id.as_str()).collect();
     let mut out = Vec::new();
     let mut seen = HashSet::new();
@@ -356,14 +356,14 @@ fn forest<'a>(rows: &'a [(&'a Issue, String)]) -> Vec<Row<'a>> {
     out
 }
 
-fn branch<'a>(
-    rows: &'a [(&'a Issue, String)],
+fn branch<'a, 'r>(
+    rows: &'r [(&'a Issue, String)],
     i: &'a Issue,
-    suffix: &'a str,
+    suffix: &'r str,
     depth: usize,
     lead: String,
     seen: &mut HashSet<&'a str>,
-    out: &mut Vec<Row<'a>>,
+    out: &mut Vec<Row<'a, 'r>>,
 ) {
     if !seen.insert(i.id.as_str()) {
         return;
