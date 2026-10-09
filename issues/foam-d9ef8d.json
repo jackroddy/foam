@@ -3,20 +3,20 @@
   "title": "A fresh clone says \"not initialized\" instead of fetching the data ref",
   "body": "git clone only fetches refs/heads/*, so a clone of a repository that ran foam init elsewhere has no refs/foam/data. The first foam command there prints \"foam is not initialized here\" and nothing else, and the person does not learn that foam init in the clone would fetch the ref from origin and set up sync (tests/cli.rs sync_moves_data_between_clones_and_merges_it covers that path, and the README's storage and sync section states it).\n\nTwo fixes, either or both:\n\n1. Say what to do. When the local ref is missing and the repository has an origin, the error becomes: foam is not initialized here; run foam init to fetch refs/foam/data from origin, or to start fresh. No network call, no behaviour change.\n\n2. Adopt on first use. A command that finds no local ref but has an origin runs ls-remote, and if the data ref is there, fetches it and sets up sync before doing its own work. One round trip on the first command in every uninitialized clone. prime --hook-json stays exempt: it runs in every repository at session start, foam or not.\n\nRelated: the ref only reaches the remote through the pre-push hook, so a repository never pushed after foam init has nothing for a clone to fetch. When ls-remote finds no data ref, the message could say that the origin has none yet and that foam sync on the original machine sends it.",
   "type": "bug",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 2,
   "labels": [],
   "parent": null,
   "blocked_by": [],
   "related": [],
   "assignee": "Jack Roddy/6de6737a",
-  "lease_expires": "2026-10-09T19:43:04.232670427Z",
+  "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-09-28T22:14:52.971188323Z",
-  "updated_at": "2026-10-09T20:24:02.788952439Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-10-09T20:24:02.797521574Z",
+  "closed_at": "2026-10-09T20:24:02.797521574Z",
+  "close_reason": "refspec waits for the ref, sync sets itself up, init and the error say what to do next; tests in tests/cli.rs",
+  "resolution": "done",
   "notes": [
     {
       "at": "2026-09-28T22:24:00.649243252Z",
@@ -38,6 +38,9 @@
       "commit": "abb2b9e",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "abb2b9e",
+      "branch": "dev"
+    }
   }
 }
