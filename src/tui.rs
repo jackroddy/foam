@@ -11,7 +11,7 @@ use ratatui::widgets::{Block, BorderType, List, ListItem, ListState, Padding, Pa
 use ratatui::{DefaultTerminal, Frame};
 
 use crate::graph::{self, BOARD_LOG};
-use crate::model::{Issue, Status};
+use crate::model::{Issue, Kind, Status};
 use crate::render;
 use crate::store::{DATA_REF, Db, Store};
 
@@ -119,7 +119,7 @@ enum Row<'a> {
         /// The indent and connector of a row under its parent.
         lead: String,
         issue: &'a Issue,
-        rollup: String,
+        rollup: Option<(usize, usize)>,
         suffix: String,
     },
     Log(String),
@@ -299,7 +299,7 @@ fn build<'a>(store: &Store, db: &'a Db, view: View) -> Result<Screen<'a>> {
     let stamp = store.git.head_stamp()?;
     let count = |s: Status| db.issues.values().filter(|i| i.status == s).count();
     let title = Line::from(vec![
-        Span::raw(db.meta.prefix.clone()).bold(),
+        Span::raw(db.meta.prefix.clone()).bold().cyan(),
         Span::raw(format!("  on {} at {}  ", stamp.branch, stamp.commit)),
         Span::raw(format!(
             "{} open, {} in progress, {} deferred, {} closed",
@@ -342,7 +342,7 @@ fn build<'a>(store: &Store, db: &'a Db, view: View) -> Result<Screen<'a>> {
                 .max(lead.chars().count() + issue.id.chars().count());
             widths.status = widths.status.max(issue.status.to_string().len());
             widths.kind = widths.kind.max(issue.kind.to_string().len());
-            widths.rollup = widths.rollup.max(rollup.len());
+            widths.rollup = widths.rollup.max(rollup_text(*rollup).len());
         }
     }
     Ok(Screen {
@@ -434,10 +434,73 @@ fn waits_on(by: Vec<&str>) -> String {
     }
 }
 
-fn rollup(db: &Db, issue: &Issue) -> String {
+fn rollup(db: &Db, issue: &Issue) -> Option<(usize, usize)> {
     graph::rollup(db, issue)
-        .map(|(closed, total)| format!("{closed}/{total}"))
+}
+
+fn rollup_text(r: Option<(usize, usize)>) -> String {
+    r.map(|(closed, total)| format!("{closed}/{total}"))
         .unwrap_or_default()
+}
+
+/// Green once every child is closed.
+fn rollup_style(r: Option<(usize, usize)>) -> Style {
+    match r {
+        Some((closed, total)) if total > 0 && closed == total => Style::new().fg(Color::Green),
+        _ => Style::new(),
+    }
+}
+
+/// A person's name is cyan, an agent's magenta: the session
+/// suffix is what tells them apart.
+fn actor(name: &str) -> Style {
+    Style::new().fg(if name.contains('/') {
+        Color::Magenta
+    } else {
+        Color::Cyan
+    })
+}
+
+/// A milestone's kind stands out; every other kind recedes.
+fn kind_style(kind: Kind) -> Style {
+    if kind == Kind::Milestone {
+        Style::new().fg(Color::Magenta)
+    } else {
+        Style::new().add_modifier(Modifier::DIM)
+    }
+}
+
+/// A row's suffix, with the ids after "waits on" in the id colour.
+fn suffix_spans(suffix: &str) -> Vec<Span<'static>> {
+    let Some(ids) = suffix.strip_prefix("waits on ") else {
+        return vec![Span::raw(suffix.to_string()).dim()];
+    };
+    let mut spans = vec![Span::raw("waits on ").dim()];
+    for (n, id) in ids.split(' ').enumerate() {
+        if n > 0 {
+            spans.push(Span::raw(" "));
+        }
+        spans.push(Span::raw(id.to_string()).cyan());
+    }
+    spans
+}
+
+/// `spans` cut to `room` columns, the last kept one ending in an
+/// ellipsis when anything was dropped.
+fn cut_spans(spans: Vec<Span<'static>>, room: usize) -> Vec<Span<'static>> {
+    let mut out = Vec::new();
+    let mut left = room;
+    for span in spans {
+        let n = span.content.chars().count();
+        if n <= left {
+            left -= n;
+            out.push(span);
+        } else {
+            out.push(Span::styled(cut(&span.content, left), span.style));
+            break;
+        }
+    }
+    out
 }
 
 fn frame_areas(frame: &Frame) -> [Rect; 3] {
@@ -508,7 +571,7 @@ fn draw_detail(frame: &mut Frame, title: &Line, db: &Db, issue: &Issue, page: &P
     };
 
     frame.render_widget(
-        Paragraph::new(heading).block(pane(&format!(" {} ", issue.id))),
+        Paragraph::new(heading).block(pane(Span::raw(format!(" {} ", issue.id)).cyan(), false)),
         card,
     );
 
@@ -522,7 +585,7 @@ fn draw_detail(frame: &mut Frame, title: &Line, db: &Db, issue: &Issue, page: &P
         });
     frame.render_widget(
         Paragraph::new(about.lines)
-            .block(pane(" about "))
+            .block(pane(Span::raw(" about "), page.tie.is_some()))
             .scroll((u16::try_from(about_scroll).unwrap_or(u16::MAX), 0)),
         about_area,
     );
@@ -532,7 +595,7 @@ fn draw_detail(frame: &mut Frame, title: &Line, db: &Db, issue: &Issue, page: &P
     let scroll = page.scroll.min(max);
     frame.render_widget(
         Paragraph::new(lines)
-            .block(pane(" posts "))
+            .block(pane(Span::raw(" posts "), page.tie.is_none()))
             .scroll((u16::try_from(scroll).unwrap_or(u16::MAX), 0)),
         posts_area,
     );
@@ -561,11 +624,18 @@ fn rows_in(outer: u16) -> usize {
     usize::from(outer.saturating_sub(2))
 }
 
-fn pane(title: &str) -> Block<'static> {
+/// A bordered pane; the one holding the cursor is drawn plain
+/// with a bold title, the others dim.
+fn pane(title: Span<'static>, focused: bool) -> Block<'static> {
+    let (border, title) = if focused {
+        (Style::new(), title.bold())
+    } else {
+        (Style::new().add_modifier(Modifier::DIM), title.dim())
+    };
     Block::bordered()
         .border_type(BorderType::Rounded)
-        .border_style(Style::new().add_modifier(Modifier::DIM))
-        .title(Span::raw(title.to_string()).dim())
+        .border_style(border)
+        .title(title)
         .padding(Padding::horizontal(1))
 }
 
@@ -625,11 +695,16 @@ fn about(db: &Db, i: &Issue, width: usize, tie: Option<usize>) -> About {
     let label = |l: &str| dim(pad(l, 10));
     let mut lines = vec![Line::from(vec![
         priority_badge(i.priority),
-        Span::raw(format!("  {}  ", i.kind)),
+        Span::raw("  "),
+        Span::styled(i.kind.to_string(), kind_style(i.kind)),
+        Span::raw("  "),
         status_badge(i.status),
     ])];
     if let Some(a) = &i.assignee {
-        lines.push(Line::from(Span::raw(cut(&format!("@{a}"), width))));
+        lines.push(Line::from(Span::styled(
+            cut(&format!("@{a}"), width),
+            actor(a),
+        )));
         if i.lease_expires.is_some() {
             lines.push(Line::from(dim(render::lease_left(i))));
         }
@@ -665,7 +740,7 @@ fn about(db: &Db, i: &Issue, width: usize, tie: Option<usize>) -> About {
     let mut ties = Vec::new();
     let mut tie_lines = Vec::new();
     let mut tie_row = |lines: &mut Vec<Line<'static>>, id: &str, rest: Vec<Span<'static>>| {
-        let mut spans = vec![Span::raw("› "), Span::raw(id.to_string())];
+        let mut spans = vec![Span::raw("› ").dim(), Span::raw(id.to_string()).cyan()];
         spans.extend(rest);
         let mut line = Line::from(spans);
         if tie == Some(ties.len()) {
@@ -849,7 +924,7 @@ fn post_box(p: &Post, style: &render::Style, width: usize) -> Vec<Line<'static>>
 /// A row as one line of `width` columns, the title cut to fit.
 fn line<'a>(row: &'a Row, widths: &Widths, width: usize) -> Line<'a> {
     match row {
-        Row::Header(h) => Line::from(Span::raw(*h).bold()),
+        Row::Header(h) => Line::from(Span::raw(*h).bold().cyan()),
         Row::Note(n) => Line::from(Span::raw(*n).dim()),
         Row::Log(l) => Line::from(Span::raw(l.as_str())),
         Row::Issue {
@@ -858,37 +933,45 @@ fn line<'a>(row: &'a Row, widths: &Widths, width: usize) -> Line<'a> {
             rollup,
             suffix,
         } => {
+            let id_pad = widths
+                .id
+                .saturating_sub(lead.chars().count() + issue.id.chars().count());
             let mut spans = vec![
-                Span::raw(pad(&format!("{lead}{}", issue.id), widths.id)),
-                Span::raw("  "),
+                Span::raw(lead.as_str()).dim(),
+                Span::raw(issue.id.as_str()).cyan(),
+                Span::raw(format!("{}  ", " ".repeat(id_pad))),
                 priority(issue.priority),
                 Span::raw("  "),
                 status(issue.status, widths.status),
                 Span::raw("  "),
-                Span::raw(pad(&issue.kind.to_string(), widths.kind)).dim(),
+                Span::styled(
+                    pad(&issue.kind.to_string(), widths.kind),
+                    kind_style(issue.kind),
+                ),
                 Span::raw("  "),
             ];
-            let mut used: usize = spans.iter().map(|s| s.content.chars().count()).sum();
+            let mut used = widths.id + 2 + 2 + 2 + widths.status + 2 + widths.kind + 2;
             if widths.rollup > 0 {
-                let r = format!("{}{rollup}", " ".repeat(widths.rollup - rollup.len()));
-                used += widths.rollup + 2;
-                spans.push(Span::raw(r).dim());
+                let r = rollup_text(*rollup);
+                spans.push(Span::raw(" ".repeat(widths.rollup - r.len())));
+                spans.push(Span::styled(r, rollup_style(*rollup)));
                 spans.push(Span::raw("  "));
+                used += widths.rollup + 2;
             }
-            let mut tail = String::new();
+            let mut tail = Vec::new();
             if let Some(a) = &issue.assignee {
-                tail = format!("  @{a}");
+                tail.push(Span::raw("  "));
+                tail.push(Span::styled(format!("@{a}"), actor(a)));
             }
             if !suffix.is_empty() {
-                tail.push_str("  ");
-                tail.push_str(suffix);
+                tail.push(Span::raw("  "));
+                tail.extend(suffix_spans(suffix));
             }
             let room = width.saturating_sub(used);
-            let (title, tail) = fit(&issue.title, &tail, room);
-            spans.push(Span::raw(title));
-            if !tail.is_empty() {
-                spans.push(Span::raw(tail).dim());
-            }
+            let tail_len: usize = tail.iter().map(|s| s.content.chars().count()).sum();
+            let (title_room, tail_room) = split(issue.title.chars().count(), tail_len, room);
+            spans.push(Span::raw(cut(&issue.title, title_room)));
+            spans.extend(cut_spans(tail, tail_room));
             Line::from(spans)
         }
     }
@@ -915,16 +998,15 @@ fn status(s: Status, width: usize) -> Span<'static> {
     Span::styled(pad(&s.to_string(), width), style)
 }
 
-/// The title and its tail cut to share `room` columns: the tail
-/// gives way first, down to a third of the room, and only then
-/// the title.
-fn fit(title: &str, tail: &str, room: usize) -> (String, String) {
-    let (t, l) = (title.chars().count(), tail.chars().count());
+/// How a title `t` columns long and a tail `l` long share `room`
+/// columns: the tail gives way first, down to a third of the
+/// room, and only then the title.
+fn split(t: usize, l: usize, room: usize) -> (usize, usize) {
     if t + l <= room {
-        return (title.to_string(), tail.to_string());
+        return (t, l);
     }
     let tail_room = l.min((room / 3).max(room.saturating_sub(t)));
-    (cut(title, room - tail_room), cut(tail, tail_room))
+    (room - tail_room, tail_room)
 }
 
 fn pad(s: &str, width: usize) -> String {
@@ -975,14 +1057,15 @@ mod tests {
             .collect()
     }
 
-    fn parts<'r>(row: &'r Row<'_>) -> (&'r str, &'r str, &'r str) {
+    /// A row's lead, rollup and suffix, joined with bars.
+    fn parts(row: &Row) -> String {
         match row {
             Row::Issue {
                 lead,
                 rollup,
                 suffix,
                 ..
-            } => (lead, rollup, suffix),
+            } => format!("{lead}|{}|{suffix}", rollup_text(*rollup)),
             _ => panic!("an issue row"),
         }
     }
@@ -1003,9 +1086,30 @@ mod tests {
         // priority first, then the child under its parent; the
         // closed issue is not listed
         assert_eq!(ids(&rows), ["t-000003", "t-000001", "t-000002"]);
-        assert_eq!(parts(&rows[0]), ("", "", "waits on t-000002"));
-        assert_eq!(parts(&rows[1]), ("", "0/1", ""));
-        assert_eq!(parts(&rows[2]), ("  └─ ", "", ""));
+        assert_eq!(parts(&rows[0]), "||waits on t-000002");
+        assert_eq!(parts(&rows[1]), "|0/1|");
+        assert_eq!(parts(&rows[2]), "  └─ ||");
+        // the id is cyan after a dim lead, and the ids a row waits
+        // on are cyan inside the dim suffix
+        let widths = Widths {
+            id: 13,
+            status: 4,
+            kind: 9,
+            rollup: 3,
+        };
+        let child = line(&rows[2], &widths, 80);
+        assert_eq!(child.spans[0].content, "  └─ ");
+        assert!(child.spans[0].style.add_modifier.contains(Modifier::DIM));
+        assert_eq!(child.spans[1].content, "t-000002");
+        assert_eq!(child.spans[1].style.fg, Some(Color::Cyan));
+        let held = line(&rows[0], &widths, 80);
+        let last = held.spans.last().unwrap();
+        assert_eq!(last.content, "t-000002");
+        assert_eq!(last.style.fg, Some(Color::Cyan));
+        assert_eq!(
+            line(&rows[1], &widths, 80).to_string().trim_end(),
+            "t-000001       P2  open  milestone  0/1  t"
+        );
         // every list row takes the cursor
         assert_eq!(step(&rows, None, 1), Some(0));
         assert_eq!(step(&rows, Some(0), 1), Some(1));
@@ -1183,15 +1287,19 @@ mod tests {
         use ratatui::backend::TestBackend;
         let (db, i) = fixture();
         let title = Line::from("t");
-        let rows = |width: u16, height: u16| {
+        let render = |width: u16, height: u16, tie: Option<usize>| {
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-            let page = Page::open(i.id.clone());
+            let mut page = Page::open(i.id.clone());
+            page.tie = tie;
             terminal
                 .draw(|f| {
                     draw_detail(f, &title, &db, &i, &page);
                 })
                 .unwrap();
-            let buffer = terminal.backend().buffer().clone();
+            terminal.backend().buffer().clone()
+        };
+        let rows = |width: u16, height: u16| {
+            let buffer = render(width, height, None);
             (0..height)
                 .map(|y| {
                     (0..width)
@@ -1200,6 +1308,14 @@ mod tests {
                 })
                 .collect::<Vec<String>>()
         };
+        // the pane with the cursor is lit, the others dim, and an
+        // id in the about pane is cyan
+        let dim = |cell: &ratatui::buffer::Cell| cell.modifier.contains(Modifier::DIM);
+        let buffer = render(100, 30, None);
+        assert!(!dim(&buffer[(0, 4)]) && dim(&buffer[(70, 1)]));
+        assert_eq!(buffer[(74, 7)].fg, Color::Cyan);
+        let buffer = render(100, 30, Some(0));
+        assert!(dim(&buffer[(0, 4)]) && !dim(&buffer[(70, 1)]));
         let col_of = |row: &str, needle: &str| row.find(needle).map(|b| row[..b].chars().count());
 
         // wide: the card and the posts on the left, the about pane
@@ -1229,18 +1345,22 @@ mod tests {
         assert_eq!(cut("abcdef", 4), "abc…");
         assert_eq!(cut("abc", 3), "abc");
         assert_eq!(cut("abc", 0), "");
-        assert_eq!(
-            fit("title", "  @ann", 20),
-            ("title".into(), "  @ann".into())
-        );
+        assert_eq!(split(5, 6, 20), (5, 6));
         // the tail gives way first, down to a third
-        let (t, l) = fit("a long title here", "  @someone  lease 9 min left", 30);
-        assert_eq!(t, "a long title here");
-        assert_eq!(l.chars().count(), 13);
-        assert!(l.ends_with('…'));
+        assert_eq!(split(17, 28, 30), (17, 13));
         // then the title
-        let (t, l) = fit("a long title here that goes on", "  @ann", 20);
-        assert_eq!(l, "  @ann");
-        assert_eq!(t.chars().count(), 14);
+        assert_eq!(split(30, 6, 20), (14, 6));
+        // a cut span keeps its style and ends the line
+        let spans = cut_spans(
+            vec![
+                Span::raw("ab").dim(),
+                Span::raw("cdef").cyan(),
+                Span::raw("gh"),
+            ],
+            4,
+        );
+        assert_eq!(spans.len(), 2);
+        assert_eq!(spans[1].content, "c…");
+        assert_eq!(spans[1].style.fg, Some(Color::Cyan));
     }
 }
