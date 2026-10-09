@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-09
+
 ### Changed
 
 - "foam is not initialized here" now says that `foam init` fetches the
@@ -25,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the hook every line starts with `foam:`; by hand, nothing to move
   prints "up to date".
 
+- `foam setup claude --help` names both hooks it installs.
 - Listings wrap a long title at the terminal width, with each later line
   under the title column, so the columns stay aligned. `--plain` output
   is unchanged.
@@ -178,6 +181,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `foam log` shows the data ref's history, optionally only the entries that
   touched one id. Every command accepts `--json`.
 
-[Unreleased]: https://github.com/jackroddy/foam/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/jackroddy/foam/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/jackroddy/foam/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/jackroddy/foam/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/jackroddy/foam/releases/tag/v0.1.0
