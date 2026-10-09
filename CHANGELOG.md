@@ -10,36 +10,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - A screen. `foam` with no command, in a terminal, opens what `foam
-  list` prints as a screen with a cursor: j and k move, g and G jump to
-  the ends, Enter opens the issue's page and Esc comes back, Tab
-  switches to the board and back, r reloads, q quits. The page keeps
-  the title and an about pane in view while the body and the notes
-  scroll as a message board, one box per post; Tab moves onto the
-  parent, children and blockers and Enter follows one. It
-  sits behind the `tui` cargo feature, on by default; `cargo install
-  --no-default-features` builds without it. Under a pipe or a hook, bare
-  `foam` prints the usage as before.
-
-## [0.2.1] - 2026-10-09
-
-### Changed
-
-- "foam is not initialized here" now says that `foam init` fetches the
-  data ref from origin when origin has one.
-- `foam init` says when origin has no data ref yet, and when there is no
-  remote, so sync is not set up.
-- `foam sync` installs the pre-push hook and the refspec when they are
-  missing, so a repo that added its remote after `foam init` needs no
-  `--setup`. The flag remains and reports on the hook.
-- `foam doctor` only reports a missing refspec once origin's data has
-  been fetched.
-- `foam sync` says on stderr what it is about to do before each round
-  trip, so `git push` no longer goes quiet while the hook runs. It skips
-  the push when origin already has the tip, and fetches without asking
-  ls-remote first: two round trips fewer when nothing has changed. Under
-  the hook every line starts with `foam:`; by hand, nothing to move
-  prints "up to date".
-
+  list` prints as rows with a cursor and a preview of the chosen issue
+  beside them. j and k move, Space folds a row's children, Enter opens
+  the issue's page and Esc comes back, Tab switches to the board, where
+  each section is a card, p hides the preview, and s, t, a, c and /
+  filter by status, kind, your own claims, closed issues and text. A
+  strip above the rows shows the branch, the counts and the filter. The
+  page keeps the title and an about pane in view while the body and the
+  notes scroll as a message board, one box per post; Tab moves onto the
+  parent, children and blockers and Enter follows one. The screen sits
+  behind the `tui` cargo feature, on by default; `cargo install
+  --no-default-features` builds without it. Under a pipe or a hook,
+  bare `foam` prints the usage as before.
 - `foam setup claude --help` names both hooks it installs.
 - Listings wrap a long title at the terminal width, with each later line
   under the title column, so the columns stay aligned. `--plain` output

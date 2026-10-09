@@ -102,9 +102,10 @@ board, open an issue now and then, and step in with `foam create`,
 
 `foam board` puts everything on one screen, with milestones, what's in
 progress, what's ready, what's blocked and by what, and the recent
-history. Plain `foam` in a terminal opens a screen you can move around
-in, the listing first and the board on Tab: j and k move, Enter opens
-an issue with its notes, Esc comes back, r reloads, q quits.
+history. Plain `foam` in a terminal opens a screen: the listing with a
+preview of the chosen issue beside it, the board on Tab, and an issue's
+page on Enter, with its notes as a message board. The footer names the
+keys.
 
 ```
 foam  on main at 9f25882  5 open, 1 in progress, 0 deferred, 2 closed
