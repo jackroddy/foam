@@ -1,0 +1,28 @@
+{
+  "id": "foam-63237a",
+  "title": "tui: notes as a message board",
+  "body": "On the detail screen, one rounded box per note, full width: the author and relative time in the top border, the branch and short commit dimmed in the bottom border, the text wrapped inside with a column of padding. Oldest first, as foam show prints them. The author is coloured one way for a person and another for an agent, which the slash and session suffix already mark.",
+  "type": "task",
+  "status": "open",
+  "priority": 2,
+  "labels": [],
+  "parent": "foam-08d750",
+  "blocked_by": [],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-10-09T22:26:49.685215379Z",
+  "updated_at": "2026-10-09T22:26:49.685215379Z",
+  "closed_at": null,
+  "close_reason": null,
+  "resolution": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "64d7521",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
