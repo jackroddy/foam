@@ -13,11 +13,19 @@
   "lease_expires": "2026-10-09T20:55:44.949559819Z",
   "defer_until": null,
   "created_at": "2026-09-28T19:55:55.432245265Z",
-  "updated_at": "2026-10-09T20:40:44.949559819Z",
+  "updated_at": "2026-10-09T20:43:05.036794197Z",
   "closed_at": null,
   "close_reason": null,
   "resolution": null,
-  "notes": [],
+  "notes": [
+    {
+      "at": "2026-10-09T20:43:05.036793557Z",
+      "author": "Jack Roddy/6de6737a",
+      "text": "Done: the terminal form wraps the title with wrap_at at width minus the column prefix (floor 20), hangs later lines under the title column, and keeps the dim tags and suffix on the title's last line when they fit, else on a line of their own. Plain output untouched.",
+      "commit": "844eeab",
+      "branch": "dev"
+    }
+  ],
   "stamps": {
     "created": {
       "commit": "abb2b9e",
