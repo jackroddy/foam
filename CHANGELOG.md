@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   behind the `tui` cargo feature, on by default; `cargo install
   --no-default-features` builds without it. Under a pipe or a hook,
   bare `foam` prints the usage as before.
+- `foam stats` says how big the data ref has grown: its commits and
+  age, the objects only the ref holds and their bytes on disk, what the
+  tip holds, and the largest records. `--json` carries the same.
 - `foam setup claude --help` names both hooks it installs.
 - Listings wrap a long title at the terminal width, with each later line
   under the title column, so the columns stay aligned. `--plain` output

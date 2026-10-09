@@ -59,6 +59,17 @@ pub struct Conflict {
     pub theirs: Option<String>,
 }
 
+/// What a ref holds, by `Git::ref_size`.
+pub struct RefSize {
+    pub commits: usize,
+    /// When the first commit was made, RFC 3339.
+    pub since: Option<String>,
+    pub only_objects: usize,
+    pub only_bytes: u64,
+    pub shared_objects: usize,
+    pub shared_bytes: u64,
+}
+
 /// The outcome of a push.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Push {
@@ -447,6 +458,79 @@ impl Git {
     pub fn config_add(&self, key: &str, value: &str) -> Result<()> {
         self.run(&["config", "--add", key, value])?;
         Ok(())
+    }
+
+    /// How much a ref holds: its commits, when the first was made,
+    /// and what its objects take on disk, split into what only the
+    /// ref reaches and what a branch reaches too.
+    pub fn ref_size(&self, name: &str) -> Result<RefSize> {
+        let commits = String::from_utf8(self.run(&["rev-list", "--count", name])?)?
+            .trim()
+            .parse()?;
+        // two clones that both ran init leave two roots once merged;
+        // the older one is when the data began
+        let roots = String::from_utf8(self.run(&["rev-list", "--max-parents=0", name])?)?;
+        let mut since = None;
+        for root in roots.lines() {
+            let at = String::from_utf8(self.run(&["show", "-s", "--format=%cI", root])?)?
+                .trim()
+                .to_string();
+            if since.as_ref().is_none_or(|s| at < *s) {
+                since = Some(at);
+            }
+        }
+        let (only_objects, only_bytes) =
+            self.objects_on_disk(&["rev-list", "--objects", name, "--not", "--branches"])?;
+        let (all_objects, all_bytes) = self.objects_on_disk(&["rev-list", "--objects", name])?;
+        Ok(RefSize {
+            commits,
+            since,
+            only_objects,
+            only_bytes,
+            shared_objects: all_objects.saturating_sub(only_objects),
+            shared_bytes: all_bytes.saturating_sub(only_bytes),
+        })
+    }
+
+    /// How many objects a rev-list names and their bytes on disk.
+    fn objects_on_disk(&self, rev_list: &[&str]) -> Result<(usize, u64)> {
+        let listed = String::from_utf8(self.run(rev_list)?)?;
+        // rev-list --objects puts a path after each blob and tree id
+        let ids: String = listed
+            .lines()
+            .filter_map(|l| l.split(' ').next())
+            .map(|id| format!("{id}\n"))
+            .collect();
+        let sizes = self.run_with_input(
+            &["cat-file", "--batch-check=%(objectsize:disk)"],
+            ids.as_bytes(),
+        )?;
+        let mut count = 0;
+        let mut bytes = 0;
+        for line in String::from_utf8(sizes)?.lines() {
+            bytes += line.trim().parse::<u64>().context("cat-file size")?;
+            count += 1;
+        }
+        Ok((count, bytes))
+    }
+
+    /// Every file at the tip of `name`, with its size in bytes.
+    pub fn tree_sizes(&self, name: &str) -> Result<Vec<(String, u64)>> {
+        let out = String::from_utf8(self.run(&["ls-tree", "-r", "-l", name])?)?;
+        let mut files = Vec::new();
+        for line in out.lines() {
+            // "<mode> <type> <oid> <size>\t<path>"
+            let Some((meta, path)) = line.split_once('\t') else {
+                continue;
+            };
+            let size = meta
+                .split_whitespace()
+                .nth(3)
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0);
+            files.push((path.to_string(), size));
+        }
+        Ok(files)
     }
 
     /// Where this repository's hooks live.

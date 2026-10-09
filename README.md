@@ -80,6 +80,9 @@ sync` does the fetch, merge, and push by hand, and installs the hook and
 refspec when they are missing, so a repo that added its remote after `foam
 init` needs only one `foam sync`.
 
+`foam stats` says how big the ref has grown: commits, the bytes its
+objects take on disk, and the largest records.
+
 `git clone` only fetches branches, so a fresh clone has no data ref. Run
 `foam init` there: it fetches the ref from origin when origin has it, and
 starts fresh otherwise.

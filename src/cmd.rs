@@ -420,6 +420,7 @@ pub fn run(cli: Cli, command: Cmd) -> Result<()> {
             sync(&store, &remote)
         }
         Cmd::Doctor => doctor(&store, cli.json),
+        Cmd::Stats => stats(&store, cli.json),
         Cmd::Log { id, limit } => {
             load(&store)?;
             let entries = store.git.log(DATA_REF, limit, id.as_deref())?;
@@ -786,6 +787,90 @@ fn sync(store: &Store, remote: &str) -> Result<()> {
 }
 
 /// Report what is wrong, if anything, and exit 1 if something is.
+/// How many of the largest records stats lists.
+const LARGEST: usize = 5;
+
+fn stats(store: &Store, json: bool) -> Result<()> {
+    load(store)?;
+    let size = store.git.ref_size(DATA_REF)?;
+    let mut files = store.git.tree_sizes(DATA_REF)?;
+    let tip_bytes: u64 = files.iter().map(|(_, b)| b).sum();
+    let under = |dir: &str| files.iter().filter(|(p, _)| p.starts_with(dir)).count();
+    let (issues, memories) = (under("issues/"), under("memories/"));
+    let total_files = files.len();
+    files.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    files.truncate(LARGEST);
+    let days = size
+        .since
+        .as_deref()
+        .and_then(|s| s.parse::<Timestamp>().ok())
+        .map(|t| Timestamp::now().duration_since(t).as_hours() / 24);
+    if json {
+        let largest: Vec<serde_json::Value> = files
+            .iter()
+            .map(|(path, bytes)| serde_json::json!({ "path": path, "bytes": bytes }))
+            .collect();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "ref": DATA_REF,
+                "commits": size.commits,
+                "since": size.since,
+                "days": days,
+                "objects": {
+                    "only": size.only_objects,
+                    "only_bytes": size.only_bytes,
+                    "shared": size.shared_objects,
+                    "shared_bytes": size.shared_bytes,
+                },
+                "tip": {
+                    "files": total_files,
+                    "bytes": tip_bytes,
+                    "issues": issues,
+                    "memories": memories,
+                },
+                "largest": largest,
+            }))?
+        );
+        return Ok(());
+    }
+    let since = match (&size.since, days) {
+        (Some(s), Some(d)) => format!(" since {}, {d} days", &s[..10.min(s.len())]),
+        _ => String::new(),
+    };
+    println!("{DATA_REF:<16} {} commits{since}", size.commits);
+    println!(
+        "{:<16} {} held only by the ref, {} on disk",
+        "objects",
+        size.only_objects,
+        render::bytes(size.only_bytes)
+    );
+    println!(
+        "{:<16} {} shared with the branches, {}",
+        "",
+        size.shared_objects,
+        render::bytes(size.shared_bytes)
+    );
+    println!(
+        "{:<16} {} files, {}: {issues} issues, {memories} memories",
+        "tip",
+        total_files,
+        render::bytes(tip_bytes)
+    );
+    for (n, (path, bytes)) in files.iter().enumerate() {
+        println!(
+            "{:<16} {path:<28} {}",
+            if n == 0 { "largest" } else { "" },
+            render::bytes(*bytes)
+        );
+    }
+    println!(
+        "{:<16} on-disk sizes are before git gc packs the objects",
+        ""
+    );
+    Ok(())
+}
+
 fn doctor(store: &Store, json: bool) -> Result<()> {
     let snap = load(store)?;
     let db = &snap.db;

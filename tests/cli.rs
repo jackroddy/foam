@@ -742,6 +742,40 @@ fn git_push_carries_the_data_ref_through_the_hook() {
 }
 
 #[test]
+fn stats_size_the_data_ref() {
+    let dir = repo();
+    stdout(foam(dir.path()).args(["init", "--prefix", "t"]));
+    for n in ["one", "two", "three"] {
+        stdout(foam(dir.path()).args(["create", n]));
+    }
+    stdout(foam(dir.path()).args(["remember", "fact", "water is wet"]));
+    let text = stdout(foam(dir.path()).arg("stats"));
+    assert!(text.contains("refs/foam/data   5 commits since"), "{text}");
+    assert!(text.contains("3 issues, 1 memories"), "{text}");
+    assert!(
+        text.contains("largest") && text.contains("issues/t-"),
+        "{text}"
+    );
+    let v: serde_json::Value =
+        serde_json::from_str(&stdout(foam(dir.path()).args(["--json", "stats"]))).unwrap();
+    assert_eq!(v["commits"], 5);
+    assert_eq!(v["days"], 0);
+    assert_eq!(v["tip"]["issues"], 3);
+    assert_eq!(v["tip"]["memories"], 1);
+    assert_eq!(v["tip"]["files"], 5);
+    assert!(v["objects"]["only"].as_u64().unwrap() > 5);
+    assert!(v["objects"]["only_bytes"].as_u64().unwrap() > 0);
+    assert_eq!(v["objects"]["shared"], 0);
+    assert_eq!(v["largest"].as_array().unwrap().len(), 5);
+    assert!(
+        v["largest"][0]["path"]
+            .as_str()
+            .unwrap()
+            .starts_with("issues/")
+    );
+}
+
+#[test]
 fn doctor_reports_problems() {
     let dir = repo();
     stdout(foam(dir.path()).args(["init", "--prefix", "t"]));

@@ -183,6 +183,19 @@ pub fn wrap_at(text: &str, first: usize, rest: usize) -> Vec<String> {
     lines
 }
 
+/// A byte count in B, KB or MB, one decimal from a kilobyte up.
+pub fn bytes(n: u64) -> String {
+    const K: f64 = 1000.0;
+    let n = n as f64;
+    if n < K {
+        format!("{n} B")
+    } else if n < K * K {
+        format!("{:.1} KB", n / K)
+    } else {
+        format!("{:.1} MB", n / (K * K))
+    }
+}
+
 /// Pad `s` on the right to `width` characters.
 fn pad(s: &str, width: usize) -> String {
     let n = s.chars().count();
@@ -621,6 +634,15 @@ mod tests {
         let old = relative(at(30 * 86_400), now);
         assert_eq!(old.len(), 10, "{old}");
         assert!(old.starts_with("20"), "{old}");
+    }
+
+    #[test]
+    fn bytes_pick_the_unit() {
+        assert_eq!(bytes(0), "0 B");
+        assert_eq!(bytes(999), "999 B");
+        assert_eq!(bytes(1000), "1.0 KB");
+        assert_eq!(bytes(204_591), "204.6 KB");
+        assert_eq!(bytes(2_700_000), "2.7 MB");
     }
 
     #[test]

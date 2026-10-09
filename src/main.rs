@@ -222,6 +222,8 @@ enum Cmd {
     },
     /// Check the data and this clone's setup for problems
     Doctor,
+    /// How big the data ref has grown
+    Stats,
     /// The history of the data ref, newest first
     Log {
         /// Only entries that touched this issue or memory
