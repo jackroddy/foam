@@ -3,20 +3,20 @@
   "title": "tui: one meaning per hue",
   "body": "Ids cyan everywhere, including inside 'waits on'. Priority and status as now. Kind magenta for a milestone, dim otherwise. A person's name cyan and an agent's magenta, on rows and in posts. Times dim. The pane holding the cursor gets a plain border and a bright title. Section headers and the title line bold cyan. A rollup green once every child is closed. Titles, bodies and note text stay in the default foreground.",
   "type": "task",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 2,
   "labels": [],
   "parent": "foam-08d750",
   "blocked_by": [],
   "related": [],
   "assignee": "Jack Roddy/6de6737a",
-  "lease_expires": "2026-10-09T23:04:28.808370823Z",
+  "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-09T22:49:28.797601376Z",
-  "updated_at": "2026-10-09T22:51:03.047677422Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-10-09T22:51:03.056427144Z",
+  "closed_at": "2026-10-09T22:51:03.056427144Z",
+  "close_reason": "one meaning per hue across list, board and page; tests check the id and suffix colours on rows, the cut spans, and the lit pane on the test backend",
+  "resolution": "done",
   "notes": [
     {
       "at": "2026-10-09T22:51:03.047676942Z",
@@ -31,6 +31,9 @@
       "commit": "bb246a4",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "bb246a4",
+      "branch": "dev"
+    }
   }
 }
