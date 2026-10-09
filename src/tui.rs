@@ -1,6 +1,8 @@
 //! The listing, the board and one issue as screens, with a cursor
 //! over the issues.
 
+use std::collections::HashSet;
+
 use anyhow::Result;
 use jiff::Timestamp;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
@@ -215,6 +217,8 @@ enum Row<'a> {
         issue: &'a Issue,
         rollup: Option<(usize, usize)>,
         suffix: String,
+        /// How many rows under this one are folded away.
+        hidden: usize,
     },
     Log(String),
     Note(&'static str),
@@ -251,11 +255,12 @@ fn screen(terminal: &mut DefaultTerminal, store: &Store, actor: &str) -> Result<
     let mut filter = Filter::default();
     // whether keys go into the filter's text
     let mut typing = false;
+    let mut folded: HashSet<String> = HashSet::new();
     loop {
         let snap = store
             .load()?
             .ok_or_else(|| anyhow::anyhow!("{}", crate::store::NOT_INITIALIZED))?;
-        let mut screen = build(store, &snap.db, view, &filter, actor)?;
+        let mut screen = build(store, &snap.db, view, &filter, actor, &folded)?;
         keep(&mut state, &screen.rows);
         // a page whose issues a reload took away falls back
         if let Mode::Detail(page) = &mut mode {
@@ -301,7 +306,7 @@ fn screen(terminal: &mut DefaultTerminal, store: &Store, actor: &str) -> Result<
                     KeyCode::Char('c') => return Ok(()),
                     _ => {}
                 }
-                screen = build(store, &snap.db, view, &filter, actor)?;
+                screen = build(store, &snap.db, view, &filter, actor, &folded)?;
                 keep(&mut state, &screen.rows);
                 continue;
             }
@@ -316,10 +321,29 @@ fn screen(terminal: &mut DefaultTerminal, store: &Store, actor: &str) -> Result<
                     KeyCode::Esc if filter.is_empty() => return Ok(()),
                     KeyCode::Esc => {
                         filter = Filter::default();
-                        screen = build(store, &snap.db, view, &filter, actor)?;
+                        screen = build(store, &snap.db, view, &filter, actor, &folded)?;
                         keep(&mut state, &screen.rows);
                     }
                     KeyCode::Char('p') => preview = !preview,
+                    KeyCode::Char(' ') => {
+                        let chosen = match state.selected().map(|i| &screen.rows[i]) {
+                            Some(Row::Issue { issue, .. })
+                                if !graph::children(&snap.db, &issue.id).is_empty() =>
+                            {
+                                Some(issue.id.clone())
+                            }
+                            _ => None,
+                        };
+                        if let Some(id) = chosen {
+                            if !folded.remove(&id) {
+                                folded.insert(id.clone());
+                            }
+                            screen = build(store, &snap.db, view, &filter, actor, &folded)?;
+                            state.select(screen.rows.iter().position(
+                                |r| matches!(r, Row::Issue { issue, .. } if issue.id == id),
+                            ));
+                        }
+                    }
                     KeyCode::Char('s')
                     | KeyCode::Char('t')
                     | KeyCode::Char('a')
@@ -332,12 +356,12 @@ fn screen(terminal: &mut DefaultTerminal, store: &Store, actor: &str) -> Result<
                             KeyCode::Char('c') => filter.closed = !filter.closed,
                             _ => typing = true,
                         }
-                        screen = build(store, &snap.db, view, &filter, actor)?;
+                        screen = build(store, &snap.db, view, &filter, actor, &folded)?;
                         keep(&mut state, &screen.rows);
                     }
                     KeyCode::Tab | KeyCode::BackTab => {
                         view = view.other();
-                        screen = build(store, &snap.db, view, &filter, actor)?;
+                        screen = build(store, &snap.db, view, &filter, actor, &folded)?;
                         state.select(step(&screen.rows, None, 1));
                     }
                     KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => {
@@ -440,12 +464,13 @@ fn build<'a>(
     view: View,
     filter: &Filter,
     actor: &str,
+    folded: &HashSet<String>,
 ) -> Result<Screen<'a>> {
     let now = Timestamp::now();
     let stamp = store.git.head_stamp()?;
     let strip = strip(db, &stamp);
     let mut rows = match view {
-        View::List => list_rows(db, filter, actor),
+        View::List => list_rows(db, filter, actor, folded),
         View::Board => board_rows(db, now),
     };
     if view == View::Board {
@@ -530,7 +555,12 @@ fn draw_strip(frame: &mut Frame, area: Rect, strip: &Line, right: &str) {
 
 /// What `foam list` prints: open and in-progress issues by
 /// priority, each under its parent when the parent is listed.
-fn list_rows<'a>(db: &'a Db, filter: &Filter, actor: &str) -> Vec<Row<'a>> {
+fn list_rows<'a>(
+    db: &'a Db,
+    filter: &Filter,
+    actor: &str,
+    folded: &HashSet<String>,
+) -> Vec<Row<'a>> {
     let mut issues: Vec<&Issue> = db
         .issues
         .values()
@@ -541,15 +571,27 @@ fn list_rows<'a>(db: &'a Db, filter: &Filter, actor: &str) -> Vec<Row<'a>> {
         .into_iter()
         .map(|i| (i, waits_on(graph::open_blockers(db, i))))
         .collect();
-    render::forest(&rows)
-        .into_iter()
-        .map(|(_, lead, issue, suffix)| Row::Issue {
+    let mut out: Vec<Row> = Vec::new();
+    // the tree comes depth first, so everything under a folded
+    // row follows it at once and is counted onto it
+    let mut hide_below = None;
+    for (depth, lead, issue, suffix) in render::forest(&rows) {
+        if hide_below.is_some_and(|d| depth > d) {
+            if let Some(Row::Issue { hidden, .. }) = out.last_mut() {
+                *hidden += 1;
+            }
+            continue;
+        }
+        hide_below = folded.contains(&issue.id).then_some(depth);
+        out.push(Row::Issue {
             lead,
             issue,
             rollup: rollup(db, issue),
             suffix: suffix.to_string(),
-        })
-        .collect()
+            hidden: 0,
+        });
+    }
+    out
 }
 
 /// The issue sections of the board, in the order `foam board`
@@ -561,6 +603,7 @@ fn board_rows(db: &Db, now: Timestamp) -> Vec<Row<'_>> {
             issue,
             rollup: rollup(db, issue),
             suffix,
+            hidden: 0,
         }
     }
     let board = graph::board(db, now);
@@ -741,7 +784,7 @@ fn draw_rows(
         );
     }
     let keys = format!(
-        "{}   p {}   s/t/a/c / filter",
+        "{}   Space fold   p {}   s/t/a/c / filter",
         screen.view.keys(),
         if preview { "no preview" } else { "preview" }
     );
@@ -1204,6 +1247,7 @@ fn line<'a>(row: &'a Row, widths: &Widths, width: usize, columns: Columns) -> Li
             issue,
             rollup,
             suffix,
+            hidden,
         } => {
             let id_pad = widths
                 .id
@@ -1244,6 +1288,9 @@ fn line<'a>(row: &'a Row, widths: &Widths, width: usize, columns: Columns) -> Li
             if !suffix.is_empty() {
                 tail.push(Span::raw("  "));
                 tail.extend(suffix_spans(suffix));
+            }
+            if *hidden > 0 {
+                tail.push(Span::raw(format!("  ▸ {hidden} folded")).dim());
             }
             let room = width.saturating_sub(used);
             let tail_len: usize = tail.iter().map(|s| s.content.chars().count()).sum();
@@ -1360,7 +1407,7 @@ mod tests {
         let mut done = test_issue("t-000004");
         done.status = Status::Closed;
         let db = db(vec![m, child, held, done]);
-        let rows = list_rows(&db, &Filter::default(), "ann");
+        let rows = list_rows(&db, &Filter::default(), "ann", &HashSet::new());
         // priority first, then the child under its parent; the
         // closed issue is not listed
         assert_eq!(ids(&rows), ["t-000003", "t-000001", "t-000002"]);
@@ -1496,7 +1543,7 @@ mod tests {
         use ratatui::Terminal;
         use ratatui::backend::TestBackend;
         let (db, _) = fixture();
-        let rows = list_rows(&db, &Filter::default(), "ann");
+        let rows = list_rows(&db, &Filter::default(), "ann", &HashSet::new());
         let screen = Screen {
             view: View::List,
             strip: Line::from("t"),
@@ -1545,10 +1592,35 @@ mod tests {
     }
 
     #[test]
+    fn a_folded_row_hides_everything_under_it_and_says_how_much() {
+        let (db, _) = fixture();
+        let hidden = |rows: &[Row]| -> Vec<(String, usize)> {
+            rows.iter()
+                .filter_map(|r| match r {
+                    Row::Issue { issue, hidden, .. } => Some((issue.id.clone(), *hidden)),
+                    _ => None,
+                })
+                .collect()
+        };
+        let top: HashSet<String> = ["t-000001".to_string()].into();
+        let rows = list_rows(&db, &Filter::default(), "ann", &top);
+        assert_eq!(hidden(&rows), [("t-000001".to_string(), 2)]);
+        let widths = widths(&rows);
+        let text = line(&rows[0], &widths, 80, Columns::ALL).to_string();
+        assert!(text.trim_end().ends_with("t  ▸ 2 folded"), "{text}");
+        let middle: HashSet<String> = ["t-000002".to_string()].into();
+        let rows = list_rows(&db, &Filter::default(), "ann", &middle);
+        assert_eq!(
+            hidden(&rows),
+            [("t-000001".to_string(), 0), ("t-000002".to_string(), 1)]
+        );
+    }
+
+    #[test]
     fn a_filter_narrows_the_rows_and_says_what_is_on() {
         let (db, _) = fixture();
         let ids = |f: &Filter| -> Vec<String> {
-            list_rows(&db, f, "ann/s1")
+            list_rows(&db, f, "ann/s1", &HashSet::new())
                 .iter()
                 .filter_map(|r| match r {
                     Row::Issue { issue, .. } => Some(issue.id.clone()),
@@ -1579,7 +1651,7 @@ mod tests {
         assert!(ids(&f).is_empty());
         let mut db = db;
         db.issues.get_mut("t-000004").unwrap().assignee = Some("ann/s2".into());
-        let rows = list_rows(&db, &f, "ann/s1");
+        let rows = list_rows(&db, &f, "ann/s1", &HashSet::new());
         assert_eq!(rows.len(), 1);
         assert_eq!(f.describe(), "mine");
         // s and t cycle through every value and back to off
