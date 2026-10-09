@@ -3,6 +3,7 @@ mod git;
 mod graph;
 mod merge;
 mod model;
+mod ops;
 mod prime;
 mod render;
 mod store;
