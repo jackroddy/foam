@@ -3,20 +3,20 @@
   "title": "Wrap long rows in foam list so the columns stay aligned",
   "body": "When a row's trailing text (title, blockers, rollup) is longer than the terminal is wide, the terminal wraps it at whatever column it reaches, and the id, priority and status columns of the rows below no longer line up with the ones above. Wrap the trailing text at the terminal width and indent each continuation line under the start of the title, so a long row reads as one entry and the columns hold. --plain already promises no wrapping, so leave it alone.",
   "type": "task",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 2,
   "labels": [],
   "parent": null,
   "blocked_by": [],
   "related": [],
   "assignee": "Jack Roddy/6de6737a",
-  "lease_expires": "2026-10-09T20:55:44.949559819Z",
+  "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-09-28T19:55:55.432245265Z",
-  "updated_at": "2026-10-09T20:43:05.036794197Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-10-09T20:43:05.045340185Z",
+  "closed_at": "2026-10-09T20:43:05.045340185Z",
+  "close_reason": "titles wrap under their column in the terminal form; unit test in render.rs",
+  "resolution": "done",
   "notes": [
     {
       "at": "2026-10-09T20:43:05.036793557Z",
@@ -31,6 +31,9 @@
       "commit": "abb2b9e",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "844eeab",
+      "branch": "dev"
+    }
   }
 }
