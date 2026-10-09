@@ -18,7 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   strip above the rows shows the branch, the counts and the filter. The
   page keeps the title and an about pane in view while the body and the
   notes scroll as a message board, one box per post; Tab moves onto the
-  parent, children and blockers and Enter follows one. The screen sits
+  parent, children and blockers and Enter follows one. On rows and on
+  the page, m claims, u unclaims, n notes, x closes and X drops the
+  chosen issue through the same code the commands use; the footer asks
+  for the note or the reason and then says what happened. The screen sits
   behind the `tui` cargo feature, on by default; `cargo install
   --no-default-features` builds without it. Under a pipe or a hook,
   bare `foam` prints the usage as before.
