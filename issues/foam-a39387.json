@@ -3,7 +3,7 @@
   "title": "v0.2.1",
   "body": "Patch release: the clone bring-up fixes, the sync progress lines, and listing wrap. Nothing breaks.",
   "type": "milestone",
-  "status": "open",
+  "status": "closed",
   "priority": 1,
   "labels": [],
   "parent": null,
@@ -13,16 +13,19 @@
   "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-09T20:53:52.221925866Z",
-  "updated_at": "2026-10-09T20:53:52.221925866Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-10-09T20:55:20.915137964Z",
+  "closed_at": "2026-10-09T20:55:20.915137964Z",
+  "close_reason": "tagged v0.2.1 at e11ec98",
+  "resolution": "done",
   "notes": [],
   "stamps": {
     "created": {
       "commit": "a374b57",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "e11ec98",
+      "branch": "dev"
+    }
   }
 }
