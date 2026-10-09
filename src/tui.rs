@@ -7,7 +7,7 @@ use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{Block, BorderType, List, ListItem, ListState, Padding, Paragraph};
 use ratatui::{DefaultTerminal, Frame};
 
 use crate::graph::{self, BOARD_LOG};
@@ -46,10 +46,70 @@ impl View {
     }
 }
 
-/// Where the person is: on the rows, or inside one issue.
+/// Where the person is: on the rows, or on an issue's page.
 enum Mode {
     Rows,
-    Detail { id: String, scroll: usize },
+    Detail(Page),
+}
+
+/// An issue on screen, the issues followed to reach it under it,
+/// and where the cursor is.
+struct Page {
+    ids: Vec<String>,
+    scroll: usize,
+    /// The tie under the cursor, when the cursor is on the ties.
+    tie: Option<usize>,
+}
+
+impl Page {
+    fn open(id: String) -> Page {
+        Page {
+            ids: vec![id],
+            scroll: 0,
+            tie: None,
+        }
+    }
+
+    fn id(&self) -> &str {
+        self.ids.last().expect("a page shows an issue")
+    }
+
+    fn follow(&mut self, id: String) {
+        self.ids.push(id);
+        self.scroll = 0;
+        self.tie = None;
+    }
+
+    /// Back to the issue this one was followed from; `false` on
+    /// the first.
+    fn back(&mut self) -> bool {
+        if self.ids.len() < 2 {
+            return false;
+        }
+        self.ids.pop();
+        self.scroll = 0;
+        self.tie = None;
+        true
+    }
+
+    /// Drop, from the top, the issues `db` no longer has.
+    fn prune(&mut self, db: &Db) {
+        while self
+            .ids
+            .last()
+            .is_some_and(|id| !db.issues.contains_key(id))
+        {
+            self.ids.pop();
+        }
+    }
+}
+
+/// What the last draw of a page allows: how far the posts scroll,
+/// and which issues the ties lead to.
+#[derive(Default)]
+struct Limits {
+    scroll: usize,
+    ties: Vec<String>,
 }
 
 /// One line of a screen.
@@ -99,22 +159,23 @@ fn screen(terminal: &mut DefaultTerminal, store: &Store) -> Result<()> {
             .ok_or_else(|| anyhow::anyhow!("{}", crate::store::NOT_INITIALIZED))?;
         let mut screen = build(store, &snap.db, view)?;
         keep(&mut state, &screen.rows);
-        loop {
-            // an issue that a reload took away leaves its screen
-            if let Mode::Detail { id, .. } = &mode
-                && !snap.db.issues.contains_key(id)
-            {
+        // a page whose issues a reload took away falls back
+        if let Mode::Detail(page) = &mut mode {
+            page.prune(&snap.db);
+            if page.ids.is_empty() {
                 mode = Mode::Rows;
             }
-            let mut max_scroll = 0;
+        }
+        loop {
+            let mut limits = Limits::default();
             match &mode {
                 Mode::Rows => {
                     terminal.draw(|frame| draw_rows(frame, &screen, &mut state))?;
                 }
-                Mode::Detail { id, scroll } => {
-                    let issue = &snap.db.issues[id];
+                Mode::Detail(page) => {
+                    let issue = &snap.db.issues[page.id()];
                     terminal.draw(|frame| {
-                        max_scroll = draw_detail(frame, &screen.title, &snap.db, issue, *scroll);
+                        limits = draw_detail(frame, &screen.title, &snap.db, issue, page);
                     })?;
                 }
             }
@@ -143,10 +204,7 @@ fn screen(terminal: &mut DefaultTerminal, store: &Store) -> Result<()> {
                         if let Some(Row::Issue { issue, .. }) =
                             state.selected().map(|i| &screen.rows[i])
                         {
-                            mode = Mode::Detail {
-                                id: issue.id.clone(),
-                                scroll: 0,
-                            };
+                            mode = Mode::Detail(Page::open(issue.id.clone()));
                         }
                     }
                     KeyCode::Char('j') | KeyCode::Down => {
@@ -163,16 +221,44 @@ fn screen(terminal: &mut DefaultTerminal, store: &Store) -> Result<()> {
                     }
                     _ => {}
                 },
-                Mode::Detail { scroll, .. } => match key.code {
-                    KeyCode::Esc | KeyCode::Char('h') | KeyCode::Left | KeyCode::Backspace => {
-                        mode = Mode::Rows;
+                Mode::Detail(page) => {
+                    let last_tie = limits.ties.len().saturating_sub(1);
+                    match key.code {
+                        KeyCode::Esc | KeyCode::Char('h') | KeyCode::Left | KeyCode::Backspace => {
+                            if !page.back() {
+                                mode = Mode::Rows;
+                            }
+                        }
+                        KeyCode::Tab | KeyCode::BackTab => {
+                            page.tie = match page.tie {
+                                None if !limits.ties.is_empty() => Some(0),
+                                _ => None,
+                            };
+                        }
+                        KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => {
+                            if let Some(id) = page.tie.and_then(|k| limits.ties.get(k)) {
+                                page.follow(id.clone());
+                            }
+                        }
+                        KeyCode::Char('j') | KeyCode::Down => match page.tie {
+                            Some(k) => page.tie = Some((k + 1).min(last_tie)),
+                            None => page.scroll = (page.scroll + 1).min(limits.scroll),
+                        },
+                        KeyCode::Char('k') | KeyCode::Up => match page.tie {
+                            Some(k) => page.tie = Some(k.saturating_sub(1)),
+                            None => page.scroll = page.scroll.saturating_sub(1),
+                        },
+                        KeyCode::Char('g') | KeyCode::Home => match page.tie {
+                            Some(_) => page.tie = Some(0),
+                            None => page.scroll = 0,
+                        },
+                        KeyCode::Char('G') | KeyCode::End => match page.tie {
+                            Some(_) => page.tie = Some(last_tie),
+                            None => page.scroll = limits.scroll,
+                        },
+                        _ => {}
                     }
-                    KeyCode::Char('j') | KeyCode::Down => *scroll = (*scroll + 1).min(max_scroll),
-                    KeyCode::Char('k') | KeyCode::Up => *scroll = scroll.saturating_sub(1),
-                    KeyCode::Char('g') | KeyCode::Home => *scroll = 0,
-                    KeyCode::Char('G') | KeyCode::End => *scroll = max_scroll,
-                    _ => {}
-                },
+                }
             }
         }
     }
@@ -376,82 +462,233 @@ fn draw_rows(frame: &mut Frame, screen: &Screen, state: &mut ListState) {
     frame.render_widget(Paragraph::new(screen.view.keys()).dim(), foot);
 }
 
-/// Draw one issue scrolled `scroll` lines down, and return how
-/// far down it can scroll.
-fn draw_detail(frame: &mut Frame, title: &Line, db: &Db, issue: &Issue, scroll: usize) -> usize {
+/// The about pane's width, borders included, when it stands
+/// beside the posts.
+const ABOUT_WIDTH: u16 = 30;
+
+/// A terminal narrower than this stacks the about pane under the
+/// header instead.
+const WIDE: u16 = 90;
+
+/// Draw an issue's page: the header card, the about pane and the
+/// posts, side by side or stacked.
+fn draw_detail(frame: &mut Frame, title: &Line, db: &Db, issue: &Issue, page: &Page) -> Limits {
     let [top, body, foot] = frame_areas(frame);
     frame.render_widget(Paragraph::new(title.clone()), top);
-    let lines = detail(db, issue, usize::from(body.width));
-    let max = lines.len().saturating_sub(usize::from(body.height));
-    let scroll = scroll.min(max);
+    let wide = body.width >= WIDE;
+    let left_w = if wide {
+        body.width - ABOUT_WIDTH
+    } else {
+        body.width
+    };
+    let heading = heading(issue, inner(left_w));
+    let about_w = if wide { ABOUT_WIDTH } else { body.width };
+    let about = about(db, issue, inner(about_w), page.tie);
+    let card_h = u16::try_from(heading.len())
+        .unwrap_or(u16::MAX)
+        .saturating_add(2);
+    let (card, about_area, posts_area) = if wide {
+        let [left, right] =
+            Layout::horizontal([Constraint::Min(0), Constraint::Length(ABOUT_WIDTH)]).areas(body);
+        let [card, posts] =
+            Layout::vertical([Constraint::Length(card_h), Constraint::Min(0)]).areas(left);
+        (card, right, posts)
+    } else {
+        let about_h = u16::try_from(about.lines.len())
+            .unwrap_or(u16::MAX)
+            .saturating_add(2)
+            .min(body.height / 2);
+        let [card, about_area, posts] = Layout::vertical([
+            Constraint::Length(card_h),
+            Constraint::Length(about_h),
+            Constraint::Min(0),
+        ])
+        .areas(body);
+        (card, about_area, posts)
+    };
+
     frame.render_widget(
-        Paragraph::new(lines).scroll((u16::try_from(scroll).unwrap_or(u16::MAX), 0)),
-        body,
+        Paragraph::new(heading).block(pane(&format!(" {} ", issue.id))),
+        card,
     );
+
+    // the about pane scrolls only to keep the tie under the cursor
+    // in view
+    let about_scroll = page
+        .tie
+        .and_then(|k| about.tie_lines.get(k))
+        .map_or(0, |&line| {
+            line.saturating_sub(rows_in(about_area.height).saturating_sub(1))
+        });
     frame.render_widget(
-        Paragraph::new("j/k scroll   g/G ends   Esc back   r reload   q quit").dim(),
-        foot,
+        Paragraph::new(about.lines)
+            .block(pane(" about "))
+            .scroll((u16::try_from(about_scroll).unwrap_or(u16::MAX), 0)),
+        about_area,
     );
-    max
+
+    let lines = posts(issue, inner(posts_area.width));
+    let max = lines.len().saturating_sub(rows_in(posts_area.height));
+    let scroll = page.scroll.min(max);
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(pane(" posts "))
+            .scroll((u16::try_from(scroll).unwrap_or(u16::MAX), 0)),
+        posts_area,
+    );
+
+    let keys = if page.tie.is_some() {
+        "j/k pick   Enter follow   Tab posts   Esc back   q quit"
+    } else if about.ties.is_empty() {
+        "j/k scroll   g/G ends   Esc back   r reload   q quit"
+    } else {
+        "j/k scroll   Tab ties   Esc back   r reload   q quit"
+    };
+    frame.render_widget(Paragraph::new(keys).dim(), foot);
+    Limits {
+        scroll: max,
+        ties: about.ties,
+    }
 }
 
-/// One issue as a page: a title block, a line of badges, the
-/// dates, what it is tied to, then the body and the notes as
-/// posts, wrapped to `width`.
-fn detail(db: &Db, i: &Issue, width: usize) -> Vec<Line<'static>> {
-    let style = human();
-    let dim = |s: String| Span::styled(s, Style::new().add_modifier(Modifier::DIM));
-    let mut out = Vec::new();
-    let head = format!("{}  ", i.id);
-    let room = width.saturating_sub(head.len()).max(20);
-    for (n, l) in render::wrap_at(&i.title, room, room)
+/// The columns left inside a pane's border and padding.
+fn inner(outer: u16) -> usize {
+    usize::from(outer.saturating_sub(4))
+}
+
+/// The rows left inside a pane's border.
+fn rows_in(outer: u16) -> usize {
+    usize::from(outer.saturating_sub(2))
+}
+
+fn pane(title: &str) -> Block<'static> {
+    Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(Style::new().add_modifier(Modifier::DIM))
+        .title(Span::raw(title.to_string()).dim())
+        .padding(Padding::horizontal(1))
+}
+
+/// The title, bold, wrapped to `width`.
+fn heading(i: &Issue, width: usize) -> Vec<Line<'static>> {
+    let width = width.max(10);
+    render::wrap_at(&i.title, width, width)
         .into_iter()
-        .enumerate()
-    {
-        let lead = if n == 0 {
-            dim(head.clone())
-        } else {
-            Span::raw(" ".repeat(head.len()))
-        };
-        out.push(Line::from(vec![lead, Span::raw(l).bold()]));
-    }
-    let mut badges = vec![
-        priority(i.priority),
+        .map(|l| Line::from(Span::raw(l).bold()))
+        .collect()
+}
+
+/// The about pane: badges, dates and ties, with the issues the
+/// ties lead to and which line each one is on.
+struct About {
+    lines: Vec<Line<'static>>,
+    ties: Vec<String>,
+    tie_lines: Vec<usize>,
+}
+
+/// A filled badge, so the eye finds it without reading.
+fn badge(text: &str, bg: Color) -> Span<'static> {
+    Span::styled(
+        format!(" {text} "),
+        Style::new()
+            .bg(bg)
+            .fg(Color::Black)
+            .add_modifier(Modifier::BOLD),
+    )
+}
+
+fn priority_badge(p: u8) -> Span<'static> {
+    let bg = match p {
+        0 => Color::Red,
+        1 => Color::LightRed,
+        2 => Color::Yellow,
+        3 => Color::Gray,
+        _ => Color::DarkGray,
+    };
+    badge(&format!("P{p}"), bg)
+}
+
+fn status_badge(s: Status) -> Span<'static> {
+    let bg = match s {
+        Status::Open => Color::Green,
+        Status::InProgress => Color::Yellow,
+        Status::Deferred => Color::Blue,
+        Status::Closed => Color::DarkGray,
+    };
+    badge(&s.to_string(), bg)
+}
+
+fn about(db: &Db, i: &Issue, width: usize, tie: Option<usize>) -> About {
+    let style = human();
+    let width = width.max(16);
+    let dim = |s: String| Span::styled(s, Style::new().add_modifier(Modifier::DIM));
+    let label = |l: &str| dim(pad(l, 10));
+    let mut lines = vec![Line::from(vec![
+        priority_badge(i.priority),
         Span::raw(format!("  {}  ", i.kind)),
-        status(i.status, 0),
-    ];
+        status_badge(i.status),
+    ])];
     if let Some(a) = &i.assignee {
-        badges.push(dim(format!("  @{a}")));
+        lines.push(Line::from(Span::raw(cut(&format!("@{a}"), width))));
         if i.lease_expires.is_some() {
-            badges.push(dim(format!(" · {}", render::lease_left(i))));
+            lines.push(Line::from(dim(render::lease_left(i))));
         }
     }
-    out.push(Line::from(badges));
-    let mut dates = format!("created {}", style.when(i.created_at));
+    lines.push(Line::default());
+    lines.push(Line::from(vec![
+        label("created"),
+        Span::raw(style.when(i.created_at)),
+    ]));
     if let Some(t) = i.defer_until {
-        dates.push_str(&format!(" · deferred until {}", style.until(t)));
+        lines.push(Line::from(vec![
+            label("deferred"),
+            Span::raw(style.until(t)),
+        ]));
     }
     if let Some(c) = i.closed_at {
-        dates.push_str(&format!(" · closed {}", style.when(c)));
-        match (i.resolution, &i.close_reason) {
-            (Some(r), Some(why)) => dates.push_str(&format!(", {r}: {why}")),
-            (Some(r), None) => dates.push_str(&format!(", {r}")),
-            (None, Some(why)) => dates.push_str(&format!(": {why}")),
-            (None, None) => {}
+        lines.push(Line::from(vec![label("closed"), Span::raw(style.when(c))]));
+        let why = match (i.resolution, &i.close_reason) {
+            (Some(r), Some(why)) => format!("{r}: {why}"),
+            (Some(r), None) => r.to_string(),
+            (None, Some(why)) => why.clone(),
+            (None, None) => String::new(),
+        };
+        if !why.is_empty() {
+            lines.extend(
+                render::wrap_at(&why, width, width)
+                    .into_iter()
+                    .map(|l| Line::from(dim(l))),
+            );
         }
     }
-    out.push(Line::from(dim(dates)));
 
-    // the ties, each row labelled in a column of its own
-    let label = |l: &str| dim(pad(l, 10));
-    let blank = || Span::raw(" ".repeat(10));
     let mut ties = Vec::new();
-    if let Some(p) = &i.parent {
-        let mut spans = vec![label("parent"), Span::raw(p.clone())];
-        if let Some(parent) = db.issues.get(p) {
-            spans.push(dim(format!("  {}", parent.title)));
+    let mut tie_lines = Vec::new();
+    let mut tie_row = |lines: &mut Vec<Line<'static>>, id: &str, rest: Vec<Span<'static>>| {
+        let mut spans = vec![Span::raw("› "), Span::raw(id.to_string())];
+        spans.extend(rest);
+        let mut line = Line::from(spans);
+        if tie == Some(ties.len()) {
+            line = line.style(Style::new().add_modifier(Modifier::REVERSED));
         }
-        ties.push(Line::from(spans));
+        ties.push(id.to_string());
+        tie_lines.push(lines.len());
+        lines.push(line);
+    };
+    let mut section = Vec::new();
+    if let Some(p) = &i.parent {
+        section.push(Line::from(dim("parent".into())));
+        let title = db
+            .issues
+            .get(p)
+            .map(|parent| {
+                vec![dim(cut(
+                    &format!("  {}", parent.title),
+                    width.saturating_sub(p.len() + 2),
+                ))]
+            })
+            .unwrap_or_default();
+        tie_row(&mut section, p, title);
     }
     let children = graph::children(db, &i.id);
     if !children.is_empty() {
@@ -459,42 +696,56 @@ fn detail(db: &Db, i: &Issue, width: usize) -> Vec<Line<'static>> {
             Some((closed, total)) => format!("{closed}/{total} closed"),
             None => children.len().to_string(),
         };
-        ties.push(Line::from(vec![label("children"), Span::raw(count)]));
+        section.push(Line::from(vec![label("children"), Span::raw(count)]));
         for c in children {
-            ties.push(Line::from(vec![
-                blank(),
-                Span::raw(format!("{}  ", c.id)),
-                status(c.status, 0),
-                Span::raw(format!("  {}", c.title)),
-                dim(render::rollup_tag(db, c)),
-            ]));
+            tie_row(
+                &mut section,
+                &c.id,
+                vec![Span::raw("  "), status(c.status, 0)],
+            );
         }
     }
-    for (n, b) in i.blocked_by.iter().enumerate() {
-        let status = match db.issues.get(b) {
-            Some(o) => status(o.status, 0),
-            None => Span::raw("missing"),
-        };
-        ties.push(Line::from(vec![
-            if n == 0 { label("blocked") } else { blank() },
-            Span::raw(format!("{b}  ")),
-            status,
-        ]));
+    if !i.blocked_by.is_empty() {
+        section.push(Line::from(dim("blocked by".into())));
+        for b in &i.blocked_by {
+            match db.issues.get(b) {
+                Some(o) => tie_row(&mut section, b, vec![Span::raw("  "), status(o.status, 0)]),
+                None => section.push(Line::from(vec![
+                    Span::raw(format!("  {b}  ")),
+                    dim("missing".into()),
+                ])),
+            }
+        }
     }
     if !i.labels.is_empty() {
-        ties.push(Line::from(vec![
-            label("labels"),
-            Span::raw(i.labels.join(", ")),
-        ]));
+        section.push(Line::from(dim("labels".into())));
+        section.push(Line::from(Span::raw(cut(
+            &format!("  {}", i.labels.join(", ")),
+            width,
+        ))));
     }
-    if !ties.is_empty() {
-        out.push(Line::default());
-        out.extend(ties);
+    if !section.is_empty() {
+        lines.push(Line::default());
+        let offset = lines.len();
+        for l in &mut tie_lines {
+            *l += offset;
+        }
+        lines.extend(section);
     }
+    About {
+        lines,
+        ties,
+        tie_lines,
+    }
+}
 
+/// The body as the issue's first post, then the notes, each a box
+/// `width` wide.
+fn posts(i: &Issue, width: usize) -> Vec<Line<'static>> {
+    let style = human();
     let wide = width.max(20);
+    let mut out = Vec::new();
     if !i.body.is_empty() {
-        out.push(Line::default());
         out.extend(post_box(
             &Post {
                 author: None,
@@ -508,7 +759,9 @@ fn detail(db: &Db, i: &Issue, width: usize) -> Vec<Line<'static>> {
         ));
     }
     for n in &i.notes {
-        out.push(Line::default());
+        if !out.is_empty() {
+            out.push(Line::default());
+        }
         out.extend(post_box(
             &Post {
                 author: Some(&n.author),
@@ -812,8 +1065,9 @@ mod tests {
         assert_eq!(step(&rows, None, 1), Some(1));
     }
 
-    #[test]
-    fn detail_shows_what_show_prints_wrapped_to_the_width() {
+    /// An issue with a parent, a child, two blockers, a body and a
+    /// note, and the db around it.
+    fn fixture() -> (Db, Issue) {
         let mut m = test_issue("t-000001");
         m.kind = Kind::Milestone;
         m.title = "the parent".into();
@@ -833,44 +1087,141 @@ mod tests {
         c.parent = Some("t-000002".into());
         let mut b = test_issue("t-000003");
         b.status = Status::Closed;
-        let db = db(vec![m, i.clone(), c, b]);
-        let lines: Vec<String> = detail(&db, &i, 40).iter().map(Line::to_string).collect();
-        assert!(lines.iter().all(|l| l.chars().count() <= 40), "{lines:#?}");
-        assert_eq!(lines[0], "t-000002  a title that is long enough to");
-        assert_eq!(lines[1], "          wrap at forty columns");
-        assert_eq!(lines[2], "P2  task  open");
-        assert_eq!(lines[3], "created just now");
-        assert_eq!(lines[4], "");
-        assert_eq!(lines[5], "parent    t-000001  the parent");
-        assert_eq!(lines[6], "children  1");
-        assert_eq!(lines[7], "          t-000004  open  t");
-        assert_eq!(lines[8], "blocked   t-000003  closed");
-        assert_eq!(lines[9], "          t-nope  missing");
-        assert_eq!(lines[10], "");
-        // the body is the first post, with the creation stamp
-        let wide = |l: &String| l.chars().count() == 40;
-        assert!(lines[11..16].iter().all(wide), "{lines:#?}");
-        assert!(lines[11].starts_with("╭─ just now ─"), "{}", lines[11]);
-        assert_eq!(lines[12], format!("│ {:<36} │", "one paragraph"));
-        assert_eq!(lines[13], format!("│ {:<36} │", ""));
-        assert_eq!(lines[14], format!("│ {:<36} │", "another"));
-        assert!(lines[15].ends_with(" main @ none ─╯"), "{}", lines[15]);
-        assert_eq!(lines[16], "");
-        // then the note, author first
-        assert!(lines[17..21].iter().all(wide), "{lines:#?}");
-        assert!(
-            lines[17].starts_with("╭─ ann · just now ─"),
-            "{}",
-            lines[17]
-        );
-        assert!(lines[17].ends_with("─╮"), "{}", lines[17]);
+        (db(vec![m, i.clone(), c, b]), i)
+    }
+
+    fn strings(lines: &[Line]) -> Vec<String> {
+        lines.iter().map(Line::to_string).collect()
+    }
+
+    #[test]
+    fn the_heading_wraps_the_title() {
+        let (_, i) = fixture();
         assert_eq!(
-            lines[18],
+            strings(&heading(&i, 30)),
+            ["a title that is long enough to", "wrap at forty columns"]
+        );
+    }
+
+    #[test]
+    fn the_about_pane_has_badges_dates_and_ties_in_order() {
+        let (db, i) = fixture();
+        let about = about(&db, &i, 26, Some(1));
+        let lines = strings(&about.lines);
+        assert_eq!(lines[0], " P2   task   open ");
+        assert_eq!(lines[1], "");
+        assert_eq!(lines[2], "created   just now");
+        assert_eq!(lines[3], "");
+        assert_eq!(lines[4], "parent");
+        assert_eq!(lines[5], "› t-000001  the parent");
+        assert_eq!(lines[6], "children  1");
+        assert_eq!(lines[7], "› t-000004  open");
+        assert_eq!(lines[8], "blocked by");
+        assert_eq!(lines[9], "› t-000003  closed");
+        assert_eq!(lines[10], "  t-nope  missing");
+        assert_eq!(lines.len(), 11);
+        assert_eq!(about.ties, ["t-000001", "t-000004", "t-000003"]);
+        assert_eq!(about.tie_lines, [5, 7, 9]);
+        // the tie under the cursor stands out, the others do not
+        let reversed = |l: &Line| l.style.add_modifier.contains(Modifier::REVERSED);
+        assert!(reversed(&about.lines[7]));
+        assert!(!reversed(&about.lines[5]) && !reversed(&about.lines[9]));
+    }
+
+    #[test]
+    fn the_posts_are_the_body_then_the_notes_as_boxes() {
+        let (_, i) = fixture();
+        let lines = strings(&posts(&i, 40));
+        let wide = |l: &String| l.chars().count() == 40;
+        assert!(
+            lines.iter().filter(|l| !l.is_empty()).all(wide),
+            "{lines:#?}"
+        );
+        // the body carries the creation stamp and no author
+        assert!(lines[0].starts_with("╭─ just now ─"), "{}", lines[0]);
+        assert_eq!(lines[1], format!("│ {:<36} │", "one paragraph"));
+        assert_eq!(lines[2], format!("│ {:<36} │", ""));
+        assert_eq!(lines[3], format!("│ {:<36} │", "another"));
+        assert!(lines[4].ends_with(" main @ none ─╯"), "{}", lines[4]);
+        assert_eq!(lines[5], "");
+        assert!(lines[6].starts_with("╭─ ann · just now ─"), "{}", lines[6]);
+        assert!(lines[6].ends_with("─╮"), "{}", lines[6]);
+        assert_eq!(
+            lines[7],
             format!("│ {:<36} │", "a note long enough that it has to")
         );
-        assert_eq!(lines[19], format!("│ {:<36} │", "wrap onto a second line"));
-        assert!(lines[20].ends_with(" dev @ abc1234 ─╯"), "{}", lines[20]);
-        assert_eq!(lines.len(), 21);
+        assert_eq!(lines[8], format!("│ {:<36} │", "wrap onto a second line"));
+        assert!(lines[9].ends_with(" dev @ abc1234 ─╯"), "{}", lines[9]);
+        assert_eq!(lines.len(), 10);
+    }
+
+    #[test]
+    fn a_page_follows_ties_and_comes_back_the_same_way() {
+        let (db, _) = fixture();
+        let mut page = Page::open("t-000002".into());
+        page.scroll = 3;
+        page.follow("t-000001".into());
+        assert_eq!(page.id(), "t-000001");
+        assert_eq!(page.scroll, 0);
+        assert!(page.back());
+        assert_eq!(page.id(), "t-000002");
+        assert!(!page.back());
+        // a reload that removed the issues on top drops to the
+        // first that remains
+        page.follow("t-gone".into());
+        page.follow("t-also-gone".into());
+        page.prune(&db);
+        assert_eq!(page.id(), "t-000002");
+        page.ids.clear();
+        page.prune(&db);
+        assert!(page.ids.is_empty());
+    }
+
+    #[test]
+    fn the_page_puts_the_about_pane_beside_or_under_the_card() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+        let (db, i) = fixture();
+        let title = Line::from("t");
+        let rows = |width: u16, height: u16| {
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            let page = Page::open(i.id.clone());
+            terminal
+                .draw(|f| {
+                    draw_detail(f, &title, &db, &i, &page);
+                })
+                .unwrap();
+            let buffer = terminal.backend().buffer().clone();
+            (0..height)
+                .map(|y| {
+                    (0..width)
+                        .map(|x| buffer[(x, y)].symbol().to_string())
+                        .collect::<String>()
+                })
+                .collect::<Vec<String>>()
+        };
+        let col_of = |row: &str, needle: &str| row.find(needle).map(|b| row[..b].chars().count());
+
+        // wide: the card and the posts on the left, the about pane
+        // at the right edge, all starting under the title line
+        let wide = rows(100, 30);
+        assert!(wide[1].starts_with("╭ t-000002 "), "{}", wide[1]);
+        assert_eq!(col_of(&wide[1], "╭ about "), Some(70), "{}", wide[1]);
+        assert!(wide[2].contains("││  P2   task   open "), "{}", wide[2]);
+        let posts = wide.iter().position(|r| r.starts_with("╭ posts ")).unwrap();
+        let body = &wide[posts + 1];
+        assert!(body.starts_with("│ ╭─ just now "), "{body}");
+        assert!(
+            body.ends_with("╮ ││                            │"),
+            "{body}"
+        );
+
+        // narrow: card, about and posts stacked, each full width
+        let narrow = rows(60, 30);
+        let at = |needle: &str| narrow.iter().position(|r| r.starts_with(needle)).unwrap();
+        let (card, about, posts) = (at("╭ t-000002 "), at("╭ about "), at("╭ posts "));
+        assert!(card < about && about < posts, "{narrow:#?}");
+        assert!(narrow[about].ends_with('╮'), "{}", narrow[about]);
     }
 
     #[test]
