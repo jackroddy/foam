@@ -3,7 +3,7 @@
   "title": "Cut the 0.2.1 release",
   "body": "Version in Cargo.toml, the changelog's Unreleased section becomes 0.2.1 with a date, annotated tag v0.2.1, merge dev to main. Jack pushes.",
   "type": "chore",
-  "status": "open",
+  "status": "closed",
   "priority": 1,
   "labels": [],
   "parent": "foam-a39387",
@@ -13,16 +13,19 @@
   "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-09T20:53:52.240949523Z",
-  "updated_at": "2026-10-09T20:53:52.240949523Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-10-09T20:55:20.90610325Z",
+  "closed_at": "2026-10-09T20:55:20.90610325Z",
+  "close_reason": "version 0.2.1, changelog dated, tag v0.2.1 at e11ec98, dev merged to main",
+  "resolution": "done",
   "notes": [],
   "stamps": {
     "created": {
       "commit": "a374b57",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "e11ec98",
+      "branch": "dev"
+    }
   }
 }
