@@ -1,0 +1,28 @@
+{
+  "id": "foam-4fc5ee",
+  "title": "tui: a preview pane beside the rows",
+  "body": "The right third shows the chosen issue's about block and the start of its body; Enter still opens the page. Stacked under the rows below 90 columns; p hides it.",
+  "type": "task",
+  "status": "open",
+  "priority": 2,
+  "labels": [],
+  "parent": "foam-08d750",
+  "blocked_by": [],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-10-09T23:09:15.687283757Z",
+  "updated_at": "2026-10-09T23:09:15.687283757Z",
+  "closed_at": null,
+  "close_reason": null,
+  "resolution": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "2c6b49f",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
