@@ -3,26 +3,29 @@
   "title": "tui: the board as cards",
   "body": "Each section a pane with its name in the border, the log pane at the bottom with dim relative times.",
   "type": "task",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 2,
   "labels": [],
   "parent": "foam-08d750",
   "blocked_by": [],
   "related": [],
   "assignee": "Jack Roddy/6de6737a",
-  "lease_expires": "2026-10-09T23:30:21.665887189Z",
+  "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-09T23:09:15.714002917Z",
-  "updated_at": "2026-10-09T23:15:21.665887189Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-10-09T23:16:46.986757887Z",
+  "closed_at": "2026-10-09T23:16:46.986757887Z",
+  "close_reason": "sections boxed inside the one list; the boxed lines are checked for width in the board test",
+  "resolution": "done",
   "notes": [],
   "stamps": {
     "created": {
       "commit": "2c6b49f",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "8ebd98d",
+      "branch": "dev"
+    }
   }
 }
