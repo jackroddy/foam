@@ -7,7 +7,9 @@ use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, List, ListItem, ListState, Padding, Paragraph};
+use ratatui::widgets::{
+    Block, BorderType, HighlightSpacing, List, ListItem, ListState, Padding, Paragraph,
+};
 use ratatui::{DefaultTerminal, Frame};
 
 use crate::graph::{self, BOARD_LOG};
@@ -520,10 +522,17 @@ fn draw_rows(frame: &mut Frame, screen: &Screen, state: &mut ListState) {
         .iter()
         .map(|row| ListItem::new(line(row, &screen.widths, usize::from(body.width))))
         .collect();
-    let list = List::new(items).highlight_style(Style::new().add_modifier(Modifier::REVERSED));
+    let list = List::new(items)
+        .highlight_style(CHOSEN)
+        .highlight_symbol("› ")
+        .highlight_spacing(HighlightSpacing::Always);
     frame.render_stateful_widget(list, body, state);
     frame.render_widget(Paragraph::new(screen.view.keys()).dim(), foot);
 }
+
+/// The row under the cursor: a background under its colours,
+/// never in place of them.
+const CHOSEN: Style = Style::new().bg(Color::DarkGray);
 
 /// The about pane's width, borders included, when it stands
 /// beside the posts.
@@ -744,7 +753,7 @@ fn about(db: &Db, i: &Issue, width: usize, tie: Option<usize>) -> About {
         spans.extend(rest);
         let mut line = Line::from(spans);
         if tie == Some(ties.len()) {
-            line = line.style(Style::new().add_modifier(Modifier::REVERSED));
+            line = line.style(CHOSEN);
         }
         ties.push(id.to_string());
         tie_lines.push(lines.len());
@@ -1227,9 +1236,9 @@ mod tests {
         assert_eq!(about.ties, ["t-000001", "t-000004", "t-000003"]);
         assert_eq!(about.tie_lines, [5, 7, 9]);
         // the tie under the cursor stands out, the others do not
-        let reversed = |l: &Line| l.style.add_modifier.contains(Modifier::REVERSED);
-        assert!(reversed(&about.lines[7]));
-        assert!(!reversed(&about.lines[5]) && !reversed(&about.lines[9]));
+        let chosen = |l: &Line| l.style.bg == Some(Color::DarkGray);
+        assert!(chosen(&about.lines[7]));
+        assert!(!chosen(&about.lines[5]) && !chosen(&about.lines[9]));
     }
 
     #[test]
