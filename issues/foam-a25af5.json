@@ -3,26 +3,29 @@
   "title": "tui: fold a milestone's children",
   "body": "Space folds the children under a milestone in the tree and shows the rollup in their place.",
   "type": "task",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 2,
   "labels": [],
   "parent": "foam-08d750",
   "blocked_by": [],
   "related": [],
   "assignee": "Jack Roddy/6de6737a",
-  "lease_expires": "2026-10-09T23:28:54.347758645Z",
+  "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-09T23:09:15.705243782Z",
-  "updated_at": "2026-10-09T23:13:54.347758645Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-10-09T23:15:21.657180618Z",
+  "closed_at": "2026-10-09T23:15:21.657180618Z",
+  "close_reason": "Space folds and unfolds, the row says how many are hidden; unit test on a top and a middle fold",
+  "resolution": "done",
   "notes": [],
   "stamps": {
     "created": {
       "commit": "2c6b49f",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "f014915",
+      "branch": "dev"
+    }
   }
 }
