@@ -3,26 +3,29 @@
   "title": "tui: a status strip above the rows",
   "body": "The title line becomes a bar: prefix, branch and commit, the counts as filled badges in the status colours, then the view name and the filter when one is on.",
   "type": "task",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 2,
   "labels": [],
   "parent": "foam-08d750",
   "blocked_by": [],
   "related": [],
   "assignee": "Jack Roddy/6de6737a",
-  "lease_expires": "2026-10-09T23:25:18.480508377Z",
+  "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-09T23:09:15.668803546Z",
-  "updated_at": "2026-10-09T23:10:18.480508377Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-10-09T23:10:36.811617011Z",
+  "closed_at": "2026-10-09T23:10:36.811617011Z",
+  "close_reason": "strip with counts as badges and the view name at the right edge; unit test on its text and colours",
+  "resolution": "done",
   "notes": [],
   "stamps": {
     "created": {
       "commit": "2c6b49f",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "40f3ab3",
+      "branch": "dev"
+    }
   }
 }
