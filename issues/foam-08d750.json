@@ -3,7 +3,7 @@
   "title": "A TUI in this crate",
   "body": "Decided: the TUI lives in this crate behind a cargo feature named tui that is on by default, so cargo install gets it and --no-default-features gives a slim binary for hooks and CI. Internals stay private: --json is the extension point for anyone else's front end, because the lease, compare-and-swap and merge rules live in store.rs and cmd.rs and a library caller could skip them. With the feature on, bare foam launches the TUI when stdin and stdout are both terminals; piped, under a hook, or with the feature off it prints the help as it does today, so no script or agent ever lands in a screen.",
   "type": "milestone",
-  "status": "open",
+  "status": "closed",
   "priority": 2,
   "labels": [],
   "parent": "foam-716694",
@@ -13,16 +13,19 @@
   "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-09T21:04:30.461431259Z",
-  "updated_at": "2026-10-09T21:04:30.461431259Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-10-09T23:27:55.281229121Z",
+  "closed_at": "2026-10-09T23:27:55.281229121Z",
+  "close_reason": "every child closed: the screen lists, boards, previews, filters, folds, pages, and acts",
+  "resolution": "done",
   "notes": [],
   "stamps": {
     "created": {
       "commit": "e11ec98",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "72a9ddc",
+      "branch": "dev"
+    }
   }
 }
