@@ -12,6 +12,7 @@ use ratatui::widgets::{
 };
 use ratatui::{DefaultTerminal, Frame};
 
+use crate::git::Stamp;
 use crate::graph::{self, BOARD_LOG};
 use crate::model::{Issue, Kind, Status};
 use crate::render;
@@ -37,6 +38,13 @@ impl View {
         match self {
             View::List => View::Board,
             View::Board => View::List,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            View::List => "list",
+            View::Board => "board",
         }
     }
 
@@ -146,7 +154,7 @@ struct Widths {
 
 struct Screen<'a> {
     view: View,
-    title: Line<'static>,
+    strip: Line<'static>,
     rows: Vec<Row<'a>>,
     widths: Widths,
 }
@@ -177,7 +185,7 @@ fn screen(terminal: &mut DefaultTerminal, store: &Store) -> Result<()> {
                 Mode::Detail(page) => {
                     let issue = &snap.db.issues[page.id()];
                     terminal.draw(|frame| {
-                        limits = draw_detail(frame, &screen.title, &snap.db, issue, page);
+                        limits = draw_detail(frame, &screen.strip, &snap.db, issue, page);
                     })?;
                 }
             }
@@ -299,19 +307,7 @@ fn human() -> render::Style {
 fn build<'a>(store: &Store, db: &'a Db, view: View) -> Result<Screen<'a>> {
     let now = Timestamp::now();
     let stamp = store.git.head_stamp()?;
-    let count = |s: Status| db.issues.values().filter(|i| i.status == s).count();
-    let title = Line::from(vec![
-        Span::raw(db.meta.prefix.clone()).bold().cyan(),
-        Span::raw(format!("  on {} at {}  ", stamp.branch, stamp.commit)),
-        Span::raw(format!(
-            "{} open, {} in progress, {} deferred, {} closed",
-            count(Status::Open),
-            count(Status::InProgress),
-            count(Status::Deferred),
-            count(Status::Closed),
-        ))
-        .dim(),
-    ]);
+    let strip = strip(db, &stamp);
     let mut rows = match view {
         View::List => list_rows(db),
         View::Board => board_rows(db, now),
@@ -349,10 +345,46 @@ fn build<'a>(store: &Store, db: &'a Db, view: View) -> Result<Screen<'a>> {
     }
     Ok(Screen {
         view,
-        title,
+        strip,
         rows,
         widths,
     })
+}
+
+/// The bar above the rows: the prefix, where HEAD is, and the
+/// counts as badges in the status colours.
+fn strip(db: &Db, stamp: &Stamp) -> Line<'static> {
+    let count = |s: Status| db.issues.values().filter(|i| i.status == s).count();
+    let mut spans = vec![
+        Span::raw(db.meta.prefix.clone()).bold().cyan(),
+        Span::raw(format!("  {} @ {}  ", stamp.branch, stamp.commit)).dim(),
+    ];
+    for (n, s) in [
+        Status::Open,
+        Status::InProgress,
+        Status::Deferred,
+        Status::Closed,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        if n > 0 {
+            spans.push(Span::raw(" "));
+        }
+        spans.push(badge(&format!("{} {}", count(s), s), status_colour(s)));
+    }
+    Line::from(spans)
+}
+
+/// Draw the strip with `right` against the right edge.
+fn draw_strip(frame: &mut Frame, area: Rect, strip: &Line, right: &str) {
+    let [left, end] = Layout::horizontal([
+        Constraint::Min(0),
+        Constraint::Length(u16::try_from(right.chars().count()).unwrap_or(u16::MAX)),
+    ])
+    .areas(area);
+    frame.render_widget(Paragraph::new(strip.clone()), left);
+    frame.render_widget(Paragraph::new(right).dim(), end);
 }
 
 /// What `foam list` prints: open and in-progress issues by
@@ -516,11 +548,14 @@ fn frame_areas(frame: &Frame) -> [Rect; 3] {
 
 fn draw_rows(frame: &mut Frame, screen: &Screen, state: &mut ListState) {
     let [top, body, foot] = frame_areas(frame);
-    frame.render_widget(Paragraph::new(screen.title.clone()), top);
+    draw_strip(frame, top, &screen.strip, screen.view.name());
+    // the gutter takes two columns from every row
+    let width = usize::from(body.width.saturating_sub(2));
+    let columns = Columns::at(width);
     let items: Vec<ListItem> = screen
         .rows
         .iter()
-        .map(|row| ListItem::new(line(row, &screen.widths, usize::from(body.width))))
+        .map(|row| ListItem::new(line(row, &screen.widths, width, columns)))
         .collect();
     let list = List::new(items)
         .highlight_style(CHOSEN)
@@ -544,9 +579,9 @@ const WIDE: u16 = 90;
 
 /// Draw an issue's page: the header card, the about pane and the
 /// posts, side by side or stacked.
-fn draw_detail(frame: &mut Frame, title: &Line, db: &Db, issue: &Issue, page: &Page) -> Limits {
+fn draw_detail(frame: &mut Frame, strip: &Line, db: &Db, issue: &Issue, page: &Page) -> Limits {
     let [top, body, foot] = frame_areas(frame);
-    frame.render_widget(Paragraph::new(title.clone()), top);
+    draw_strip(frame, top, strip, "issue");
     let wide = body.width >= WIDE;
     let left_w = if wide {
         body.width - ABOUT_WIDTH
@@ -687,14 +722,17 @@ fn priority_badge(p: u8) -> Span<'static> {
     badge(&format!("P{p}"), bg)
 }
 
-fn status_badge(s: Status) -> Span<'static> {
-    let bg = match s {
+fn status_colour(s: Status) -> Color {
+    match s {
         Status::Open => Color::Green,
         Status::InProgress => Color::Yellow,
         Status::Deferred => Color::Blue,
         Status::Closed => Color::DarkGray,
-    };
-    badge(&s.to_string(), bg)
+    }
+}
+
+fn status_badge(s: Status) -> Span<'static> {
+    badge(&s.to_string(), status_colour(s))
 }
 
 fn about(db: &Db, i: &Issue, width: usize, tie: Option<usize>) -> About {
@@ -930,8 +968,32 @@ fn post_box(p: &Post, style: &render::Style, width: usize) -> Vec<Line<'static>>
     out
 }
 
+/// Which of the optional columns a row shows at a width: the
+/// kind goes first, then the status, and the id, priority and
+/// title stay.
+#[derive(Clone, Copy)]
+struct Columns {
+    status: bool,
+    kind: bool,
+}
+
+impl Columns {
+    #[cfg(test)]
+    const ALL: Columns = Columns {
+        status: true,
+        kind: true,
+    };
+
+    fn at(width: usize) -> Columns {
+        Columns {
+            status: width >= 60,
+            kind: width >= 80,
+        }
+    }
+}
+
 /// A row as one line of `width` columns, the title cut to fit.
-fn line<'a>(row: &'a Row, widths: &Widths, width: usize) -> Line<'a> {
+fn line<'a>(row: &'a Row, widths: &Widths, width: usize, columns: Columns) -> Line<'a> {
     match row {
         Row::Header(h) => Line::from(Span::raw(*h).bold().cyan()),
         Row::Note(n) => Line::from(Span::raw(*n).dim()),
@@ -951,15 +1013,21 @@ fn line<'a>(row: &'a Row, widths: &Widths, width: usize) -> Line<'a> {
                 Span::raw(format!("{}  ", " ".repeat(id_pad))),
                 priority(issue.priority),
                 Span::raw("  "),
-                status(issue.status, widths.status),
-                Span::raw("  "),
-                Span::styled(
+            ];
+            let mut used = widths.id + 2 + 2 + 2;
+            if columns.status {
+                spans.push(status(issue.status, widths.status));
+                spans.push(Span::raw("  "));
+                used += widths.status + 2;
+            }
+            if columns.kind {
+                spans.push(Span::styled(
                     pad(&issue.kind.to_string(), widths.kind),
                     kind_style(issue.kind),
-                ),
-                Span::raw("  "),
-            ];
-            let mut used = widths.id + 2 + 2 + 2 + widths.status + 2 + widths.kind + 2;
+                ));
+                spans.push(Span::raw("  "));
+                used += widths.kind + 2;
+            }
             if widths.rollup > 0 {
                 let r = rollup_text(*rollup);
                 spans.push(Span::raw(" ".repeat(widths.rollup - r.len())));
@@ -1106,18 +1174,33 @@ mod tests {
             kind: 9,
             rollup: 3,
         };
-        let child = line(&rows[2], &widths, 80);
+        let child = line(&rows[2], &widths, 80, Columns::ALL);
         assert_eq!(child.spans[0].content, "  └─ ");
         assert!(child.spans[0].style.add_modifier.contains(Modifier::DIM));
         assert_eq!(child.spans[1].content, "t-000002");
         assert_eq!(child.spans[1].style.fg, Some(Color::Cyan));
-        let held = line(&rows[0], &widths, 80);
+        let held = line(&rows[0], &widths, 80, Columns::ALL);
         let last = held.spans.last().unwrap();
         assert_eq!(last.content, "t-000002");
         assert_eq!(last.style.fg, Some(Color::Cyan));
         assert_eq!(
-            line(&rows[1], &widths, 80).to_string().trim_end(),
+            line(&rows[1], &widths, 80, Columns::ALL)
+                .to_string()
+                .trim_end(),
             "t-000001       P2  open  milestone  0/1  t"
+        );
+        // a narrow terminal drops the kind, then the status
+        assert_eq!(
+            line(&rows[1], &widths, 70, Columns::at(70))
+                .to_string()
+                .trim_end(),
+            "t-000001       P2  open  0/1  t"
+        );
+        assert_eq!(
+            line(&rows[1], &widths, 50, Columns::at(50))
+                .to_string()
+                .trim_end(),
+            "t-000001       P2  0/1  t"
         );
         // every list row takes the cursor
         assert_eq!(step(&rows, None, 1), Some(0));
@@ -1205,6 +1288,25 @@ mod tests {
 
     fn strings(lines: &[Line]) -> Vec<String> {
         lines.iter().map(Line::to_string).collect()
+    }
+
+    #[test]
+    fn the_strip_counts_every_status_in_its_colour() {
+        let mut busy = test_issue("t-000001");
+        busy.status = Status::InProgress;
+        let db = db(vec![busy, test_issue("t-000002")]);
+        let stamp = Stamp {
+            commit: "abc1234".into(),
+            branch: "dev".into(),
+        };
+        let line = strip(&db, &stamp);
+        assert_eq!(
+            line.to_string(),
+            "t  dev @ abc1234   1 open   1 in_progress   0 deferred   0 closed "
+        );
+        assert_eq!(line.spans[0].style.fg, Some(Color::Cyan));
+        assert_eq!(line.spans[2].style.bg, Some(Color::Green));
+        assert_eq!(line.spans[4].style.bg, Some(Color::Yellow));
     }
 
     #[test]
