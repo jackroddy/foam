@@ -69,13 +69,20 @@ knows later that a memory is fifty commits behind. If two `foam` commands
 in the same clone race, the ref's compare-and-swap catches it and the loser
 retries.
 
-If your repo has a remote, `foam init` adds a fetch refspec so `git fetch`
-lands the remote's data on `refs/foam/origin`, and installs a pre-push hook
-that runs `foam sync` before every push. Any `foam` command merges whatever
-a fetch brought in before it does its own work, so a clone is never behind
-what it has fetched. `foam sync` does the fetch, merge, and push by hand,
-and `foam sync --setup` adds the refspec and hook to a clone that was made
-before `foam init` ran somewhere else.
+If your repo has a remote, `foam init` installs a pre-push hook that runs
+`foam sync` before every push. It also adds a fetch refspec so `git fetch`
+lands the remote's data on `refs/foam/origin`, but only once the remote has
+the ref: git fails any fetch whose configured refspec names a ref the remote
+lacks. Until then, the first `foam sync` that finds or pushes the ref adds
+the refspec. Any `foam` command merges whatever a fetch brought in before it
+does its own work, so a clone is never behind what it has fetched. `foam
+sync` does the fetch, merge, and push by hand, and installs the hook and
+refspec when they are missing, so a repo that added its remote after `foam
+init` needs only one `foam sync`.
+
+`git clone` only fetches branches, so a fresh clone has no data ref. Run
+`foam init` there: it fetches the ref from origin when origin has it, and
+starts fresh otherwise.
 
 When two clones change the same record, `foam` merges it field by field: a
 removal on either side stands, notes interleave by time, and a field both

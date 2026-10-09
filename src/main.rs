@@ -207,7 +207,7 @@ enum Cmd {
         /// Which remote
         #[arg(long, default_value = "origin")]
         remote: String,
-        /// Also add the fetch refspec and the pre-push hook to this clone
+        /// Install the pre-push hook and say what became of it
         #[arg(long)]
         setup: bool,
     },

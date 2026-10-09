@@ -14,6 +14,9 @@ pub const DATA_REF: &str = "refs/foam/data";
 /// Where a fetch lands the remote's data ref.
 pub const ORIGIN_REF: &str = "refs/foam/origin";
 
+/// What a command says when there is no data ref to read.
+pub const NOT_INITIALIZED: &str = "foam is not initialized here; `foam init` fetches refs/foam/data from origin if it has one, and starts fresh otherwise";
+
 const RETRIES: usize = 5;
 
 /// Everything on the data ref, decoded.
@@ -242,7 +245,7 @@ impl Store {
         mut change: impl FnMut(&mut Db) -> Result<(T, String)>,
     ) -> Result<T> {
         for attempt in 1..=RETRIES {
-            let snap = self.load()?.context("foam is not initialized here")?;
+            let snap = self.load()?.context(NOT_INITIALIZED)?;
             let mut db = snap.db;
             let (out, message) = change(&mut db)?;
             let tree = self.write_tree(&db, &snap.files)?;

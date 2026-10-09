@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- "foam is not initialized here" now says that `foam init` fetches the
+  data ref from origin when origin has one.
+- `foam init` says when origin has no data ref yet, and when there is no
+  remote, so sync is not set up.
+- `foam sync` installs the pre-push hook and the refspec when they are
+  missing, so a repo that added its remote after `foam init` needs no
+  `--setup`. The flag remains and reports on the hook.
+- `foam doctor` only reports a missing refspec once origin's data has
+  been fetched.
+
+### Fixed
+
+- `foam init` no longer adds the fetch refspec before the remote has the
+  data ref. Git fails every fetch whose configured refspec names a ref the
+  remote lacks, so `git pull` broke in a clone initialized ahead of the
+  first push. `foam sync` adds the refspec once it finds or pushes the ref.
+
 ## [0.2.0] - 2026-09-27
 
 ### Added
