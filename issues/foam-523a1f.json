@@ -1,0 +1,28 @@
+{
+  "id": "foam-523a1f",
+  "title": "tui: the issue as the first post on the detail screen",
+  "body": "Title block with the id dim and the title bold; one badge line with priority, kind, status, assignee and lease; a dim dates line; a small labelled table of parent, children, blockers and labels, only the rows that apply; then the body as the first box, with the creation time, branch and commit in its borders, and the notes below as now.",
+  "type": "task",
+  "status": "open",
+  "priority": 2,
+  "labels": [],
+  "parent": "foam-08d750",
+  "blocked_by": [],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-10-09T22:32:25.602622998Z",
+  "updated_at": "2026-10-09T22:32:25.602622998Z",
+  "closed_at": null,
+  "close_reason": null,
+  "resolution": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "7ba3629",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
