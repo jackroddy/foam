@@ -66,6 +66,18 @@ pub fn run(cmd: &mut Command) -> Output {
     cmd.output().unwrap()
 }
 
+/// Run git in `dir` as a fixed test user and return everything
+/// it produced, success or not.
+pub fn git_output(dir: &Path, args: &[&str]) -> Output {
+    Command::new("git")
+        .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+        .args(args)
+        .env("PATH", path_with_foam())
+        .current_dir(dir)
+        .output()
+        .unwrap()
+}
+
 /// Run git in `dir` as a fixed test user and return its stdout.
 pub fn git(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")

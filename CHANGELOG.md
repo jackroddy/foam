@@ -18,6 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--setup`. The flag remains and reports on the hook.
 - `foam doctor` only reports a missing refspec once origin's data has
   been fetched.
+- `foam sync` says on stderr what it is about to do before each round
+  trip, so `git push` no longer goes quiet while the hook runs. It skips
+  the push when origin already has the tip, and fetches without asking
+  ls-remote first: two round trips fewer when nothing has changed. Under
+  the hook every line starts with `foam:`; by hand, nothing to move
+  prints "up to date".
 
 ### Fixed
 

@@ -976,31 +976,50 @@ fn sync(store: &Store, remote: &str) -> Result<()> {
         bail!("no remote named {remote}");
     }
     install_hook(store, false)?;
+
+    // git sends a hook's stdout to stderr, between its own
+    // lines, so there every line says it is foam's
+    let in_hook = std::env::var_os("FOAM_IN_HOOK").is_some();
+    let say = |line: String| {
+        if in_hook {
+            eprintln!("foam: {line}");
+        } else {
+            println!("{line}");
+        }
+    };
+    eprintln!("foam: syncing {DATA_REF} with {remote}");
     for _ in 0..3 {
-        if store.git.ls_remote(remote, DATA_REF)? {
+        if store
+            .git
+            .fetch_if_present(remote, &format!("+{DATA_REF}:{ORIGIN_REF}"))?
+        {
             add_refspec(store, remote)?;
-            store
-                .git
-                .fetch(remote, &format!("+{DATA_REF}:{ORIGIN_REF}"))?;
         }
         match store.absorb_origin()? {
             Absorbed::Nothing => {}
-            Absorbed::FastForward => println!("fast-forwarded to {remote}"),
-            Absorbed::Merged { conflicts: 0 } => println!("merged {remote}"),
-            Absorbed::Merged { conflicts } => {
-                println!("merged {remote}, settling {conflicts} record(s) both sides changed")
-            }
+            Absorbed::FastForward => say(format!("fast-forwarded to {remote}")),
+            Absorbed::Merged { conflicts: 0 } => say(format!("merged {remote}")),
+            Absorbed::Merged { conflicts } => say(format!(
+                "merged {remote}, settling {conflicts} record(s) both sides changed"
+            )),
         }
-        if store.git.rev_parse(DATA_REF)?.is_none() {
+        let Some(data) = store.git.rev_parse(DATA_REF)? else {
             bail!("{NOT_INITIALIZED}");
+        };
+        if store.git.rev_parse(ORIGIN_REF)? == Some(data) {
+            if !in_hook {
+                println!("{DATA_REF} is up to date with {remote}");
+            }
+            return Ok(());
         }
+        eprintln!("foam: pushing {DATA_REF} to {remote}");
         match store.git.push(remote, &format!("{DATA_REF}:{DATA_REF}"))? {
             Push::Done => {
-                println!("pushed {DATA_REF} to {remote}");
+                say(format!("pushed {DATA_REF} to {remote}"));
                 add_refspec(store, remote)?;
                 return Ok(());
             }
-            Push::Rejected => continue,
+            Push::Rejected => eprintln!("foam: {remote} moved, fetching again"),
         }
     }
     bail!("could not push {DATA_REF}: {remote} kept moving")

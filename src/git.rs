@@ -386,6 +386,23 @@ impl Git {
         Ok(())
     }
 
+    /// Fetch `refspec`, or return `false` when `remote` has no
+    /// such ref.
+    pub fn fetch_if_present(&self, remote: &str, refspec: &str) -> Result<bool> {
+        let out = self
+            .command(&["fetch", "--quiet", remote, refspec])
+            .stderr(Stdio::piped())
+            .output()?;
+        if out.status.success() {
+            return Ok(true);
+        }
+        let err = String::from_utf8_lossy(&out.stderr);
+        if err.contains("couldn't find remote ref") {
+            return Ok(false);
+        }
+        bail!("git fetch failed: {}", err.trim());
+    }
+
     pub fn push(&self, remote: &str, refspec: &str) -> Result<Push> {
         // the pre-push hook foam installs runs foam sync,
         // which would push again; the variable tells it

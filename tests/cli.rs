@@ -698,11 +698,36 @@ fn git_push_carries_the_data_ref_through_the_hook() {
     stdout(foam(&a).args(["create", "hooked"]));
     commit(&a, "two");
     // the hook runs foam from PATH, which git() sets to this build
-    git(&a, &["push", "-q"]);
+    let out = git_output(&a, &["push", "-q"]);
+    assert!(out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("foam: syncing refs/foam/data with origin"),
+        "{err}"
+    );
+    assert!(
+        err.contains("foam: pushing refs/foam/data to origin"),
+        "{err}"
+    );
+    assert!(
+        err.contains("foam: pushed refs/foam/data to origin"),
+        "{err}"
+    );
     let bare = root.path().join("remote.git");
     git(&bare, &["rev-parse", "refs/foam/data"]);
     stdout(foam(&b).arg("init"));
     assert!(stdout(foam(&b).arg("list")).contains("hooked"));
+
+    // nothing to move: the hook names the wait and no more
+    commit(&a, "three");
+    let out = git_output(&a, &["push", "-q"]);
+    assert!(out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("foam: syncing"), "{err}");
+    assert!(!err.contains("pushing"), "{err}");
+    let out = stdout(foam(&a).arg("sync"));
+    assert!(out.contains("up to date with origin"), "{out}");
+    assert!(!out.contains("pushed"), "{out}");
 }
 
 #[test]
