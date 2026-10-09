@@ -1,0 +1,28 @@
+{
+  "id": "foam-2ec13a",
+  "title": "Review the README before the 0.2.1 release",
+  "body": "Check every command and flag the README names against the binary's --help, and the storage and sync section against what init and sync now do.",
+  "type": "chore",
+  "status": "open",
+  "priority": 1,
+  "labels": [],
+  "parent": "foam-a39387",
+  "blocked_by": [],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-10-09T20:53:52.232393706Z",
+  "updated_at": "2026-10-09T20:53:52.232393706Z",
+  "closed_at": null,
+  "close_reason": null,
+  "resolution": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "a374b57",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
