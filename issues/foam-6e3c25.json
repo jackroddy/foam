@@ -3,7 +3,7 @@
   "title": "Split foam's core into a library crate",
   "body": "foam is one binary crate. Everything that reads and writes the ref (git, store, merge, model), the blocker graph, prime and the renderers lives beside the CLI in the same crate, so another front end (a TUI, an MCP server, an editor plugin, a web view) would have to shell out to the binary and parse its --json.\n\nMove the core into a library crate and leave the CLI as a thin binary over it. The seam is already there: cmd.rs and main.rs hold every println, eprintln and bail; git.rs, store.rs, merge.rs, model.rs, graph.rs, prime.rs and render.rs print nothing. The library's surface is roughly: open a store, load a snapshot, the mutations cmd.rs performs on it, sync, and the derived views (ready, blocked, milestone rollups, prime text). Errors come back as values for the front end to word.\n\nDecide as part of this: a workspace with foam-core and foam, or one package with [lib] and [[bin]]; what the library promises about stability, given the --json stability policy in the README; and whether render.rs belongs to the library or to the CLI.\n\nIntegration tests in tests/ keep running the binary. The library gets its own tests where the split exposes something the CLI tests only covered by accident.",
   "type": "task",
-  "status": "open",
+  "status": "closed",
   "priority": 2,
   "labels": [],
   "parent": null,
@@ -13,16 +13,19 @@
   "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-09-29T17:36:52.668953065Z",
-  "updated_at": "2026-09-29T17:36:52.668953065Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-10-09T21:04:30.441441226Z",
+  "closed_at": "2026-10-09T21:04:30.441441226Z",
+  "close_reason": "not splitting: a public library would let other front ends call the store without the lease, compare-and-swap and merge rules that cmd.rs enforces; --json is the extension point for other people's tools, and the TUI lives in this crate",
+  "resolution": "dropped",
   "notes": [],
   "stamps": {
     "created": {
       "commit": "abb2b9e",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "e11ec98",
+      "branch": "dev"
+    }
   }
 }
