@@ -15,11 +15,19 @@
   "lease_expires": "2026-10-09T22:12:40.710094154Z",
   "defer_until": null,
   "created_at": "2026-10-09T21:04:30.505125031Z",
-  "updated_at": "2026-10-09T21:57:40.710094154Z",
+  "updated_at": "2026-10-09T22:03:08.25643084Z",
   "closed_at": null,
   "close_reason": null,
   "resolution": null,
-  "notes": [],
+  "notes": [
+    {
+      "at": "2026-10-09T22:03:08.25643027Z",
+      "author": "Jack Roddy/6de6737a",
+      "text": "Done: Mode::Detail over the rows, entered with Enter, l or Right, left with Esc, h, Left or Backspace; q quits from anywhere. detail() mirrors render::issue line for line in spans, wrapped with render::wrap_at (now pub) at the body width, notes with a two-space hanging indent. Full screen rather than a split pane; a split for wide terminals is a later issue if wanted. The cursor survives reload and the detail of an issue a reload removed falls back to the rows.",
+      "commit": "16b152b",
+      "branch": "dev"
+    }
+  ],
   "stamps": {
     "created": {
       "commit": "e11ec98",
