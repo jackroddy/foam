@@ -11,7 +11,7 @@ use ratatui::widgets::{List, ListItem, ListState, Paragraph};
 use ratatui::{DefaultTerminal, Frame};
 
 use crate::graph::{self, BOARD_LOG};
-use crate::model::{Issue, Status};
+use crate::model::{Issue, Note, Status};
 use crate::render;
 use crate::store::{DATA_REF, Db, Store};
 
@@ -489,23 +489,65 @@ fn detail(db: &Db, i: &Issue, width: usize) -> Vec<Line<'static>> {
                 .map(|l| text(&l)),
         );
     }
-    if !i.notes.is_empty() {
+    for n in &i.notes {
         out.push(text(""));
-        for n in &i.notes {
-            let head = format!("[{} {}] ", style.when(n.at), n.author);
-            let first = wide.saturating_sub(head.chars().count()).max(20);
-            for (k, l) in render::wrap_at(&n.text, first, wide.saturating_sub(2).max(20))
-                .into_iter()
-                .enumerate()
-            {
-                out.push(if k == 0 {
-                    Line::from(vec![Span::raw(head.clone()).dim(), Span::raw(l)])
-                } else {
-                    text(&format!("  {l}"))
-                });
-            }
-        }
+        out.extend(note_box(n, &style, wide));
     }
+    out
+}
+
+/// A note as a rounded box `width` columns wide: who and when in
+/// the top border, the text inside, where it was written in the
+/// bottom border.
+fn note_box(n: &Note, style: &render::Style, width: usize) -> Vec<Line<'static>> {
+    let border = Style::new().add_modifier(Modifier::DIM);
+    let edge = |s: String| Span::styled(s, border);
+    // the session suffix marks an agent, and the colour says so
+    // from across the room
+    let who = Style::new()
+        .add_modifier(Modifier::BOLD)
+        .fg(if n.author.contains('/') {
+            Color::Magenta
+        } else {
+            Color::Cyan
+        });
+    let when = format!(" · {} ", style.when(n.at));
+    let used = 2 + 1 + n.author.chars().count() + when.chars().count() + 1;
+    let mut out = vec![Line::from(vec![
+        edge("╭─ ".into()),
+        Span::styled(n.author.clone(), who),
+        edge(when),
+        edge("─".repeat(width.saturating_sub(used))),
+        edge("╮".into()),
+    ])];
+    let inner = width.saturating_sub(4).max(16);
+    for l in render::wrap_at(&n.text, inner, inner) {
+        out.push(Line::from(vec![
+            edge("│ ".into()),
+            Span::raw(pad(&l, inner)),
+            edge(" │".into()),
+        ]));
+    }
+    let mut from = String::new();
+    if !n.branch.is_empty() {
+        from.push_str(&n.branch);
+    }
+    if !n.commit.is_empty() {
+        if !from.is_empty() {
+            from.push_str(" @ ");
+        }
+        from.extend(n.commit.chars().take(7));
+    }
+    if !from.is_empty() {
+        from = format!(" {from} ");
+    }
+    let rest = width.saturating_sub(2 + from.chars().count() + 1);
+    out.push(Line::from(vec![
+        edge("╰".into()),
+        edge("─".repeat(rest)),
+        edge(from),
+        edge("─╯".into()),
+    ]));
     out
 }
 
@@ -742,8 +784,8 @@ mod tests {
             at: Timestamp::now(),
             author: "ann".into(),
             text: "a note long enough that it has to wrap onto a second line".into(),
-            commit: String::new(),
-            branch: String::new(),
+            commit: "abc1234def".into(),
+            branch: "dev".into(),
         });
         let mut c = test_issue("t-000004");
         c.parent = Some("t-000002".into());
@@ -767,13 +809,23 @@ mod tests {
         assert_eq!(lines[12], "");
         assert_eq!(lines[13], "another");
         assert_eq!(lines[14], "");
+        // the note is a box exactly as wide as the screen
+        let wide = |l: &String| l.chars().count() == 40;
+        assert!(lines[15..19].iter().all(wide), "{lines:#?}");
         assert!(
-            lines[15].starts_with("[just now ann] a note"),
+            lines[15].starts_with("╭─ ann · just now ─"),
             "{}",
             lines[15]
         );
-        assert!(lines[16].starts_with("  "), "{}", lines[16]);
-        assert_eq!(lines.len(), 17);
+        assert!(lines[15].ends_with("─╮"), "{}", lines[15]);
+        assert_eq!(
+            lines[16],
+            format!("│ {:<36} │", "a note long enough that it has to")
+        );
+        assert_eq!(lines[17], format!("│ {:<36} │", "wrap onto a second line"));
+        assert!(lines[18].starts_with("╰─"), "{}", lines[18]);
+        assert!(lines[18].ends_with(" dev @ abc1234 ─╯"), "{}", lines[18]);
+        assert_eq!(lines.len(), 19);
     }
 
     #[test]
