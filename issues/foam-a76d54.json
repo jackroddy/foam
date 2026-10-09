@@ -1,0 +1,30 @@
+{
+  "id": "foam-a76d54",
+  "title": "tui: a detail pane for the selected issue",
+  "body": "What foam show prints, beside or below the board: body, notes, blockers, children, lease.",
+  "type": "task",
+  "status": "open",
+  "priority": 2,
+  "labels": [],
+  "parent": "foam-08d750",
+  "blocked_by": [
+    "foam-c362cb"
+  ],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-10-09T21:04:30.505125031Z",
+  "updated_at": "2026-10-09T21:04:30.505125031Z",
+  "closed_at": null,
+  "close_reason": null,
+  "resolution": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "e11ec98",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
