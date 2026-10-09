@@ -1,0 +1,28 @@
+{
+  "id": "foam-6b8750",
+  "title": "Mutations as functions that return values, with the printing left in cmd.rs",
+  "body": "claim, unclaim, close, reopen, note, update, create and dep live inline in cmd.rs beside their println. Pull each into a function that takes the store and returns what changed, and have the Cmd arms print. Nothing becomes pub beyond the crate. This is the inner half of the library split that foam-6e3c25 dropped, and the TUI is the second caller that shapes it.",
+  "type": "task",
+  "status": "open",
+  "priority": 2,
+  "labels": [],
+  "parent": "foam-08d750",
+  "blocked_by": [],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-10-09T21:04:30.483382968Z",
+  "updated_at": "2026-10-09T21:04:30.483382968Z",
+  "closed_at": null,
+  "close_reason": null,
+  "resolution": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "e11ec98",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
