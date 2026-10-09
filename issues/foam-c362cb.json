@@ -1,0 +1,28 @@
+{
+  "id": "foam-c362cb",
+  "title": "tui: the board as the first screen, behind the tui feature, from bare foam",
+  "body": "ratatui and crossterm behind the tui feature. One screen with what foam board shows: milestones, in progress, ready, blocked and the recent log, from one Store::load, with a selection cursor and q to quit. Bare foam opens it when stdin and stdout are terminals. Rows render through their own spans for now; fold into render.rs once it is clear what repeats.",
+  "type": "task",
+  "status": "open",
+  "priority": 2,
+  "labels": [],
+  "parent": "foam-08d750",
+  "blocked_by": [],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-10-09T21:04:30.472735313Z",
+  "updated_at": "2026-10-09T21:04:30.472735313Z",
+  "closed_at": null,
+  "close_reason": null,
+  "resolution": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "e11ec98",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
