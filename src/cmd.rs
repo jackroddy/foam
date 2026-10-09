@@ -26,7 +26,13 @@ struct Options {
 #[cfg(feature = "tui")]
 pub fn tui(cli: Cli) -> Result<()> {
     let store = Store::open(&cli.directory)?;
-    crate::tui::run(&store)
+    let options = Options {
+        json: false,
+        actor: cli.actor,
+        style: Style::PLAIN,
+    };
+    let actor = actor(&store, &options);
+    crate::tui::run(&store, &actor)
 }
 
 pub fn run(cli: Cli, command: Cmd) -> Result<()> {

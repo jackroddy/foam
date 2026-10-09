@@ -18,8 +18,92 @@ use crate::model::{Issue, Kind, Status};
 use crate::render;
 use crate::store::{DATA_REF, Db, Store};
 
-pub fn run(store: &Store) -> Result<()> {
-    ratatui::run(|terminal| screen(terminal, store))
+pub fn run(store: &Store, actor: &str) -> Result<()> {
+    ratatui::run(|terminal| screen(terminal, store, actor))
+}
+
+/// What narrows the listed rows.
+#[derive(Default, Clone, PartialEq, Eq)]
+struct Filter {
+    status: Option<Status>,
+    kind: Option<Kind>,
+    /// Only issues the acting person holds, in any session.
+    mine: bool,
+    /// Text the title or the id must contain, in any case.
+    text: String,
+    /// Closed issues too, when no status is picked.
+    closed: bool,
+}
+
+impl Filter {
+    fn is_empty(&self) -> bool {
+        *self == Filter::default()
+    }
+
+    fn keeps(&self, issue: &Issue, actor: &str) -> bool {
+        let status = match self.status {
+            Some(s) => issue.status == s,
+            None => {
+                matches!(issue.status, Status::Open | Status::InProgress)
+                    || (self.closed && issue.status == Status::Closed)
+            }
+        };
+        let mine = !self.mine
+            || issue
+                .assignee
+                .as_deref()
+                .is_some_and(|a| person(a) == person(actor));
+        let text = self.text.to_lowercase();
+        let text = text.is_empty()
+            || issue.title.to_lowercase().contains(&text)
+            || issue.id.to_lowercase().contains(&text);
+        status && issue_kind(issue, self.kind) && mine && text
+    }
+
+    /// What is on, for the strip; empty when nothing is.
+    fn describe(&self) -> String {
+        let mut parts = Vec::new();
+        if let Some(s) = self.status {
+            parts.push(s.to_string());
+        }
+        if let Some(k) = self.kind {
+            parts.push(k.to_string());
+        }
+        if self.mine {
+            parts.push("mine".to_string());
+        }
+        if !self.text.is_empty() {
+            parts.push(format!("/{}", self.text));
+        }
+        if self.closed {
+            parts.push("closed".to_string());
+        }
+        parts.join(" · ")
+    }
+}
+
+fn issue_kind(issue: &Issue, kind: Option<Kind>) -> bool {
+    kind.is_none_or(|k| issue.kind == k)
+}
+
+/// The person in an actor name: what comes before the session
+/// suffix, or all of it.
+fn person(actor: &str) -> &str {
+    actor.split('/').next().unwrap_or(actor)
+}
+
+/// The value after `cur` in the enum's declared order, and none
+/// after the last, so a key cycles through every choice and off.
+fn cycle<T: clap::ValueEnum + Copy + PartialEq>(cur: Option<T>) -> Option<T> {
+    let all = T::value_variants();
+    match cur {
+        None => all.first().copied(),
+        Some(c) => all
+            .iter()
+            .position(|v| *v == c)
+            .and_then(|i| all.get(i + 1))
+            .copied(),
+    }
 }
 
 /// Which rows are up.
@@ -159,16 +243,19 @@ struct Screen<'a> {
     widths: Widths,
 }
 
-fn screen(terminal: &mut DefaultTerminal, store: &Store) -> Result<()> {
+fn screen(terminal: &mut DefaultTerminal, store: &Store, actor: &str) -> Result<()> {
     let mut view = View::List;
     let mut mode = Mode::Rows;
     let mut state = ListState::default();
     let mut preview = true;
+    let mut filter = Filter::default();
+    // whether keys go into the filter's text
+    let mut typing = false;
     loop {
         let snap = store
             .load()?
             .ok_or_else(|| anyhow::anyhow!("{}", crate::store::NOT_INITIALIZED))?;
-        let mut screen = build(store, &snap.db, view)?;
+        let mut screen = build(store, &snap.db, view, &filter, actor)?;
         keep(&mut state, &screen.rows);
         // a page whose issues a reload took away falls back
         if let Mode::Detail(page) = &mut mode {
@@ -181,8 +268,14 @@ fn screen(terminal: &mut DefaultTerminal, store: &Store) -> Result<()> {
             let mut limits = Limits::default();
             match &mode {
                 Mode::Rows => {
-                    terminal
-                        .draw(|frame| draw_rows(frame, &screen, &mut state, &snap.db, preview))?;
+                    let right = match (typing, filter.describe()) {
+                        (true, _) => format!("/{}▏", filter.text),
+                        (false, on) if on.is_empty() => view.name().to_string(),
+                        (false, on) => format!("{on}   {}", view.name()),
+                    };
+                    terminal.draw(|frame| {
+                        draw_rows(frame, &screen, &mut state, &snap.db, preview, &right)
+                    })?;
                 }
                 Mode::Detail(page) => {
                     let issue = &snap.db.issues[page.id()];
@@ -198,6 +291,20 @@ fn screen(terminal: &mut DefaultTerminal, store: &Store) -> Result<()> {
                 continue;
             }
             let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+            if typing {
+                match key.code {
+                    KeyCode::Esc | KeyCode::Enter => typing = false,
+                    KeyCode::Backspace => {
+                        filter.text.pop();
+                    }
+                    KeyCode::Char(c) if !ctrl => filter.text.push(c),
+                    KeyCode::Char('c') => return Ok(()),
+                    _ => {}
+                }
+                screen = build(store, &snap.db, view, &filter, actor)?;
+                keep(&mut state, &screen.rows);
+                continue;
+            }
             match key.code {
                 KeyCode::Char('q') => return Ok(()),
                 KeyCode::Char('c') if ctrl => return Ok(()),
@@ -206,11 +313,31 @@ fn screen(terminal: &mut DefaultTerminal, store: &Store) -> Result<()> {
             }
             match &mut mode {
                 Mode::Rows => match key.code {
-                    KeyCode::Esc => return Ok(()),
+                    KeyCode::Esc if filter.is_empty() => return Ok(()),
+                    KeyCode::Esc => {
+                        filter = Filter::default();
+                        screen = build(store, &snap.db, view, &filter, actor)?;
+                        keep(&mut state, &screen.rows);
+                    }
                     KeyCode::Char('p') => preview = !preview,
+                    KeyCode::Char('s')
+                    | KeyCode::Char('t')
+                    | KeyCode::Char('a')
+                    | KeyCode::Char('c')
+                    | KeyCode::Char('/') => {
+                        match key.code {
+                            KeyCode::Char('s') => filter.status = cycle(filter.status),
+                            KeyCode::Char('t') => filter.kind = cycle(filter.kind),
+                            KeyCode::Char('a') => filter.mine = !filter.mine,
+                            KeyCode::Char('c') => filter.closed = !filter.closed,
+                            _ => typing = true,
+                        }
+                        screen = build(store, &snap.db, view, &filter, actor)?;
+                        keep(&mut state, &screen.rows);
+                    }
                     KeyCode::Tab | KeyCode::BackTab => {
                         view = view.other();
-                        screen = build(store, &snap.db, view)?;
+                        screen = build(store, &snap.db, view, &filter, actor)?;
                         state.select(step(&screen.rows, None, 1));
                     }
                     KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => {
@@ -307,12 +434,18 @@ fn human() -> render::Style {
     }
 }
 
-fn build<'a>(store: &Store, db: &'a Db, view: View) -> Result<Screen<'a>> {
+fn build<'a>(
+    store: &Store,
+    db: &'a Db,
+    view: View,
+    filter: &Filter,
+    actor: &str,
+) -> Result<Screen<'a>> {
     let now = Timestamp::now();
     let stamp = store.git.head_stamp()?;
     let strip = strip(db, &stamp);
     let mut rows = match view {
-        View::List => list_rows(db),
+        View::List => list_rows(db, filter, actor),
         View::Board => board_rows(db, now),
     };
     if view == View::Board {
@@ -397,11 +530,11 @@ fn draw_strip(frame: &mut Frame, area: Rect, strip: &Line, right: &str) {
 
 /// What `foam list` prints: open and in-progress issues by
 /// priority, each under its parent when the parent is listed.
-fn list_rows(db: &Db) -> Vec<Row<'_>> {
+fn list_rows<'a>(db: &'a Db, filter: &Filter, actor: &str) -> Vec<Row<'a>> {
     let mut issues: Vec<&Issue> = db
         .issues
         .values()
-        .filter(|i| matches!(i.status, Status::Open | Status::InProgress))
+        .filter(|i| filter.keeps(i, actor))
         .collect();
     issues.sort_by_key(|i| (i.priority, i.created_at));
     let rows: Vec<(&Issue, String)> = issues
@@ -558,9 +691,16 @@ fn frame_areas(frame: &Frame) -> [Rect; 3] {
 /// beside the rows.
 const PREVIEW_WIDTH: u16 = 44;
 
-fn draw_rows(frame: &mut Frame, screen: &Screen, state: &mut ListState, db: &Db, preview: bool) {
+fn draw_rows(
+    frame: &mut Frame,
+    screen: &Screen,
+    state: &mut ListState,
+    db: &Db,
+    preview: bool,
+    right: &str,
+) {
     let [top, body, foot] = frame_areas(frame);
-    draw_strip(frame, top, &screen.strip, screen.view.name());
+    draw_strip(frame, top, &screen.strip, right);
     let chosen = match state.selected().map(|i| &screen.rows[i]) {
         Some(Row::Issue { issue, .. }) if preview => Some(*issue),
         _ => None,
@@ -601,7 +741,7 @@ fn draw_rows(frame: &mut Frame, screen: &Screen, state: &mut ListState, db: &Db,
         );
     }
     let keys = format!(
-        "{}   p {}",
+        "{}   p {}   s/t/a/c / filter",
         screen.view.keys(),
         if preview { "no preview" } else { "preview" }
     );
@@ -1220,7 +1360,7 @@ mod tests {
         let mut done = test_issue("t-000004");
         done.status = Status::Closed;
         let db = db(vec![m, child, held, done]);
-        let rows = list_rows(&db);
+        let rows = list_rows(&db, &Filter::default(), "ann");
         // priority first, then the child under its parent; the
         // closed issue is not listed
         assert_eq!(ids(&rows), ["t-000003", "t-000001", "t-000002"]);
@@ -1356,7 +1496,7 @@ mod tests {
         use ratatui::Terminal;
         use ratatui::backend::TestBackend;
         let (db, _) = fixture();
-        let rows = list_rows(&db);
+        let rows = list_rows(&db, &Filter::default(), "ann");
         let screen = Screen {
             view: View::List,
             strip: Line::from("t"),
@@ -1369,7 +1509,7 @@ mod tests {
             // the second row is the issue with the body
             state.select(Some(1));
             terminal
-                .draw(|f| draw_rows(f, &screen, &mut state, &db, preview))
+                .draw(|f| draw_rows(f, &screen, &mut state, &db, preview, "list"))
                 .unwrap();
             let buffer = terminal.backend().buffer().clone();
             (0..height)
@@ -1402,6 +1542,56 @@ mod tests {
         // off: no pane at all
         let off = render(120, 30, false);
         assert!(at(&off, "╭ t-000002 ").is_none(), "{off:#?}");
+    }
+
+    #[test]
+    fn a_filter_narrows_the_rows_and_says_what_is_on() {
+        let (db, _) = fixture();
+        let ids = |f: &Filter| -> Vec<String> {
+            list_rows(&db, f, "ann/s1")
+                .iter()
+                .filter_map(|r| match r {
+                    Row::Issue { issue, .. } => Some(issue.id.clone()),
+                    _ => None,
+                })
+                .collect()
+        };
+        let mut f = Filter::default();
+        assert!(f.is_empty() && f.describe().is_empty());
+        assert_eq!(ids(&f), ["t-000001", "t-000002", "t-000004"]);
+        // closed joins the default set, and a status replaces it
+        f.closed = true;
+        assert_eq!(ids(&f).len(), 4);
+        f.status = Some(Status::Closed);
+        assert_eq!(ids(&f), ["t-000003"]);
+        assert_eq!(f.describe(), "closed · closed");
+        f = Filter::default();
+        // the kind, text in any case, and mine across sessions
+        f.kind = Some(Kind::Milestone);
+        assert_eq!(ids(&f), ["t-000001"]);
+        f.kind = None;
+        f.text = "FORTY".into();
+        assert_eq!(ids(&f), ["t-000002"]);
+        f.text = "000004".into();
+        assert_eq!(ids(&f), ["t-000004"]);
+        f.text.clear();
+        f.mine = true;
+        assert!(ids(&f).is_empty());
+        let mut db = db;
+        db.issues.get_mut("t-000004").unwrap().assignee = Some("ann/s2".into());
+        let rows = list_rows(&db, &f, "ann/s1");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(f.describe(), "mine");
+        // s and t cycle through every value and back to off
+        let mut s = None;
+        let mut seen = Vec::new();
+        loop {
+            s = cycle::<Status>(s);
+            let Some(v) = s else { break };
+            seen.push(v);
+        }
+        assert_eq!(seen.len(), 4);
+        assert_eq!(cycle::<Kind>(None), Some(Kind::Task));
     }
 
     #[test]
