@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the hook every line starts with `foam:`; by hand, nothing to move
   prints "up to date".
 
+- Listings wrap a long title at the terminal width, with each later line
+  under the title column, so the columns stay aligned. `--plain` output
+  is unchanged.
+
 ### Fixed
 
 - `foam init` no longer adds the fetch refspec before the remote has the

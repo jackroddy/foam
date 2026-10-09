@@ -233,7 +233,8 @@ fn tags(i: &Issue, db: Option<&Db>, rollup: bool) -> String {
 /// One line per issue, each followed by its suffix when that is
 /// not empty. An issue whose parent is also listed sits under it,
 /// drawn as a tree. The terminal form aligns the columns over the
-/// whole listing and adds the kind.
+/// whole listing, adds the kind, and wraps a long title under its
+/// own column.
 pub fn listing(style: &Style, db: Option<&Db>, rows: &[(&Issue, String)]) -> String {
     let rows = forest(rows);
     let mut out = String::new();
@@ -275,11 +276,16 @@ pub fn listing(style: &Style, db: Option<&Db>, rows: &[(&Issue, String)]) -> Str
             .unwrap_or_default()
     };
     let rollup_w = width(&|_, i| rollup(i));
+    // the title column starts past the other columns and the
+    // two-space gap after each; "P2" is the priority's width
+    let used =
+        id_w + 2 + 2 + 2 + status_w + 2 + kind_w + 2 + if rollup_w > 0 { rollup_w + 2 } else { 0 };
+    let title_w = style.width.saturating_sub(used).max(20);
     for (_, lead, i, suffix) in &rows {
         let status = i.status.to_string();
         let _ = write!(
             out,
-            "{}  {}  {}{}  {}  {}{}{}",
+            "{}  {}  {}{}  {}  {}",
             pad(&format!("{lead}{}", i.id), id_w),
             style.priority(i.priority),
             style.status(i.status),
@@ -295,11 +301,31 @@ pub fn listing(style: &Style, db: Option<&Db>, rows: &[(&Issue, String)]) -> Str
             } else {
                 String::new()
             },
-            i.title,
-            style.dim(&tags(i, db, false)),
         );
+        let mut tail = tags(i, db, false);
         if !suffix.is_empty() {
-            let _ = write!(out, "  {}", style.dim(suffix));
+            tail.push_str("  ");
+            tail.push_str(suffix);
+        }
+        let mut lines = wrap_at(&i.title, title_w, title_w);
+        if lines.is_empty() {
+            lines.push(String::new());
+        }
+        if !tail.is_empty() {
+            let last = lines.last_mut().expect("at least one line");
+            // the tags stay on the title's last line while they fit
+            if last.chars().count() + tail.chars().count() <= title_w {
+                last.push_str(&style.dim(&tail));
+            } else {
+                lines.push(style.dim(tail.trim_start()));
+            }
+        }
+        for (n, line) in lines.iter().enumerate() {
+            if n > 0 {
+                out.push('\n');
+                out.push_str(&" ".repeat(used));
+            }
+            out.push_str(line);
         }
         out.push('\n');
     }
@@ -630,6 +656,45 @@ mod tests {
         let colored = listing(&COLOR, None, &rows[..1]);
         assert!(colored.contains("\x1b[33min_progress\x1b[0m"), "{colored}");
         assert!(colored.contains("\x1b[33mP2\x1b[0m"), "{colored}");
+    }
+
+    #[test]
+    fn listing_wraps_a_long_title_under_its_column() {
+        let wide = Style {
+            human: true,
+            color: false,
+            width: 60,
+        };
+        fn rows(a: &Issue) -> Vec<(&Issue, String)> {
+            vec![(a, "waits on t-000002".to_string())]
+        }
+        let mut a = test_issue("t-000001");
+        a.title = "one two three four five six seven eight nine ten eleven".into();
+        let text = listing(&wide, None, &rows(&a));
+        let lines: Vec<&str> = text.lines().collect();
+        // id, priority, status and kind columns, each with its gap
+        let used = "t-000001  P2  open  task  ".len();
+        assert_eq!(
+            lines[0].len(),
+            used + "one two three four five six seven".len(),
+            "{text}"
+        );
+        assert!(lines[1].starts_with(&" ".repeat(used)), "{text}");
+        assert!(lines.iter().all(|l| l.len() <= 60), "{text}");
+        assert!(
+            lines.last().unwrap().ends_with("waits on t-000002"),
+            "{text}"
+        );
+        assert_eq!(lines.len(), 3, "{text}");
+
+        // the suffix stays on the title's last line while it fits
+        a.title = "short".into();
+        let text = listing(&wide, None, &rows(&a));
+        assert_eq!(text, "t-000001  P2  open  task  short  waits on t-000002\n");
+
+        // plain output never wraps
+        a.title = "one two three four five six seven eight nine ten eleven".into();
+        assert_eq!(listing(&Style::PLAIN, None, &rows(&a)).lines().count(), 1);
     }
 
     #[test]
