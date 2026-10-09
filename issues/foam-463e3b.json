@@ -1,0 +1,28 @@
+{
+  "id": "foam-463e3b",
+  "title": "tui: one meaning per hue",
+  "body": "Ids cyan everywhere, including inside 'waits on'. Priority and status as now. Kind magenta for a milestone, dim otherwise. A person's name cyan and an agent's magenta, on rows and in posts. Times dim. The pane holding the cursor gets a plain border and a bright title. Section headers and the title line bold cyan. A rollup green once every child is closed. Titles, bodies and note text stay in the default foreground.",
+  "type": "task",
+  "status": "open",
+  "priority": 2,
+  "labels": [],
+  "parent": "foam-08d750",
+  "blocked_by": [],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-10-09T22:49:28.797601376Z",
+  "updated_at": "2026-10-09T22:49:28.797601376Z",
+  "closed_at": null,
+  "close_reason": null,
+  "resolution": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "bb246a4",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
