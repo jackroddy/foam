@@ -3,7 +3,7 @@
   "title": "tui: keys that act on the selected issue",
   "body": "claim, unclaim, close with a reason, and note on single keys, through the functions from the mutations refactor. A write re-reads the snapshot afterwards, since another clone or agent may have moved the ref.",
   "type": "task",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 2,
   "labels": [],
   "parent": "foam-08d750",
@@ -13,19 +13,22 @@
   ],
   "related": [],
   "assignee": "Jack Roddy/6de6737a",
-  "lease_expires": "2026-10-09T23:40:29.311385852Z",
+  "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-09T21:04:30.494099642Z",
-  "updated_at": "2026-10-09T23:25:29.311385852Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-10-09T23:27:55.272335494Z",
+  "closed_at": "2026-10-09T23:27:55.272335494Z",
+  "close_reason": "m/u/n/x/X act through ops with a footer prompt; the helper is tested against a temporary repository",
+  "resolution": "done",
   "notes": [],
   "stamps": {
     "created": {
       "commit": "e11ec98",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "72a9ddc",
+      "branch": "dev"
+    }
   }
 }
