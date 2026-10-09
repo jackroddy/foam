@@ -1,0 +1,31 @@
+{
+  "id": "foam-a9e4a2",
+  "title": "tui: keys that act on the selected issue",
+  "body": "claim, unclaim, close with a reason, and note on single keys, through the functions from the mutations refactor. A write re-reads the snapshot afterwards, since another clone or agent may have moved the ref.",
+  "type": "task",
+  "status": "open",
+  "priority": 2,
+  "labels": [],
+  "parent": "foam-08d750",
+  "blocked_by": [
+    "foam-c362cb",
+    "foam-6b8750"
+  ],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-10-09T21:04:30.494099642Z",
+  "updated_at": "2026-10-09T21:04:30.494099642Z",
+  "closed_at": null,
+  "close_reason": null,
+  "resolution": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "e11ec98",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
