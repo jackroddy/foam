@@ -1,0 +1,28 @@
+{
+  "id": "foam-6b7a59",
+  "title": "tui: the board as cards",
+  "body": "Each section a pane with its name in the border, the log pane at the bottom with dim relative times.",
+  "type": "task",
+  "status": "open",
+  "priority": 2,
+  "labels": [],
+  "parent": "foam-08d750",
+  "blocked_by": [],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-10-09T23:09:15.714002917Z",
+  "updated_at": "2026-10-09T23:09:15.714002917Z",
+  "closed_at": null,
+  "close_reason": null,
+  "resolution": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "2c6b49f",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
