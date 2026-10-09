@@ -11,7 +11,7 @@ use ratatui::widgets::{List, ListItem, ListState, Paragraph};
 use ratatui::{DefaultTerminal, Frame};
 
 use crate::graph::{self, BOARD_LOG};
-use crate::model::{Issue, Note, Status};
+use crate::model::{Issue, Status};
 use crate::render;
 use crate::store::{DATA_REF, Db, Store};
 
@@ -395,13 +395,12 @@ fn draw_detail(frame: &mut Frame, title: &Line, db: &Db, issue: &Issue, scroll: 
     max
 }
 
-/// One issue as `foam show` prints it, wrapped to `width`.
+/// One issue as a page: a title block, a line of badges, the
+/// dates, what it is tied to, then the body and the notes as
+/// posts, wrapped to `width`.
 fn detail(db: &Db, i: &Issue, width: usize) -> Vec<Line<'static>> {
     let style = human();
-    let text = |s: &str| Line::from(Span::raw(s.to_string()));
-    let pair = |label: &str, value: Span<'static>| {
-        Line::from(vec![Span::raw(label.to_string()).dim(), value])
-    };
+    let dim = |s: String| Span::styled(s, Style::new().add_modifier(Modifier::DIM));
     let mut out = Vec::new();
     let head = format!("{}  ", i.id);
     let room = width.saturating_sub(head.len()).max(20);
@@ -410,118 +409,161 @@ fn detail(db: &Db, i: &Issue, width: usize) -> Vec<Line<'static>> {
         .enumerate()
     {
         let lead = if n == 0 {
-            head.clone()
+            dim(head.clone())
         } else {
-            " ".repeat(head.len())
+            Span::raw(" ".repeat(head.len()))
         };
-        out.push(Line::from(vec![Span::raw(lead), Span::raw(l).bold()]));
+        out.push(Line::from(vec![lead, Span::raw(l).bold()]));
     }
-    out.push(Line::from(vec![
-        Span::raw("type: ").dim(),
-        Span::raw(i.kind.to_string()),
-        Span::raw("  status: ").dim(),
-        status(i.status, 0),
-        Span::raw("  priority: ").dim(),
+    let mut badges = vec![
         priority(i.priority),
-    ]));
-    if !i.labels.is_empty() {
-        out.push(pair("labels: ", Span::raw(i.labels.join(", "))));
-    }
-    if let Some(p) = &i.parent {
-        let mut spans = vec![Span::raw("parent: ").dim(), Span::raw(p.clone())];
-        if let Some(parent) = db.issues.get(p) {
-            spans.push(Span::raw(format!("  {}", parent.title)).dim());
+        Span::raw(format!("  {}  ", i.kind)),
+        status(i.status, 0),
+    ];
+    if let Some(a) = &i.assignee {
+        badges.push(dim(format!("  @{a}")));
+        if i.lease_expires.is_some() {
+            badges.push(dim(format!(" · {}", render::lease_left(i))));
         }
-        out.push(Line::from(spans));
+    }
+    out.push(Line::from(badges));
+    let mut dates = format!("created {}", style.when(i.created_at));
+    if let Some(t) = i.defer_until {
+        dates.push_str(&format!(" · deferred until {}", style.until(t)));
+    }
+    if let Some(c) = i.closed_at {
+        dates.push_str(&format!(" · closed {}", style.when(c)));
+        match (i.resolution, &i.close_reason) {
+            (Some(r), Some(why)) => dates.push_str(&format!(", {r}: {why}")),
+            (Some(r), None) => dates.push_str(&format!(", {r}")),
+            (None, Some(why)) => dates.push_str(&format!(": {why}")),
+            (None, None) => {}
+        }
+    }
+    out.push(Line::from(dim(dates)));
+
+    // the ties, each row labelled in a column of its own
+    let label = |l: &str| dim(pad(l, 10));
+    let blank = || Span::raw(" ".repeat(10));
+    let mut ties = Vec::new();
+    if let Some(p) = &i.parent {
+        let mut spans = vec![label("parent"), Span::raw(p.clone())];
+        if let Some(parent) = db.issues.get(p) {
+            spans.push(dim(format!("  {}", parent.title)));
+        }
+        ties.push(Line::from(spans));
     }
     let children = graph::children(db, &i.id);
     if !children.is_empty() {
-        out.push(match graph::rollup(db, i) {
-            Some((closed, total)) => text(&format!("children ({closed}/{total} closed):")),
-            None => text("children:"),
-        });
+        let count = match graph::rollup(db, i) {
+            Some((closed, total)) => format!("{closed}/{total} closed"),
+            None => children.len().to_string(),
+        };
+        ties.push(Line::from(vec![label("children"), Span::raw(count)]));
         for c in children {
-            out.push(Line::from(vec![
-                Span::raw(format!("  {}  ", c.id)),
+            ties.push(Line::from(vec![
+                blank(),
+                Span::raw(format!("{}  ", c.id)),
                 status(c.status, 0),
                 Span::raw(format!("  {}", c.title)),
-                Span::raw(render::rollup_tag(db, c)).dim(),
+                dim(render::rollup_tag(db, c)),
             ]));
         }
     }
-    if let Some(a) = &i.assignee {
-        let mut spans = vec![Span::raw("assignee: ").dim(), Span::raw(a.clone())];
-        if i.lease_expires.is_some() {
-            spans.push(Span::raw(format!("  {}", render::lease_left(i))).dim());
-        }
-        out.push(Line::from(spans));
+    for (n, b) in i.blocked_by.iter().enumerate() {
+        let status = match db.issues.get(b) {
+            Some(o) => status(o.status, 0),
+            None => Span::raw("missing"),
+        };
+        ties.push(Line::from(vec![
+            if n == 0 { label("blocked") } else { blank() },
+            Span::raw(format!("{b}  ")),
+            status,
+        ]));
     }
-    if let Some(t) = i.defer_until {
-        out.push(pair("deferred until: ", Span::raw(style.until(t))));
+    if !i.labels.is_empty() {
+        ties.push(Line::from(vec![
+            label("labels"),
+            Span::raw(i.labels.join(", ")),
+        ]));
     }
-    if !i.blocked_by.is_empty() {
-        out.push(text("blocked by:"));
-        for b in &i.blocked_by {
-            let status = match db.issues.get(b) {
-                Some(o) => status(o.status, 0),
-                None => Span::raw("missing"),
-            };
-            out.push(Line::from(vec![Span::raw(format!("  {b}  ")), status]));
-        }
+    if !ties.is_empty() {
+        out.push(Line::default());
+        out.extend(ties);
     }
-    out.push(pair("created: ", Span::raw(style.when(i.created_at))));
-    if let Some(c) = i.closed_at {
-        let mut closed = style.when(c);
-        if let Some(r) = i.resolution {
-            closed.push_str(&format!("  {r}"));
-        }
-        if let Some(why) = &i.close_reason {
-            closed.push_str(&format!("  {why}"));
-        }
-        out.push(pair("closed: ", Span::raw(closed)));
-    }
+
     let wide = width.max(20);
     if !i.body.is_empty() {
-        out.push(text(""));
-        out.extend(
-            render::wrap_at(&i.body, wide, wide)
-                .into_iter()
-                .map(|l| text(&l)),
-        );
+        out.push(Line::default());
+        out.extend(post_box(
+            &Post {
+                author: None,
+                at: i.created_at,
+                text: &i.body,
+                branch: &i.stamps.created.branch,
+                commit: &i.stamps.created.commit,
+            },
+            &style,
+            wide,
+        ));
     }
     for n in &i.notes {
-        out.push(text(""));
-        out.extend(note_box(n, &style, wide));
+        out.push(Line::default());
+        out.extend(post_box(
+            &Post {
+                author: Some(&n.author),
+                at: n.at,
+                text: &n.text,
+                branch: &n.branch,
+                commit: &n.commit,
+            },
+            &style,
+            wide,
+        ));
     }
     out
 }
 
-/// A note as a rounded box `width` columns wide: who and when in
+/// What a box on the page shows: a note, or the body as the
+/// issue's own first post.
+struct Post<'a> {
+    author: Option<&'a str>,
+    at: Timestamp,
+    text: &'a str,
+    branch: &'a str,
+    commit: &'a str,
+}
+
+/// A post as a rounded box `width` columns wide: who and when in
 /// the top border, the text inside, where it was written in the
 /// bottom border.
-fn note_box(n: &Note, style: &render::Style, width: usize) -> Vec<Line<'static>> {
+fn post_box(p: &Post, style: &render::Style, width: usize) -> Vec<Line<'static>> {
     let border = Style::new().add_modifier(Modifier::DIM);
     let edge = |s: String| Span::styled(s, border);
-    // the session suffix marks an agent, and the colour says so
-    // from across the room
-    let who = Style::new()
-        .add_modifier(Modifier::BOLD)
-        .fg(if n.author.contains('/') {
-            Color::Magenta
-        } else {
-            Color::Cyan
-        });
-    let when = format!(" · {} ", style.when(n.at));
-    let used = 2 + 1 + n.author.chars().count() + when.chars().count() + 1;
-    let mut out = vec![Line::from(vec![
-        edge("╭─ ".into()),
-        Span::styled(n.author.clone(), who),
-        edge(when),
-        edge("─".repeat(width.saturating_sub(used))),
-        edge("╮".into()),
-    ])];
+    let mut top = vec![edge("╭─ ".into())];
+    let mut used = 2 + 1 + 1;
+    if let Some(author) = p.author {
+        // the session suffix marks an agent, and the colour says
+        // so from across the room
+        let who = Style::new()
+            .add_modifier(Modifier::BOLD)
+            .fg(if author.contains('/') {
+                Color::Magenta
+            } else {
+                Color::Cyan
+            });
+        top.push(Span::styled(author.to_string(), who));
+        top.push(edge(" · ".into()));
+        used += author.chars().count() + 3;
+    }
+    let when = format!("{} ", style.when(p.at));
+    used += when.chars().count();
+    top.push(edge(when));
+    top.push(edge("─".repeat(width.saturating_sub(used))));
+    top.push(edge("╮".into()));
+    let mut out = vec![Line::from(top)];
     let inner = width.saturating_sub(4).max(16);
-    for l in render::wrap_at(&n.text, inner, inner) {
+    for l in render::wrap_at(p.text, inner, inner) {
         out.push(Line::from(vec![
             edge("│ ".into()),
             Span::raw(pad(&l, inner)),
@@ -529,14 +571,14 @@ fn note_box(n: &Note, style: &render::Style, width: usize) -> Vec<Line<'static>>
         ]));
     }
     let mut from = String::new();
-    if !n.branch.is_empty() {
-        from.push_str(&n.branch);
+    if !p.branch.is_empty() {
+        from.push_str(p.branch);
     }
-    if !n.commit.is_empty() {
+    if !p.commit.is_empty() {
         if !from.is_empty() {
             from.push_str(" @ ");
         }
-        from.extend(n.commit.chars().take(7));
+        from.extend(p.commit.chars().take(7));
     }
     if !from.is_empty() {
         from = format!(" {from} ");
@@ -796,36 +838,39 @@ mod tests {
         assert!(lines.iter().all(|l| l.chars().count() <= 40), "{lines:#?}");
         assert_eq!(lines[0], "t-000002  a title that is long enough to");
         assert_eq!(lines[1], "          wrap at forty columns");
-        assert_eq!(lines[2], "type: task  status: open  priority: P2");
-        assert_eq!(lines[3], "parent: t-000001  the parent");
-        assert_eq!(lines[4], "children:");
-        assert_eq!(lines[5], "  t-000004  open  t");
-        assert_eq!(lines[6], "blocked by:");
-        assert_eq!(lines[7], "  t-000003  closed");
-        assert_eq!(lines[8], "  t-nope  missing");
-        assert!(lines[9].starts_with("created: "), "{}", lines[9]);
+        assert_eq!(lines[2], "P2  task  open");
+        assert_eq!(lines[3], "created just now");
+        assert_eq!(lines[4], "");
+        assert_eq!(lines[5], "parent    t-000001  the parent");
+        assert_eq!(lines[6], "children  1");
+        assert_eq!(lines[7], "          t-000004  open  t");
+        assert_eq!(lines[8], "blocked   t-000003  closed");
+        assert_eq!(lines[9], "          t-nope  missing");
         assert_eq!(lines[10], "");
-        assert_eq!(lines[11], "one paragraph");
-        assert_eq!(lines[12], "");
-        assert_eq!(lines[13], "another");
-        assert_eq!(lines[14], "");
-        // the note is a box exactly as wide as the screen
+        // the body is the first post, with the creation stamp
         let wide = |l: &String| l.chars().count() == 40;
-        assert!(lines[15..19].iter().all(wide), "{lines:#?}");
+        assert!(lines[11..16].iter().all(wide), "{lines:#?}");
+        assert!(lines[11].starts_with("╭─ just now ─"), "{}", lines[11]);
+        assert_eq!(lines[12], format!("│ {:<36} │", "one paragraph"));
+        assert_eq!(lines[13], format!("│ {:<36} │", ""));
+        assert_eq!(lines[14], format!("│ {:<36} │", "another"));
+        assert!(lines[15].ends_with(" main @ none ─╯"), "{}", lines[15]);
+        assert_eq!(lines[16], "");
+        // then the note, author first
+        assert!(lines[17..21].iter().all(wide), "{lines:#?}");
         assert!(
-            lines[15].starts_with("╭─ ann · just now ─"),
+            lines[17].starts_with("╭─ ann · just now ─"),
             "{}",
-            lines[15]
+            lines[17]
         );
-        assert!(lines[15].ends_with("─╮"), "{}", lines[15]);
+        assert!(lines[17].ends_with("─╮"), "{}", lines[17]);
         assert_eq!(
-            lines[16],
+            lines[18],
             format!("│ {:<36} │", "a note long enough that it has to")
         );
-        assert_eq!(lines[17], format!("│ {:<36} │", "wrap onto a second line"));
-        assert!(lines[18].starts_with("╰─"), "{}", lines[18]);
-        assert!(lines[18].ends_with(" dev @ abc1234 ─╯"), "{}", lines[18]);
-        assert_eq!(lines.len(), 19);
+        assert_eq!(lines[19], format!("│ {:<36} │", "wrap onto a second line"));
+        assert!(lines[20].ends_with(" dev @ abc1234 ─╯"), "{}", lines[20]);
+        assert_eq!(lines.len(), 21);
     }
 
     #[test]
