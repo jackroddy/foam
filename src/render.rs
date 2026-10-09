@@ -163,7 +163,7 @@ fn local_date(t: Timestamp) -> String {
 /// held to `first` characters and every later one to `rest`;
 /// blank lines stay, and a word longer than the width gets a
 /// line to itself.
-fn wrap_at(text: &str, first: usize, rest: usize) -> Vec<String> {
+pub fn wrap_at(text: &str, first: usize, rest: usize) -> Vec<String> {
     let mut lines = Vec::new();
     for paragraph in text.lines() {
         let mut line = String::new();

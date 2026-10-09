@@ -11,7 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - A screen. `foam` with no command, in a terminal, opens what `foam
   list` prints as a screen with a cursor: j and k move, g and G jump to
-  the ends, Tab switches to the board and back, r reloads, q quits. It
+  the ends, Enter opens the issue with its notes and Esc comes back, Tab
+  switches to the board and back, r reloads, q quits. It
   sits behind the `tui` cargo feature, on by default; `cargo install
   --no-default-features` builds without it. Under a pipe or a hook, bare
   `foam` prints the usage as before.

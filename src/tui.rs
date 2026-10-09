@@ -1,10 +1,10 @@
-//! The listing and the board as screens, with a cursor over the
-//! issues.
+//! The listing, the board and one issue as screens, with a cursor
+//! over the issues.
 
 use anyhow::Result;
 use jiff::Timestamp;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
-use ratatui::layout::{Constraint, Layout};
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem, ListState, Paragraph};
@@ -19,7 +19,7 @@ pub fn run(store: &Store) -> Result<()> {
     ratatui::run(|terminal| screen(terminal, store))
 }
 
-/// Which screen is up.
+/// Which rows are up.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum View {
     /// What `foam list` prints: open and in-progress issues as
@@ -40,10 +40,16 @@ impl View {
 
     fn keys(self) -> &'static str {
         match self {
-            View::List => "j/k move   g/G ends   Tab board   r reload   q quit",
-            View::Board => "j/k move   g/G ends   Tab list   r reload   q quit",
+            View::List => "j/k move   Enter open   Tab board   r reload   q quit",
+            View::Board => "j/k move   Enter open   Tab list   r reload   q quit",
         }
     }
+}
+
+/// Where the person is: on the rows, or inside one issue.
+enum Mode {
+    Rows,
+    Detail { id: String, scroll: usize },
 }
 
 /// One line of a screen.
@@ -85,15 +91,33 @@ struct Screen<'a> {
 
 fn screen(terminal: &mut DefaultTerminal, store: &Store) -> Result<()> {
     let mut view = View::List;
+    let mut mode = Mode::Rows;
+    let mut state = ListState::default();
     loop {
         let snap = store
             .load()?
             .ok_or_else(|| anyhow::anyhow!("{}", crate::store::NOT_INITIALIZED))?;
         let mut screen = build(store, &snap.db, view)?;
-        let mut state = ListState::default();
-        state.select(step(&screen.rows, None, 1));
+        keep(&mut state, &screen.rows);
         loop {
-            terminal.draw(|frame| draw(frame, &screen, &mut state))?;
+            // an issue that a reload took away leaves its screen
+            if let Mode::Detail { id, .. } = &mode
+                && !snap.db.issues.contains_key(id)
+            {
+                mode = Mode::Rows;
+            }
+            let mut max_scroll = 0;
+            match &mode {
+                Mode::Rows => {
+                    terminal.draw(|frame| draw_rows(frame, &screen, &mut state))?;
+                }
+                Mode::Detail { id, scroll } => {
+                    let issue = &snap.db.issues[id];
+                    terminal.draw(|frame| {
+                        max_scroll = draw_detail(frame, &screen.title, &snap.db, issue, *scroll);
+                    })?;
+                }
+            }
             let Event::Key(key) = event::read()? else {
                 continue;
             };
@@ -102,30 +126,65 @@ fn screen(terminal: &mut DefaultTerminal, store: &Store) -> Result<()> {
             }
             let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
             match key.code {
-                KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
+                KeyCode::Char('q') => return Ok(()),
                 KeyCode::Char('c') if ctrl => return Ok(()),
                 KeyCode::Char('r') => break,
-                KeyCode::Tab | KeyCode::BackTab => {
-                    view = view.other();
-                    screen = build(store, &snap.db, view)?;
-                    state.select(step(&screen.rows, None, 1));
-                }
-                KeyCode::Char('j') | KeyCode::Down => {
-                    state.select(step(&screen.rows, state.selected(), 1));
-                }
-                KeyCode::Char('k') | KeyCode::Up => {
-                    state.select(step(&screen.rows, state.selected(), -1));
-                }
-                KeyCode::Char('g') | KeyCode::Home => {
-                    state.select(step(&screen.rows, None, 1));
-                }
-                KeyCode::Char('G') | KeyCode::End => {
-                    state.select(step(&screen.rows, None, -1));
-                }
                 _ => {}
+            }
+            match &mut mode {
+                Mode::Rows => match key.code {
+                    KeyCode::Esc => return Ok(()),
+                    KeyCode::Tab | KeyCode::BackTab => {
+                        view = view.other();
+                        screen = build(store, &snap.db, view)?;
+                        state.select(step(&screen.rows, None, 1));
+                    }
+                    KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => {
+                        if let Some(Row::Issue { issue, .. }) =
+                            state.selected().map(|i| &screen.rows[i])
+                        {
+                            mode = Mode::Detail {
+                                id: issue.id.clone(),
+                                scroll: 0,
+                            };
+                        }
+                    }
+                    KeyCode::Char('j') | KeyCode::Down => {
+                        state.select(step(&screen.rows, state.selected(), 1));
+                    }
+                    KeyCode::Char('k') | KeyCode::Up => {
+                        state.select(step(&screen.rows, state.selected(), -1));
+                    }
+                    KeyCode::Char('g') | KeyCode::Home => {
+                        state.select(step(&screen.rows, None, 1));
+                    }
+                    KeyCode::Char('G') | KeyCode::End => {
+                        state.select(step(&screen.rows, None, -1));
+                    }
+                    _ => {}
+                },
+                Mode::Detail { scroll, .. } => match key.code {
+                    KeyCode::Esc | KeyCode::Char('h') | KeyCode::Left | KeyCode::Backspace => {
+                        mode = Mode::Rows;
+                    }
+                    KeyCode::Char('j') | KeyCode::Down => *scroll = (*scroll + 1).min(max_scroll),
+                    KeyCode::Char('k') | KeyCode::Up => *scroll = scroll.saturating_sub(1),
+                    KeyCode::Char('g') | KeyCode::Home => *scroll = 0,
+                    KeyCode::Char('G') | KeyCode::End => *scroll = max_scroll,
+                    _ => {}
+                },
             }
         }
     }
+}
+
+/// Keep the cursor where it was across a reload, as long as that
+/// is still an issue row; otherwise the first one.
+fn keep(state: &mut ListState, rows: &[Row]) {
+    let kept = state
+        .selected()
+        .filter(|&i| i < rows.len() && rows[i].selectable());
+    state.select(kept.or_else(|| step(rows, None, 1)));
 }
 
 /// The selectable row `by` steps from `from`, or the first from
@@ -137,6 +196,15 @@ fn step(rows: &[Row], from: Option<usize>, by: isize) -> Option<usize> {
         (None, false) => (0..rows.len()).rev().find(selectable),
         (Some(at), true) => (at + 1..rows.len()).find(selectable).or(Some(at)),
         (Some(at), false) => (0..at).rev().find(selectable).or(Some(at)),
+    }
+}
+
+/// The CLI's terminal style, for the relative times it renders.
+fn human() -> render::Style {
+    render::Style {
+        human: true,
+        color: false,
+        width: 80,
     }
 }
 
@@ -164,11 +232,7 @@ fn build<'a>(store: &Store, db: &'a Db, view: View) -> Result<Screen<'a>> {
         let log = store.git.log(DATA_REF, BOARD_LOG, None)?;
         if !log.is_empty() {
             rows.push(Row::Header("Recent"));
-            let style = render::Style {
-                human: true,
-                color: false,
-                width: 80,
-            };
+            let style = human();
             for (oid, when, msg) in &log {
                 let when = when
                     .parse::<Timestamp>()
@@ -290,13 +354,17 @@ fn rollup(db: &Db, issue: &Issue) -> String {
         .unwrap_or_default()
 }
 
-fn draw(frame: &mut Frame, screen: &Screen, state: &mut ListState) {
-    let [top, body, foot] = Layout::vertical([
+fn frame_areas(frame: &Frame) -> [Rect; 3] {
+    Layout::vertical([
         Constraint::Length(1),
         Constraint::Min(0),
         Constraint::Length(1),
     ])
-    .areas(frame.area());
+    .areas(frame.area())
+}
+
+fn draw_rows(frame: &mut Frame, screen: &Screen, state: &mut ListState) {
+    let [top, body, foot] = frame_areas(frame);
     frame.render_widget(Paragraph::new(screen.title.clone()), top);
     let items: Vec<ListItem> = screen
         .rows
@@ -306,6 +374,139 @@ fn draw(frame: &mut Frame, screen: &Screen, state: &mut ListState) {
     let list = List::new(items).highlight_style(Style::new().add_modifier(Modifier::REVERSED));
     frame.render_stateful_widget(list, body, state);
     frame.render_widget(Paragraph::new(screen.view.keys()).dim(), foot);
+}
+
+/// Draw one issue scrolled `scroll` lines down, and return how
+/// far down it can scroll.
+fn draw_detail(frame: &mut Frame, title: &Line, db: &Db, issue: &Issue, scroll: usize) -> usize {
+    let [top, body, foot] = frame_areas(frame);
+    frame.render_widget(Paragraph::new(title.clone()), top);
+    let lines = detail(db, issue, usize::from(body.width));
+    let max = lines.len().saturating_sub(usize::from(body.height));
+    let scroll = scroll.min(max);
+    frame.render_widget(
+        Paragraph::new(lines).scroll((u16::try_from(scroll).unwrap_or(u16::MAX), 0)),
+        body,
+    );
+    frame.render_widget(
+        Paragraph::new("j/k scroll   g/G ends   Esc back   r reload   q quit").dim(),
+        foot,
+    );
+    max
+}
+
+/// One issue as `foam show` prints it, wrapped to `width`.
+fn detail(db: &Db, i: &Issue, width: usize) -> Vec<Line<'static>> {
+    let style = human();
+    let text = |s: &str| Line::from(Span::raw(s.to_string()));
+    let pair = |label: &str, value: Span<'static>| {
+        Line::from(vec![Span::raw(label.to_string()).dim(), value])
+    };
+    let mut out = Vec::new();
+    let head = format!("{}  ", i.id);
+    let room = width.saturating_sub(head.len()).max(20);
+    for (n, l) in render::wrap_at(&i.title, room, room)
+        .into_iter()
+        .enumerate()
+    {
+        let lead = if n == 0 {
+            head.clone()
+        } else {
+            " ".repeat(head.len())
+        };
+        out.push(Line::from(vec![Span::raw(lead), Span::raw(l).bold()]));
+    }
+    out.push(Line::from(vec![
+        Span::raw("type: ").dim(),
+        Span::raw(i.kind.to_string()),
+        Span::raw("  status: ").dim(),
+        status(i.status, 0),
+        Span::raw("  priority: ").dim(),
+        priority(i.priority),
+    ]));
+    if !i.labels.is_empty() {
+        out.push(pair("labels: ", Span::raw(i.labels.join(", "))));
+    }
+    if let Some(p) = &i.parent {
+        let mut spans = vec![Span::raw("parent: ").dim(), Span::raw(p.clone())];
+        if let Some(parent) = db.issues.get(p) {
+            spans.push(Span::raw(format!("  {}", parent.title)).dim());
+        }
+        out.push(Line::from(spans));
+    }
+    let children = graph::children(db, &i.id);
+    if !children.is_empty() {
+        out.push(match graph::rollup(db, i) {
+            Some((closed, total)) => text(&format!("children ({closed}/{total} closed):")),
+            None => text("children:"),
+        });
+        for c in children {
+            out.push(Line::from(vec![
+                Span::raw(format!("  {}  ", c.id)),
+                status(c.status, 0),
+                Span::raw(format!("  {}", c.title)),
+                Span::raw(render::rollup_tag(db, c)).dim(),
+            ]));
+        }
+    }
+    if let Some(a) = &i.assignee {
+        let mut spans = vec![Span::raw("assignee: ").dim(), Span::raw(a.clone())];
+        if i.lease_expires.is_some() {
+            spans.push(Span::raw(format!("  {}", render::lease_left(i))).dim());
+        }
+        out.push(Line::from(spans));
+    }
+    if let Some(t) = i.defer_until {
+        out.push(pair("deferred until: ", Span::raw(style.until(t))));
+    }
+    if !i.blocked_by.is_empty() {
+        out.push(text("blocked by:"));
+        for b in &i.blocked_by {
+            let status = match db.issues.get(b) {
+                Some(o) => status(o.status, 0),
+                None => Span::raw("missing"),
+            };
+            out.push(Line::from(vec![Span::raw(format!("  {b}  ")), status]));
+        }
+    }
+    out.push(pair("created: ", Span::raw(style.when(i.created_at))));
+    if let Some(c) = i.closed_at {
+        let mut closed = style.when(c);
+        if let Some(r) = i.resolution {
+            closed.push_str(&format!("  {r}"));
+        }
+        if let Some(why) = &i.close_reason {
+            closed.push_str(&format!("  {why}"));
+        }
+        out.push(pair("closed: ", Span::raw(closed)));
+    }
+    let wide = width.max(20);
+    if !i.body.is_empty() {
+        out.push(text(""));
+        out.extend(
+            render::wrap_at(&i.body, wide, wide)
+                .into_iter()
+                .map(|l| text(&l)),
+        );
+    }
+    if !i.notes.is_empty() {
+        out.push(text(""));
+        for n in &i.notes {
+            let head = format!("[{} {}] ", style.when(n.at), n.author);
+            let first = wide.saturating_sub(head.chars().count()).max(20);
+            for (k, l) in render::wrap_at(&n.text, first, wide.saturating_sub(2).max(20))
+                .into_iter()
+                .enumerate()
+            {
+                out.push(if k == 0 {
+                    Line::from(vec![Span::raw(head.clone()).dim(), Span::raw(l)])
+                } else {
+                    text(&format!("  {l}"))
+                });
+            }
+        }
+    }
+    out
 }
 
 /// A row as one line of `width` columns, the title cut to fit.
@@ -410,7 +611,7 @@ fn cut(s: &str, width: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Kind, test_issue};
+    use crate::model::{Kind, Note, test_issue};
     use crate::store::test_db;
 
     fn db(issues: Vec<Issue>) -> Db {
@@ -502,6 +703,18 @@ mod tests {
         let last = step(&rows, None, -1).unwrap();
         assert_eq!(step(&rows, Some(last), 1), Some(last));
         assert_eq!(rows.len(), 9);
+
+        // a reload keeps the cursor on an issue row and nowhere else
+        let mut state = ListState::default();
+        state.select(Some(second));
+        keep(&mut state, &rows);
+        assert_eq!(state.selected(), Some(second));
+        state.select(Some(0));
+        keep(&mut state, &rows);
+        assert_eq!(state.selected(), Some(first));
+        state.select(Some(99));
+        keep(&mut state, &rows);
+        assert_eq!(state.selected(), Some(first));
     }
 
     #[test]
@@ -513,6 +726,54 @@ mod tests {
         assert!(matches!(rows[2], Row::Header("Ready")));
         assert!(matches!(rows[3], Row::Note("nothing is ready")));
         assert_eq!(step(&rows, None, 1), Some(1));
+    }
+
+    #[test]
+    fn detail_shows_what_show_prints_wrapped_to_the_width() {
+        let mut m = test_issue("t-000001");
+        m.kind = Kind::Milestone;
+        m.title = "the parent".into();
+        let mut i = test_issue("t-000002");
+        i.title = "a title that is long enough to wrap at forty columns".into();
+        i.parent = Some("t-000001".into());
+        i.blocked_by = vec!["t-000003".into(), "t-nope".into()];
+        i.body = "one paragraph\n\nanother".into();
+        i.notes.push(Note {
+            at: Timestamp::now(),
+            author: "ann".into(),
+            text: "a note long enough that it has to wrap onto a second line".into(),
+            commit: String::new(),
+            branch: String::new(),
+        });
+        let mut c = test_issue("t-000004");
+        c.parent = Some("t-000002".into());
+        let mut b = test_issue("t-000003");
+        b.status = Status::Closed;
+        let db = db(vec![m, i.clone(), c, b]);
+        let lines: Vec<String> = detail(&db, &i, 40).iter().map(Line::to_string).collect();
+        assert!(lines.iter().all(|l| l.chars().count() <= 40), "{lines:#?}");
+        assert_eq!(lines[0], "t-000002  a title that is long enough to");
+        assert_eq!(lines[1], "          wrap at forty columns");
+        assert_eq!(lines[2], "type: task  status: open  priority: P2");
+        assert_eq!(lines[3], "parent: t-000001  the parent");
+        assert_eq!(lines[4], "children:");
+        assert_eq!(lines[5], "  t-000004  open  t");
+        assert_eq!(lines[6], "blocked by:");
+        assert_eq!(lines[7], "  t-000003  closed");
+        assert_eq!(lines[8], "  t-nope  missing");
+        assert!(lines[9].starts_with("created: "), "{}", lines[9]);
+        assert_eq!(lines[10], "");
+        assert_eq!(lines[11], "one paragraph");
+        assert_eq!(lines[12], "");
+        assert_eq!(lines[13], "another");
+        assert_eq!(lines[14], "");
+        assert!(
+            lines[15].starts_with("[just now ann] a note"),
+            "{}",
+            lines[15]
+        );
+        assert!(lines[16].starts_with("  "), "{}", lines[16]);
+        assert_eq!(lines.len(), 17);
     }
 
     #[test]
