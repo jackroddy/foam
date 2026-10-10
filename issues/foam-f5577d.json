@@ -3,7 +3,7 @@
   "title": "Show memories on the screen: a third view with a preview and a page",
   "body": "",
   "type": "task",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 2,
   "labels": [],
   "parent": "foam-72e952",
@@ -12,13 +12,13 @@
   ],
   "related": [],
   "assignee": "Jack Roddy/42dfd115",
-  "lease_expires": "2026-10-10T01:46:44.176869588Z",
+  "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-10T01:09:23.156530576Z",
-  "updated_at": "2026-10-10T01:31:44.176869588Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-10-10T01:36:42.805269257Z",
+  "closed_at": "2026-10-10T01:36:42.805269257Z",
+  "close_reason": "memories view, preview and page in 7cb6296",
+  "resolution": "done",
   "notes": [
     {
       "id": "e57d2c37",
@@ -34,6 +34,9 @@
       "commit": "bb39c08",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "7cb6296",
+      "branch": "dev"
+    }
   }
 }
