@@ -131,9 +131,14 @@ On the listing, `j` and `k` move, `g` and `G` jump to the ends, Space folds
 an issue's children, and `p` hides the preview. `s` and `t` cycle the
 status and kind filters, `a` toggles your own claims, `c` toggles closed
 issues, and `/` lets you type a text match. Esc clears the filter, and Esc
-again quits. `r` reloads and `q` quits. On a page, Tab moves onto the
-parent, children, and blockers, Enter follows the one you're on, and Esc
-goes back.
+again quits. `r` reloads and `q` quits.
+
+On a page, `j` and `k` move between the body and the notes, and the one
+under the cursor has the bright border. `u` goes to the note it answers,
+`[` and `]` to the ones before and after it in the same thread, and Space
+folds the replies under it away and shows them again. Ctrl-d and Ctrl-u
+scroll without moving the cursor. Tab moves onto the parent, children,
+and blockers, Enter follows the one you're on, and Esc goes back.
 
 You can't change anything from the screen; claim, note, and close with the
 commands. The screen needs both stdin and stdout on a terminal, so a pipe,

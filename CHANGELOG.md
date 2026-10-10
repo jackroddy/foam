@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The screen's page has a cursor over the body and the notes. `j` and
+  `k` move it and the chosen box has the bright border; `u` goes to the
+  note it answers, `[` and `]` to its neighbours in the thread, Space
+  folds the replies under it, and Ctrl-d and Ctrl-u scroll without
+  moving it.
+
 ### Changed
 
 - The notes pane on the screen's page is titled `notes`, not `posts`, and

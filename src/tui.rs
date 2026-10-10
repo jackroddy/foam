@@ -2,6 +2,7 @@
 //! over the issues.
 
 use std::collections::HashSet;
+use std::ops::Range;
 
 use anyhow::Result;
 use jiff::Timestamp;
@@ -153,6 +154,12 @@ enum Mode {
 struct Page {
     ids: Vec<String>,
     scroll: usize,
+    /// The box under the cursor, counting the body as the first.
+    cursor: usize,
+    /// Whether the next draw scrolls the chosen box into view.
+    reveal: bool,
+    /// Notes whose replies are hidden.
+    folded: HashSet<String>,
     /// The tie under the cursor, when the cursor is on the ties.
     tie: Option<usize>,
 }
@@ -162,8 +169,70 @@ impl Page {
         Page {
             ids: vec![id],
             scroll: 0,
+            cursor: 0,
+            reveal: true,
+            folded: HashSet::new(),
             tie: None,
         }
+    }
+
+    fn go(&mut self, to: usize) {
+        self.cursor = to;
+        self.reveal = true;
+    }
+
+    /// The cursor onto the next box, or the previous one.
+    fn step_box(&mut self, boxes: &[NoteBox], by: isize) {
+        let last = boxes.len().saturating_sub(1);
+        self.go(match by.is_positive() {
+            true => (self.cursor + 1).min(last),
+            false => self.cursor.saturating_sub(1),
+        });
+    }
+
+    /// The cursor onto the note this one answers; a top-level note
+    /// answers the issue, so the body.
+    fn up(&mut self, boxes: &[NoteBox]) {
+        let Some(b) = boxes.get(self.cursor) else {
+            return;
+        };
+        let to = b
+            .reply_to
+            .as_deref()
+            .and_then(|p| boxes.iter().position(|x| x.id.as_deref() == Some(p)));
+        self.go(to.unwrap_or(0));
+    }
+
+    /// The cursor onto the next, or the previous, box answering
+    /// the same note; stays put when there is none.
+    fn sibling(&mut self, boxes: &[NoteBox], by: isize) {
+        let Some(b) = boxes.get(self.cursor) else {
+            return;
+        };
+        let same = |i: &usize| boxes[*i].reply_to == b.reply_to;
+        let to = match by.is_positive() {
+            true => (self.cursor + 1..boxes.len()).find(same),
+            false => (0..self.cursor).rev().find(same),
+        };
+        if let Some(to) = to {
+            self.go(to);
+        }
+    }
+
+    /// Hide the replies under the chosen note, or show them again.
+    fn fold(&mut self, boxes: &[NoteBox]) {
+        let Some(NoteBox {
+            id: Some(id),
+            replies: 1..,
+            ..
+        }) = boxes.get(self.cursor)
+        else {
+            return;
+        };
+        if !self.folded.remove(id) {
+            self.folded.insert(id.clone());
+        }
+        self.reveal = true;
     }
 
     fn id(&self) -> &str {
@@ -173,6 +242,7 @@ impl Page {
     fn follow(&mut self, id: String) {
         self.ids.push(id);
         self.scroll = 0;
+        self.go(0);
         self.tie = None;
     }
 
@@ -184,6 +254,7 @@ impl Page {
         }
         self.ids.pop();
         self.scroll = 0;
+        self.go(0);
         self.tie = None;
         true
     }
@@ -200,12 +271,26 @@ impl Page {
     }
 }
 
-/// What the last draw of a page allows: how far the posts scroll,
-/// and which issues the ties lead to.
-#[derive(Default)]
+/// What the last draw of a page allows: how far the notes scroll,
+/// how many rows the pane shows, the boxes on it, and which issues
+/// the ties lead to.
+#[derive(Debug, Default)]
 struct Limits {
     scroll: usize,
+    rows: usize,
+    boxes: Vec<NoteBox>,
     ties: Vec<String>,
+}
+
+/// One box on the page, and the lines it spans.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct NoteBox {
+    /// `None` for the body.
+    id: Option<String>,
+    reply_to: Option<String>,
+    /// How many replies are under it, shown or hidden.
+    replies: usize,
+    lines: Range<usize>,
 }
 
 /// One line of a screen.
@@ -317,7 +402,7 @@ fn screen(terminal: &mut DefaultTerminal, store: &Store, actor: &str) -> Result<
         }
         loop {
             let mut limits = Limits::default();
-            match &st.mode {
+            match &mut st.mode {
                 Mode::Rows => {
                     let right = match (st.typing, st.filter.describe()) {
                         (true, _) => format!("/{}▏", st.filter.text),
@@ -404,22 +489,32 @@ fn handle(st: &mut State, key: KeyEvent, rows: &[Row], db: &Db, limits: &Limits)
                         page.follow(id.clone());
                     }
                 }
+                KeyCode::Char('d') if ctrl => {
+                    page.scroll = (page.scroll + limits.rows / 2).min(limits.scroll);
+                }
+                KeyCode::Char('u') if ctrl => {
+                    page.scroll = page.scroll.saturating_sub(limits.rows / 2);
+                }
                 KeyCode::Char('j') | KeyCode::Down => match page.tie {
                     Some(k) => page.tie = Some((k + 1).min(last_tie)),
-                    None => page.scroll = (page.scroll + 1).min(limits.scroll),
+                    None => page.step_box(&limits.boxes, 1),
                 },
                 KeyCode::Char('k') | KeyCode::Up => match page.tie {
                     Some(k) => page.tie = Some(k.saturating_sub(1)),
-                    None => page.scroll = page.scroll.saturating_sub(1),
+                    None => page.step_box(&limits.boxes, -1),
                 },
                 KeyCode::Char('g') | KeyCode::Home => match page.tie {
                     Some(_) => page.tie = Some(0),
-                    None => page.scroll = 0,
+                    None => page.go(0),
                 },
                 KeyCode::Char('G') | KeyCode::End => match page.tie {
                     Some(_) => page.tie = Some(last_tie),
-                    None => page.scroll = limits.scroll,
+                    None => page.go(limits.boxes.len().saturating_sub(1)),
                 },
+                KeyCode::Char(' ') if page.tie.is_none() => page.fold(&limits.boxes),
+                KeyCode::Char('u') if page.tie.is_none() => page.up(&limits.boxes),
+                KeyCode::Char('[') if page.tie.is_none() => page.sibling(&limits.boxes, -1),
+                KeyCode::Char(']') if page.tie.is_none() => page.sibling(&limits.boxes, 1),
                 _ => {}
             }
             Action::Draw
@@ -911,7 +1006,7 @@ const WIDE: u16 = 90;
 
 /// Draw an issue's page: the header card, the about pane and the
 /// posts, side by side or stacked.
-fn draw_detail(frame: &mut Frame, strip: &Line, db: &Db, issue: &Issue, page: &Page) -> Limits {
+fn draw_detail(frame: &mut Frame, strip: &Line, db: &Db, issue: &Issue, page: &mut Page) -> Limits {
     let [top, body, foot] = frame_areas(frame);
     draw_strip(frame, top, strip, "issue");
     let wide = body.width >= WIDE;
@@ -966,26 +1061,41 @@ fn draw_detail(frame: &mut Frame, strip: &Line, db: &Db, issue: &Issue, page: &P
         about_area,
     );
 
-    let lines = posts(issue, inner(posts_area.width));
-    let max = lines.len().saturating_sub(rows_in(posts_area.height));
-    let scroll = page.scroll.min(max);
+    let (lines, boxes) = posts(issue, inner(posts_area.width), page, page.tie.is_none());
+    let rows = rows_in(posts_area.height);
+    let max = lines.len().saturating_sub(rows);
+    page.cursor = page.cursor.min(boxes.len().saturating_sub(1));
+    if page.reveal {
+        if let Some(b) = boxes.get(page.cursor) {
+            if b.lines.start < page.scroll {
+                page.scroll = b.lines.start;
+            } else if b.lines.end > page.scroll + rows {
+                // a box taller than the pane shows its top
+                page.scroll = b.lines.end.saturating_sub(rows).min(b.lines.start);
+            }
+        }
+        page.reveal = false;
+    }
+    page.scroll = page.scroll.min(max);
     frame.render_widget(
         Paragraph::new(lines)
             .block(pane(Span::raw(" notes "), page.tie.is_none()))
-            .scroll((u16::try_from(scroll).unwrap_or(u16::MAX), 0)),
+            .scroll((u16::try_from(page.scroll).unwrap_or(u16::MAX), 0)),
         posts_area,
     );
 
     let keys = if page.tie.is_some() {
         "j/k pick   Enter follow   Tab notes   Esc back   q quit"
     } else if about.ties.is_empty() {
-        "j/k scroll   g/G ends   Esc back   r reload   q quit"
+        "j/k notes   Space fold   u/[/] thread   ^d/^u scroll   Esc back   q quit"
     } else {
-        "j/k scroll   Tab ties   Esc back   r reload   q quit"
+        "j/k notes   Space fold   u/[/] thread   ^d/^u scroll   Tab ties   Esc back   q quit"
     };
     frame.render_widget(Paragraph::new(keys).dim(), foot);
     Limits {
         scroll: max,
+        rows,
+        boxes,
         ties: about.ties,
     }
 }
@@ -1193,12 +1303,38 @@ fn about(db: &Db, i: &Issue, width: usize, tie: Option<usize>) -> About {
     }
 }
 
-/// The body as the issue's first post, then the notes, each a box
-/// `width` wide.
-fn posts(i: &Issue, width: usize) -> Vec<Line<'static>> {
+/// The body as the issue's first post, then the notes that are
+/// not folded away, each a box `width` wide, with the box under
+/// the page's cursor drawn plain when `focused`.
+fn posts(
+    i: &Issue,
+    width: usize,
+    page: &Page,
+    focused: bool,
+) -> (Vec<Line<'static>>, Vec<NoteBox>) {
     let style = human();
     let wide = width.max(20);
+    let threaded = crate::model::threaded(&i.notes);
+    // each shown note with its depth and how many replies it has,
+    // the ones under a folded note skipped
+    let mut shown = Vec::new();
+    let mut k = 0;
+    while let Some(&(depth, n)) = threaded.get(k) {
+        let replies = threaded[k + 1..]
+            .iter()
+            .take_while(|(d, _)| *d > depth)
+            .count();
+        shown.push((depth, n, replies));
+        k += 1 + if page.folded.contains(&n.id) {
+            replies
+        } else {
+            0
+        };
+    }
+    let count = shown.len() + usize::from(!i.body.is_empty());
+    let cursor = page.cursor.min(count.saturating_sub(1));
     let mut out = Vec::new();
+    let mut boxes = Vec::new();
     if !i.body.is_empty() {
         out.extend(post_box(
             &Post {
@@ -1209,15 +1345,24 @@ fn posts(i: &Issue, width: usize) -> Vec<Line<'static>> {
                 text: &i.body,
                 branch: &i.stamps.created.branch,
                 commit: &i.stamps.created.commit,
+                hidden: 0,
             },
             &style,
             wide,
+            focused && cursor == 0,
         ));
+        boxes.push(NoteBox {
+            id: None,
+            reply_to: None,
+            replies: 0,
+            lines: 0..out.len(),
+        });
     }
-    for (depth, n) in crate::model::threaded(&i.notes) {
+    for (depth, n, replies) in shown {
         if !out.is_empty() {
             out.push(Line::default());
         }
+        let start = out.len();
         // a reply sits two columns in from what it answers
         let indent = (depth * 2).min(wide.saturating_sub(20));
         let mut lines = post_box(
@@ -1229,16 +1374,28 @@ fn posts(i: &Issue, width: usize) -> Vec<Line<'static>> {
                 text: &n.text,
                 branch: &n.branch,
                 commit: &n.commit,
+                hidden: if page.folded.contains(&n.id) {
+                    replies
+                } else {
+                    0
+                },
             },
             &style,
             wide - indent,
+            focused && cursor == boxes.len(),
         );
         for line in &mut lines {
             line.spans.insert(0, Span::raw(" ".repeat(indent)));
         }
         out.extend(lines);
+        boxes.push(NoteBox {
+            id: Some(n.id.clone()),
+            reply_to: n.reply_to.clone(),
+            replies,
+            lines: start..out.len(),
+        });
     }
-    out
+    (out, boxes)
 }
 
 /// What a box on the page shows: a note, or the body as the
@@ -1251,13 +1408,20 @@ struct Post<'a> {
     text: &'a str,
     branch: &'a str,
     commit: &'a str,
+    /// How many replies are folded away under it.
+    hidden: usize,
 }
 
 /// A post as a rounded box `width` columns wide: who and when in
 /// the top border, the text inside, where it was written in the
-/// bottom border.
-fn post_box(p: &Post, style: &render::Style, width: usize) -> Vec<Line<'static>> {
-    let border = Style::new().add_modifier(Modifier::DIM);
+/// bottom border. The box under the cursor is `plain`, the rest
+/// dim.
+fn post_box(p: &Post, style: &render::Style, width: usize, plain: bool) -> Vec<Line<'static>> {
+    let border = if plain {
+        Style::new()
+    } else {
+        Style::new().add_modifier(Modifier::DIM)
+    };
     let edge = |s: String| Span::styled(s, border);
     let mut top = vec![edge("╭─ ".into())];
     let mut used = 2 + 1 + 1;
@@ -1290,6 +1454,10 @@ fn post_box(p: &Post, style: &render::Style, width: usize) -> Vec<Line<'static>>
         ]));
     }
     let mut from = String::new();
+    if p.hidden > 0 {
+        let s = if p.hidden == 1 { "reply" } else { "replies" };
+        from.push_str(&format!("▸ {} {s} · ", p.hidden));
+    }
     if let Some(id) = p.id {
         from.push_str(id);
         from.push_str(" · ");
@@ -1893,7 +2061,7 @@ mod tests {
     #[test]
     fn the_posts_are_the_body_then_the_notes_as_boxes() {
         let (_, i) = fixture();
-        let lines = strings(&posts(&i, 40));
+        let lines = strings(&posts(&i, 40, &Page::open(i.id.clone()), true).0);
         let wide = |l: &String| l.chars().count() == 40;
         assert!(
             lines.iter().filter(|l| !l.is_empty()).all(wide),
@@ -1951,7 +2119,7 @@ mod tests {
             page.tie = tie;
             terminal
                 .draw(|f| {
-                    draw_detail(f, &title, &db, &i, &page);
+                    draw_detail(f, &title, &db, &i, &mut page);
                 })
                 .unwrap();
             terminal.backend().buffer().clone()
@@ -2142,30 +2310,206 @@ mod tests {
         let (db, mut st) = on_rows();
         let rows = list_rows(&db, &Filter::default(), "ann", &HashSet::new());
         st.mode = Mode::Detail(Page::open("t-000002".into()));
+        let note_box = |id: &str| NoteBox {
+            id: Some(id.into()),
+            reply_to: None,
+            replies: 0,
+            lines: 0..1,
+        };
         let limits = Limits {
             scroll: 2,
+            rows: 10,
+            boxes: vec![note_box("a"), note_box("b"), note_box("c")],
             ties: vec!["t-000001".into(), "t-000004".into()],
         };
         let key = |st: &mut State, code| handle(st, press(code), &rows, &db, &limits);
         let page = |st: &State| match &st.mode {
-            Mode::Detail(p) => (p.id().to_string(), p.scroll, p.tie),
+            Mode::Detail(p) => (p.id().to_string(), p.cursor, p.scroll, p.tie),
             Mode::Rows => panic!("a page"),
         };
         for _ in 0..4 {
             assert_eq!(key(&mut st, KeyCode::Char('j')), Action::Draw);
         }
-        assert_eq!(page(&st), ("t-000002".into(), 2, None));
+        assert_eq!(page(&st), ("t-000002".into(), 2, 0, None));
         key(&mut st, KeyCode::Char('g'));
+        assert_eq!(page(&st).1, 0);
+        key(&mut st, KeyCode::Char('G'));
+        assert_eq!(page(&st).1, 2);
+        assert_eq!(
+            handle(&mut st, ctrl('d'), &rows, &db, &limits),
+            Action::Draw
+        );
+        assert_eq!(page(&st).2, 2);
+        handle(&mut st, ctrl('u'), &rows, &db, &limits);
+        assert_eq!(page(&st).2, 0);
+        key(&mut st, KeyCode::Char(']'));
+        assert_eq!(page(&st).1, 2);
+        key(&mut st, KeyCode::Char('['));
+        key(&mut st, KeyCode::Char('u'));
         assert_eq!(page(&st).1, 0);
         key(&mut st, KeyCode::Tab);
         key(&mut st, KeyCode::Char('j'));
         key(&mut st, KeyCode::Char('j'));
-        assert_eq!(page(&st).2, Some(1));
+        assert_eq!(page(&st).3, Some(1));
         key(&mut st, KeyCode::Enter);
-        assert_eq!(page(&st), ("t-000004".into(), 0, None));
+        assert_eq!(page(&st), ("t-000004".into(), 0, 0, None));
         key(&mut st, KeyCode::Char('h'));
         assert_eq!(page(&st).0, "t-000002");
         key(&mut st, KeyCode::Backspace);
         assert!(matches!(st.mode, Mode::Rows));
+    }
+
+    /// An issue with a body and four notes: `a` answered by `b`,
+    /// `b` answered by `c`, and `d` on its own.
+    fn thread() -> Issue {
+        let mut i = test_issue("t-000009");
+        i.body = "the body".into();
+        let note = |id: &str, reply_to: Option<&str>| Note {
+            id: id.into(),
+            reply_to: reply_to.map(String::from),
+            edited_at: None,
+            deleted_at: None,
+            at: Timestamp::now(),
+            author: "ann".into(),
+            text: format!("note {id}"),
+            commit: String::new(),
+            branch: String::new(),
+        };
+        i.notes = vec![
+            note("aaaa0000", None),
+            note("bbbb0000", Some("aaaa0000")),
+            note("cccc0000", Some("bbbb0000")),
+            note("dddd0000", None),
+        ];
+        i
+    }
+
+    fn box_ids(boxes: &[NoteBox]) -> Vec<Option<&str>> {
+        boxes.iter().map(|b| b.id.as_deref()).collect()
+    }
+
+    #[test]
+    fn folding_a_note_hides_the_replies_under_it() {
+        let i = thread();
+        let mut page = Page::open(i.id.clone());
+        let (lines, boxes) = posts(&i, 40, &page, true);
+        assert_eq!(
+            box_ids(&boxes),
+            [
+                None,
+                Some("aaaa0000"),
+                Some("bbbb0000"),
+                Some("cccc0000"),
+                Some("dddd0000")
+            ]
+        );
+        assert_eq!(
+            boxes.iter().map(|b| b.replies).collect::<Vec<_>>(),
+            [0, 2, 1, 0, 0]
+        );
+        // each box's lines are its own, in order, with a blank
+        // line between
+        for pair in boxes.windows(2) {
+            assert_eq!(pair[0].lines.end + 1, pair[1].lines.start);
+        }
+        assert_eq!(boxes[4].lines.end, lines.len());
+
+        page.cursor = 1;
+        page.fold(&boxes);
+        assert!(page.folded.contains("aaaa0000"));
+        let (lines, boxes) = posts(&i, 40, &page, true);
+        assert_eq!(box_ids(&boxes), [None, Some("aaaa0000"), Some("dddd0000")]);
+        let bottom = lines[boxes[1].lines.end - 1].to_string();
+        assert!(bottom.contains("▸ 2 replies · aaaa0000"), "{bottom}");
+
+        // the body and a note without replies do not fold
+        page.cursor = 0;
+        page.fold(&boxes);
+        page.cursor = 2;
+        page.fold(&boxes);
+        assert_eq!(page.folded.len(), 1);
+        page.cursor = 1;
+        page.fold(&boxes);
+        assert!(page.folded.is_empty());
+    }
+
+    #[test]
+    fn the_cursor_walks_boxes_threads_and_siblings() {
+        let i = thread();
+        let mut page = Page::open(i.id.clone());
+        let (_, boxes) = posts(&i, 40, &page, true);
+        page.step_box(&boxes, -1);
+        assert_eq!(page.cursor, 0);
+        page.step_box(&boxes, 1);
+        page.step_box(&boxes, 1);
+        page.step_box(&boxes, 1);
+        assert_eq!(page.cursor, 3);
+        // c answers b answers a answers the issue
+        page.up(&boxes);
+        assert_eq!(page.cursor, 2);
+        page.up(&boxes);
+        assert_eq!(page.cursor, 1);
+        page.up(&boxes);
+        assert_eq!(page.cursor, 0);
+        // the body's siblings are the top-level notes
+        page.sibling(&boxes, 1);
+        assert_eq!(page.cursor, 1);
+        page.sibling(&boxes, 1);
+        assert_eq!(page.cursor, 4);
+        page.sibling(&boxes, 1);
+        assert_eq!(page.cursor, 4);
+        page.sibling(&boxes, -1);
+        assert_eq!(page.cursor, 1);
+        // b has no sibling
+        page.go(2);
+        page.sibling(&boxes, 1);
+        page.sibling(&boxes, -1);
+        assert_eq!(page.cursor, 2);
+        page.reveal = false;
+        page.step_box(&boxes, 1);
+        assert!(page.reveal);
+    }
+
+    #[test]
+    fn the_chosen_box_is_drawn_plain_and_scrolled_into_view() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+        let i = thread();
+        let mut page = Page::open(i.id.clone());
+        let (lines, boxes) = posts(&i, 40, &page, true);
+        let plain = |l: &Line| {
+            let corner = l.spans.iter().find(|s| s.content.contains('╭')).unwrap();
+            corner.style.add_modifier.is_empty()
+        };
+        assert!(plain(&lines[boxes[0].lines.start]));
+        assert!(!plain(&lines[boxes[1].lines.start]));
+        page.go(1);
+        let (lines, _) = posts(&i, 40, &page, true);
+        assert!(!plain(&lines[boxes[0].lines.start]));
+        assert!(plain(&lines[boxes[1].lines.start]));
+        // on the ties, no box is chosen
+        let (lines, _) = posts(&i, 40, &page, false);
+        assert!(!plain(&lines[boxes[1].lines.start]));
+
+        let (db, _) = fixture();
+        let title = Line::from("t");
+        let mut terminal = Terminal::new(TestBackend::new(60, 24)).unwrap();
+        let mut draw = |page: &mut Page| {
+            let mut limits = Limits::default();
+            terminal
+                .draw(|f| limits = draw_detail(f, &title, &db, &i, page))
+                .unwrap();
+            limits
+        };
+        let limits = draw(&mut page);
+        assert!(limits.scroll > 0, "the notes do not all fit: {limits:?}");
+        assert_eq!(page.scroll, 0);
+        page.go(4);
+        let limits = draw(&mut page);
+        assert_eq!(page.scroll, limits.scroll);
+        assert!(!page.reveal);
+        page.go(0);
+        draw(&mut page);
+        assert_eq!(page.scroll, 0);
     }
 }
