@@ -1,0 +1,28 @@
+{
+  "id": "foam-e49232",
+  "title": "Explore refreshing the screen on its own, and when a command writes",
+  "body": "",
+  "type": "spike",
+  "status": "open",
+  "priority": 3,
+  "labels": [],
+  "parent": "foam-72e952",
+  "blocked_by": [],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-10-10T02:30:47.726082286Z",
+  "updated_at": "2026-10-10T02:30:47.726082286Z",
+  "closed_at": null,
+  "close_reason": null,
+  "resolution": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "d1971c3",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
