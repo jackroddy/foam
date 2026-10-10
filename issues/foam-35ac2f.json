@@ -1,0 +1,28 @@
+{
+  "id": "foam-35ac2f",
+  "title": "Pull the page's key handling into a pure function so bindings get tests",
+  "body": "",
+  "type": "chore",
+  "status": "open",
+  "priority": 2,
+  "labels": [],
+  "parent": "foam-72e952",
+  "blocked_by": [],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-10-10T01:09:23.190038488Z",
+  "updated_at": "2026-10-10T01:09:23.190038488Z",
+  "closed_at": null,
+  "close_reason": null,
+  "resolution": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "bb39c08",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
