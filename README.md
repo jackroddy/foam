@@ -152,8 +152,9 @@ On a page, `j` and `k` move between the body and the top-level notes,
 and the one under the cursor has the bright border. Each box shows five
 lines of its text and says under them how many more there are, and a
 note's border says how many replies its thread holds and when the last
-was written. Enter opens the box's page: the body whole, or the note and
-every reply under it whole, indented by depth, in one pane that scrolls
+was written. Enter opens the box in place: the other boxes disappear and
+the box stays on its row, whole, with every reply of a note's thread
+under it, each hanging from a rail per depth, in one pane that scrolls
 by the line. Ctrl-d and Ctrl-u scroll without moving the cursor. Tab
 moves onto the parent, children, and blockers, Enter follows the one
 you're on, and Esc goes back to the page before, with the cursor where it

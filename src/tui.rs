@@ -212,6 +212,7 @@ struct Behind {
     root: Root,
     scroll: usize,
     cursor: usize,
+    pad: usize,
     tie: Option<usize>,
 }
 
@@ -227,6 +228,9 @@ struct Page {
     cursor: usize,
     /// Whether the next draw scrolls the chosen box into view.
     reveal: bool,
+    /// Blank lines above the first box, so a thread opens on the
+    /// row its note had and nothing jumps.
+    pad: usize,
     /// The tie under the cursor, when the cursor is on the ties.
     tie: Option<usize>,
 }
@@ -240,6 +244,7 @@ impl Page {
             scroll: 0,
             cursor: 0,
             reveal: true,
+            pad: 0,
             tie: None,
         }
     }
@@ -299,8 +304,10 @@ impl Page {
             None => Root::Body,
             Some(id) => Root::Note(id.clone()),
         };
+        let pad = b.lines.start.saturating_sub(self.scroll);
         self.leave();
         self.root = root;
+        self.pad = pad;
     }
 
     /// Put the page on screen behind the next one and start the
@@ -311,10 +318,12 @@ impl Page {
             root: self.root.clone(),
             scroll: self.scroll,
             cursor: self.cursor,
+            pad: self.pad,
             tie: self.tie,
         });
         self.scroll = 0;
         self.go(0);
+        self.pad = 0;
         self.tie = None;
     }
 
@@ -328,6 +337,7 @@ impl Page {
         self.root = b.root;
         self.scroll = b.scroll;
         self.go(b.cursor);
+        self.pad = b.pad;
         self.tie = b.tie;
         true
     }
@@ -602,7 +612,7 @@ fn handle(st: &mut State, key: KeyEvent, rows: &[Row], db: &Db, limits: &Limits)
             // a thread's page has no cursor: it scrolls by the line
             let thread = matches!(page.root, Root::Note(_));
             match key.code {
-                KeyCode::Esc | KeyCode::Char('h') | KeyCode::Left | KeyCode::Backspace => {
+                KeyCode::Esc | KeyCode::Backspace => {
                     if !page.back() {
                         st.mode = Mode::Rows;
                     }
@@ -613,7 +623,7 @@ fn handle(st: &mut State, key: KeyEvent, rows: &[Row], db: &Db, limits: &Limits)
                         _ => None,
                     };
                 }
-                KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => match page.tie {
+                KeyCode::Enter => match page.tie {
                     Some(k) => {
                         if let Some(id) = limits.ties.get(k) {
                             page.follow(id.clone());
@@ -721,7 +731,7 @@ fn handle_rows(
             st.filter.closed = !st.filter.closed;
             Action::Rebuild(After::Kept)
         }
-        KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => {
+        KeyCode::Enter => {
             if let Some(issue) = chosen {
                 st.mode = Mode::Detail(Page::open(issue.id.clone()));
             }
@@ -1546,29 +1556,8 @@ fn draw_detail(
         body.width
     };
     let about_w = if wide { ABOUT_WIDTH } else { body.width };
-    let note = match &page.root {
-        Root::Note(id) => issue.notes.iter().find(|n| n.id == *id),
-        _ => None,
-    };
-    let (title, heading, about) = match note {
-        Some(n) => (
-            n.id.clone(),
-            vec![Line::from(vec![
-                Span::styled(
-                    n.author.clone(),
-                    actor(&n.author).add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(" · ").dim(),
-                Span::raw(human().when(n.at)),
-            ])],
-            note_about(issue, n, inner(about_w), page.tie),
-        ),
-        None => (
-            issue.id.clone(),
-            heading(issue, inner(left_w)),
-            about(db, issue, inner(about_w), page.tie),
-        ),
-    };
+    let heading = heading(issue, inner(left_w));
+    let about = about(db, issue, inner(about_w), page.tie);
     let card_h = u16::try_from(heading.len())
         .unwrap_or(u16::MAX)
         .saturating_add(2);
@@ -1594,7 +1583,7 @@ fn draw_detail(
 
     frame.render_widget(
         Paragraph::new(heading).block(pane(
-            Span::raw(format!(" {title} ")).fg(palette::REF),
+            Span::raw(format!(" {} ", issue.id)).fg(palette::REF),
             false,
         )),
         card,
@@ -1625,9 +1614,8 @@ fn draw_detail(
     }
     page.scroll = page.scroll.min(max);
     let pane_title = match page.root {
-        Root::Issue => " notes ",
+        Root::Issue | Root::Note(_) => " notes ",
         Root::Body => " body ",
-        Root::Note(_) => " thread ",
     };
     frame.render_widget(
         Paragraph::new(lines)
@@ -1698,72 +1686,6 @@ struct About {
     lines: Vec<Line<'static>>,
     ties: Vec<String>,
     tie_lines: Vec<usize>,
-}
-
-/// The about pane of a note's page: the issue as a tie, what the
-/// note answers, how many replies it has, when it was written and
-/// changed, and where.
-fn note_about(i: &Issue, n: &Note, width: usize, tie: Option<usize>) -> About {
-    let style = human();
-    let dim = |s: String| Span::styled(s, Style::new().add_modifier(Modifier::DIM));
-    let label = |l: &str| dim(pad(l, 10));
-    let mut line = Line::from(vec![
-        Span::raw("› ").dim(),
-        Span::raw(i.id.clone()).fg(palette::REF),
-        dim(cut(
-            &format!("  {}", i.title),
-            width.saturating_sub(i.id.len() + 2),
-        )),
-    ]);
-    if tie == Some(0) {
-        line = line.style(CHOSEN);
-    }
-    let mut lines = vec![Line::from(dim("issue".into())), line, Line::default()];
-    if let Some(p) = &n.reply_to {
-        lines.push(Line::from(vec![
-            label("answers"),
-            Span::raw(p.clone()).fg(palette::REF),
-        ]));
-    }
-    let threaded = crate::model::threaded(&i.notes);
-    let replies = threaded
-        .iter()
-        .position(|(_, x)| x.id == n.id)
-        .map_or(0, |k| {
-            let depth = threaded[k].0;
-            threaded[k + 1..]
-                .iter()
-                .take_while(|(d, _)| *d > depth)
-                .count()
-        });
-    lines.push(Line::from(vec![
-        label("replies"),
-        Span::raw(replies.to_string()),
-    ]));
-    lines.push(Line::default());
-    lines.push(Line::from(vec![
-        label("written"),
-        Span::raw(style.when(n.at)),
-    ]));
-    if let Some(e) = n.edited_at {
-        lines.push(Line::from(vec![label("edited"), Span::raw(style.when(e))]));
-    }
-    if !n.branch.is_empty() || !n.commit.is_empty() {
-        lines.push(Line::from(vec![
-            label("on"),
-            Span::raw(format!(
-                "{} @ {}",
-                n.branch,
-                n.commit.chars().take(7).collect::<String>()
-            ))
-            .fg(palette::REF),
-        ]));
-    }
-    About {
-        lines,
-        ties: vec![i.id.clone()],
-        tie_lines: vec![1],
-    }
 }
 
 /// A filled badge, so the eye finds it without reading.
@@ -1985,23 +1907,29 @@ fn posts(
         }
     }
     let cursor = page.cursor.min(shown.len().saturating_sub(1));
-    let mut out = Vec::new();
+    let mut out: Vec<Line> = (0..page.pad).map(|_| Line::default()).collect();
     let mut boxes = Vec::new();
+    // a reply hangs under what it answers with a rail down its
+    // left for each depth, and the line between two boxes carries
+    // the rails of the one below
+    let rails = |depth: usize| {
+        let depth = depth.min(wide.saturating_sub(20) / 2);
+        Span::raw("│ ".repeat(depth)).dim()
+    };
     for (post, depth, id) in shown {
-        if !out.is_empty() {
-            out.push(Line::default());
+        let depth = depth.min(wide.saturating_sub(20) / 2);
+        if !boxes.is_empty() {
+            out.push(Line::from(rails(depth)));
         }
         let start = out.len();
-        // a reply sits two columns in from what it answers
-        let indent = (depth * 2).min(wide.saturating_sub(20));
         let mut lines = post_box(
             &post,
             &style,
-            wide - indent,
+            wide - 2 * depth,
             focused && cursor == boxes.len(),
         );
         for line in &mut lines {
-            line.spans.insert(0, Span::raw(" ".repeat(indent)));
+            line.spans.insert(0, rails(depth));
         }
         out.extend(lines);
         boxes.push(NoteBox {
@@ -3158,7 +3086,7 @@ mod tests {
         assert_eq!(page(&st).3, Some(1));
         key(&mut st, KeyCode::Enter);
         assert_eq!(page(&st), ("t-000004".into(), 0, 0, None));
-        key(&mut st, KeyCode::Char('h'));
+        key(&mut st, KeyCode::Esc);
         assert_eq!(page(&st).0, "t-000002");
         key(&mut st, KeyCode::Backspace);
         assert!(matches!(st.mode, Mode::Rows));
@@ -3654,13 +3582,21 @@ mod tests {
         assert!(
             lines[boxes[1].lines.start]
                 .to_string()
-                .starts_with("  ╭ ann")
+                .starts_with("│ ╭ ann")
         );
         assert!(
             lines[boxes[2].lines.start]
                 .to_string()
-                .starts_with("    ╭ ann")
+                .starts_with("│ │ ╭ ann")
         );
+        // the line between b and c carries c's rails
+        assert_eq!(lines[boxes[2].lines.start - 1].to_string(), "│ │ ");
+        // every line of every box is exactly as wide as the pane
+        for b in &boxes {
+            for l in &lines[b.lines.clone()] {
+                assert_eq!(l.to_string().chars().count(), 40, "{l}");
+            }
+        }
         assert!(!lines.iter().any(|l| l.to_string().contains("more")));
         // enter does nothing on a thread's page
         page.go(1);
@@ -3682,42 +3618,54 @@ mod tests {
     }
 
     #[test]
-    fn a_note_page_has_its_own_card_and_about_pane() {
+    fn a_thread_opens_in_place_under_the_issue_card() {
         use ratatui::Terminal;
         use ratatui::backend::TestBackend;
         let i = thread();
         let db = db(vec![i.clone()]);
         let header = test_header();
         let mut page = Page::open(i.id.clone());
+        let draw = |page: &mut Page| {
+            let mut terminal = Terminal::new(TestBackend::new(100, 20)).unwrap();
+            let mut limits = Limits::default();
+            terminal
+                .draw(|f| limits = draw_detail(f, &header, View::List, &db, &i, page))
+                .unwrap();
+            let buffer = terminal.backend().buffer().clone();
+            let rows: Vec<String> = (0..buffer.area.height)
+                .map(|y| {
+                    (0..buffer.area.width)
+                        .map(|x| buffer[(x, y)].symbol().to_string())
+                        .collect()
+                })
+                .collect();
+            (rows, limits)
+        };
         page.go(1);
-        page.enter_box(&posts(&i, 40, &page, true).1);
-        let mut terminal = Terminal::new(TestBackend::new(100, 16)).unwrap();
-        let mut limits = Limits::default();
-        terminal
-            .draw(|f| limits = draw_detail(f, &header, View::List, &db, &i, &mut page))
-            .unwrap();
-        let buffer = terminal.backend().buffer().clone();
-        let rows: Vec<String> = (0..buffer.area.height)
-            .map(|y| {
-                (0..buffer.area.width)
-                    .map(|x| buffer[(x, y)].symbol().to_string())
-                    .collect()
-            })
-            .collect();
+        let (before, limits) = draw(&mut page);
+        let row_of = |rows: &[String], needle: &str| rows.iter().position(|r| r.contains(needle));
+        let was = row_of(&before, "╭ ann · just now").unwrap();
+        page.enter_box(&limits.boxes);
+        let (after, limits) = draw(&mut page);
+        // the card, the about pane and the pane's title stay; the
+        // note keeps its row; the body and d are gone
         assert!(
-            rows[1].starts_with("list › t-000009 › aaaa0000"),
+            after[1].starts_with("list › t-000009 › aaaa0000"),
             "{}",
-            rows[1]
+            after[1]
         );
-        assert!(rows[3].starts_with("╭ aaaa0000 "), "{}", rows[3]);
-        assert!(rows[4].starts_with("│ ann · just now"), "{}", rows[4]);
-        let at = |needle: &str| rows.iter().position(|r| r.contains(needle));
-        assert!(at("╭ thread ").is_some(), "{rows:#?}");
-        assert!(at("│ › t-000009 ").is_some(), "{rows:#?}");
-        assert!(at("answers").is_none(), "{rows:#?}");
-        assert!(at("replies   2").is_some(), "{rows:#?}");
-        assert_eq!(limits.ties, ["t-000009"]);
+        assert!(after[3].starts_with("╭ t-000009 "), "{}", after[3]);
+        assert!(after[3].contains("╭ about "), "{}", after[3]);
+        assert!(row_of(&after, "╭ notes ").is_some(), "{after:#?}");
+        assert_eq!(row_of(&after, "╭ ann · just now"), Some(was), "{after:#?}");
+        assert!(row_of(&after, "the body").is_none(), "{after:#?}");
+        assert!(row_of(&after, "note dddd0000").is_none(), "{after:#?}");
+        assert!(row_of(&after, "│ │ ╭ ann").is_some(), "{after:#?}");
         assert_eq!(limits.boxes.len(), 3);
+        // back puts everything where it was
+        assert!(page.back());
+        let (again, _) = draw(&mut page);
+        assert_eq!(again, before);
     }
 
     #[test]
@@ -3730,6 +3678,9 @@ mod tests {
         let mut page = Page::open(i.id.clone());
         page.go(1);
         page.enter_box(&posts(&i, 40, &page, true).1);
+        // the padding that keeps the note in place is not the point
+        // here
+        page.pad = 0;
         let (lines, boxes) = posts(&i, 40, &page, true);
         // the root is 25 lines in a pane of 10
         assert_eq!(boxes[0].lines, 0..25, "{boxes:#?}");

@@ -29,13 +29,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The screen's page shows the body and the top-level notes, each cut
   to five lines with the rest counted under them, and a note's border
   says how many replies its thread holds and when the last was written.
-  Enter opens the box's page: the body whole, or the note and every
-  reply under it whole, in one pane that scrolls by the line. Esc goes
-  back with the cursor where it was, and the header's trail names the
-  note.
+  Enter opens the box in place: the other boxes disappear, the box
+  stays on its row, whole, and a note's replies hang under it, each
+  from a rail per depth, in one pane that scrolls by the line. Esc
+  goes back with the cursor where it was, and the header's trail names
+  the note.
 - The screen's page has a cursor over the body and the notes. `j` and
   `k` move it and the chosen box has the bright border, and Ctrl-d and
-  Ctrl-u scroll without moving it.
+  Ctrl-u scroll without moving it. `h`, `l` and the arrow keys no longer
+  go back and forward; Esc, Backspace and Enter do.
 
 ### Fixed
 
