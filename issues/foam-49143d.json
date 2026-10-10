@@ -15,11 +15,20 @@
   "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-10T01:09:23.14560621Z",
-  "updated_at": "2026-10-10T01:09:23.14560621Z",
+  "updated_at": "2026-10-10T01:09:23.219028892Z",
   "closed_at": null,
   "close_reason": null,
   "resolution": null,
-  "notes": [],
+  "notes": [
+    {
+      "id": "b5318681",
+      "at": "2026-10-10T01:09:23.219028262Z",
+      "author": "Jack Roddy/42dfd115",
+      "text": "Design, proposed 2026-10-09: a lexical highlighter, not a grammar. Four token classes per language (comment, string, number, keyword) for rust, python, sh, json, toml, yaml and diff; anything else renders unstyled on a dim background. syntect was considered and rejected for binary size and build time; it could come later behind a cargo feature.",
+      "commit": "bb39c08",
+      "branch": "dev"
+    }
+  ],
   "stamps": {
     "created": {
       "commit": "bb39c08",
