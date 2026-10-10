@@ -267,10 +267,15 @@ impl Page {
             }
         }
         let last = boxes.len().saturating_sub(1);
-        self.go(match by.is_positive() {
+        let to = match by.is_positive() {
             true => (self.cursor + 1).min(last),
             false => self.cursor.saturating_sub(1),
-        });
+        };
+        // at either end a step goes nowhere, and does not reveal
+        // the box's top again
+        if to != self.cursor {
+            self.go(to);
+        }
     }
 
     /// The cursor onto the note this one answers; a top-level note
@@ -1672,7 +1677,7 @@ fn draw_detail(
     let pane_title = match page.root {
         Root::Issue => " notes ",
         Root::Body => " body ",
-        Root::Note(_) => " replies ",
+        Root::Note(_) => " note ",
     };
     frame.render_widget(
         Paragraph::new(lines)
@@ -3838,7 +3843,7 @@ mod tests {
         assert!(rows[3].starts_with("╭ bbbb0000 "), "{}", rows[3]);
         assert!(rows[4].starts_with("│ ann · just now"), "{}", rows[4]);
         let at = |needle: &str| rows.iter().position(|r| r.contains(needle));
-        assert!(at("╭ replies ").is_some(), "{rows:#?}");
+        assert!(at("╭ note ").is_some(), "{rows:#?}");
         assert!(at("│ › t-000009 ").is_some(), "{rows:#?}");
         assert!(at("answers   aaaa0000").is_some(), "{rows:#?}");
         assert!(at("replies   1").is_some(), "{rows:#?}");
@@ -3869,6 +3874,19 @@ mod tests {
         // the bottom shows: the next step moves on to b
         page.step_box(&boxes, rows, 1);
         assert_eq!(page.cursor, 1);
+        // on the body's page there is nowhere to move on to, so the
+        // bottom stays put
+        let mut body = Page::open(i.id.clone());
+        i.body = i.notes[0].text.clone();
+        body.enter_box(&posts(&i, 40, &body, true).1);
+        let (_, one) = posts(&i, 40, &body, true);
+        assert_eq!(one.len(), 1);
+        for _ in 0..40 {
+            body.step_box(&one, rows, 1);
+        }
+        body.reveal = false;
+        body.step_box(&one, rows, 1);
+        assert_eq!((body.cursor, body.scroll, body.reveal), (0, 15, false));
         reveal(&mut page.scroll, page.cursor, &boxes, rows);
         assert!(page.scroll + rows >= boxes[1].lines.end);
         // back up: b stays the box until the top of a shows again
