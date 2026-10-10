@@ -23,7 +23,7 @@ use crate::model::{Kind, Resolution, Status};
 #[derive(Parser)]
 #[cfg_attr(
     feature = "tui",
-    command(after_help = "With no command, in a terminal, foam opens the board as a screen.")
+    command(after_help = "With no command, in a terminal, foam opens the listing as a screen.")
 )]
 #[command(name = "foam", version)]
 struct Cli {

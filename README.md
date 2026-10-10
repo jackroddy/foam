@@ -25,7 +25,7 @@ dream, dozens of `PLAN-FOR-<X>.md` files, and memories in the harness that
 you've never actually read.
 
 `foam` gives your agent's memories and plans a structured place to live.
-Memories are kept in a store, and plans becomed tracked issues (like GitHub
+Memories are kept in a store, and plans become tracked issues (like GitHub
 issues). Your agent learns how to use the `foam` CLI, and `foam` keeps track of
 everything as JSON in a git ref. This way, the memory store and issue tracking
 live alongside your project, but with a separate history; everything `foam`
@@ -69,19 +69,29 @@ knows later that a memory is fifty commits behind. If two `foam` commands
 in the same clone race, the ref's compare-and-swap catches it and the loser
 retries.
 
-If your repo has a remote, `foam init` installs a pre-push hook that runs
-`foam sync` before every push. It also adds a fetch refspec so `git fetch`
-lands the remote's data on `refs/foam/origin`, but only once the remote has
-the ref: git fails any fetch whose configured refspec names a ref the remote
-lacks. Until then, the first `foam sync` that finds or pushes the ref adds
-the refspec. Any `foam` command merges whatever a fetch brought in before it
-does its own work, so a clone is never behind what it has fetched. `foam
-sync` does the fetch, merge, and push by hand, and installs the hook and
-refspec when they are missing, so a repo that added its remote after `foam
-init` needs only one `foam sync`.
+If your repo has a remote named `origin`, `foam init` installs a pre-push
+hook that runs `foam sync` before every push. It adds a fetch refspec so
+`git fetch` lands the remote's data on `refs/foam/origin`, but only when
+origin already has the ref: git fails any fetch whose configured refspec
+names a ref the remote lacks. If origin has no data ref yet, `foam init`
+tells you so and says to run `foam sync`. If there's no remote at all, it
+tells you sync isn't set up. Any `foam` command merges whatever a fetch
+brought in before it does its own work, so a clone is never behind what it
+has fetched.
 
-`foam stats` says how big the ref has grown: commits, the bytes its
-objects take on disk, and the largest records.
+`foam sync` does the fetch, merge, and push by hand. It prints
+`foam: syncing ...` before it fetches and `foam: pushing ...` before it
+pushes, and it skips the push when origin already has the same tip. It installs
+the hook when it's missing and adds the refspec once origin has the ref, so
+a repo that added its remote after `foam init` needs only one `foam sync`.
+`--remote` names a remote other than origin. `--setup` adds advice: when
+`foam` can't install the hook, because `core.hooksPath` is set or the
+existing pre-push hook isn't a shell script, it prints the lines to add by
+hand.
+
+`foam stats` says how big the ref has grown: how many commits it holds, its
+objects and the bytes they take on disk, the files at its tip, and the
+largest records.
 
 `git clone` only fetches branches, so a fresh clone has no data ref. Run
 `foam init` there: it fetches the ref from origin when origin has it, and
@@ -101,14 +111,30 @@ Mostly you just look. Your agent files and closes the issues; you read the
 board, open an issue now and then, and step in with `foam create`,
 `foam update`, or `foam close` when the plan needs changing.
 
+#### the screen
+
+Run `foam` with no command in a terminal and you get a screen. It opens on
+the listing, with a preview of the chosen issue beside it. Tab switches to
+the board, and Enter opens the chosen issue's page, with its notes shown as
+boxes.
+
+On the listing, `j` and `k` move, `g` and `G` jump to the ends, Space folds
+an issue's children, and `p` hides the preview. `s` and `t` cycle the
+status and kind filters, `a` toggles your own claims, `c` toggles closed
+issues, and `/` lets you type a text match. Esc clears the filter, and Esc
+again quits. `r` reloads and `q` quits. On a page, Tab moves onto the
+parent, children, and blockers, Enter follows the one you're on, and Esc
+goes back.
+
+You can't change anything from the screen; claim, note, and close with the
+commands. The screen needs both stdin and stdout on a terminal, so a pipe,
+a hook, or an agent running bare `foam` gets the usage and exit code 2. A
+build with `--no-default-features` has no screen.
+
 #### foam board
 
-`foam board` puts everything on one screen, with milestones, what's in
-progress, what's ready, what's blocked and by what, and the recent
-history. Plain `foam` in a terminal opens a screen: the listing with a
-preview of the chosen issue beside it, the board on Tab, and an issue's
-page on Enter, with its notes as a message board. The footer names the
-keys.
+`foam board` prints everything at once: milestones, what's in progress,
+what's ready, what's blocked and by what, and the recent history.
 
 ```
 foam  on main at 9f25882  5 open, 1 in progress, 0 deferred, 2 closed
@@ -337,6 +363,55 @@ parser-lib: winnow, not nom
 `foam config` sets the two numbers every clone shares. `lease-minutes` is
 how long a claim holds, and `stale-after` is how many commits behind `HEAD`
 a memory can be before prime marks it old.
+
+### every command
+
+Every command also takes `-C <dir>` to run as if started there, `--json`,
+`--plain`, and `--actor <name>`. A command run before `foam init` exits 3.
+
+```
+foam                                  the screen, in a terminal
+foam init [--prefix P]                create the data ref; prefix defaults to the directory
+foam create <title> [--type T] [-p 0-4] [--label L]... [--parent ID]
+            [--body TEXT] [--blocked-by ID]...
+                                      create an issue; a P2 task by default
+foam show [id]                        one issue in full; with no id, pick one with fzf
+foam pick                             pick an issue with fzf and print its id
+foam list [--status S] [--type T] [--label L] [--assignee A] [--all]
+                                      open and in-progress issues, unless filtered
+foam ready [--limit N]                open, past any deferral, nothing blocking
+foam blocked                          open issues that something still blocks
+foam board                            milestones, in progress, ready, blocked, recent log
+foam update <ids>... [--title T] [--body B] [--type T] [-p N] [--status S]
+            [--assignee A] [--add-label L] [--rm-label L] [--parent ID]
+            [--defer-until DATE] [--resolution done|dropped] [--reason R]
+                                      change fields; "" clears the assignee or parent
+foam close <ids>... --reason R [--dropped]
+                                      close as done, or as dropped
+foam reopen <ids>...                  reopen closed issues
+foam claim <id> [--force]             take it with a lease; --force overrides another's lease
+foam unclaim <id> [--force]           give it back; --force releases another's claim
+foam heartbeat <id>                   extend the lease on an issue you hold
+foam reclaim                          reopen every in-progress issue whose lease expired
+foam note <id> <text>                 append a note
+foam search <query>                   titles, bodies, notes and memories, closed included
+foam remember <slug> <text>           store a memory, replacing any with that slug
+foam memories                         list every memory
+foam recall <slug>                    print one memory
+foam forget <slug>                    delete a memory
+foam prime [--limit N] [--hook-json]  session-start context; lists 10 ready by default
+foam session-end                      release every claim this session holds
+foam setup claude [--remove]          add or remove the Claude Code hooks
+foam setup bash                       print fzf completion for .bashrc
+foam sync [--remote R] [--setup]      fetch, merge and push; origin by default
+foam doctor                           check the data and this clone's setup
+foam stats                            how big the data ref has grown
+foam log [id] [--limit N]             the data ref's history, newest first; 20 by default
+foam dep add <id> <blocker>           make <id> wait on <blocker>
+foam dep rm <id> <blocker>            stop <id> waiting on <blocker>
+foam dep tree <id>                    <id> and everything it waits on
+foam config [key] [value]             show or set lease-minutes or stale-after
+```
 
 ### json
 
