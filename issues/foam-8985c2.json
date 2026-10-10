@@ -3,7 +3,7 @@
   "title": "Sync in an older binary fails cleanly on a newer origin",
   "body": "Check that absorb_origin bails at the gate rather than merging meta.json; add a test with two clones on different schemas if it does not.",
   "type": "task",
-  "status": "open",
+  "status": "closed",
   "priority": 2,
   "labels": [],
   "parent": "foam-a947aa",
@@ -13,10 +13,10 @@
   "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-10T00:03:11.175247069Z",
-  "updated_at": "2026-10-10T00:15:19.210667664Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-10-10T00:15:19.264406312Z",
+  "closed_at": "2026-10-10T00:15:19.264406312Z",
+  "close_reason": "gate on origin before fast-forward or merge; test with two clones where origin is at schema 99",
+  "resolution": "done",
   "notes": [
     {
       "at": "2026-10-10T00:15:19.210667154Z",
@@ -31,6 +31,9 @@
       "commit": "34d8e13",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "e57529a",
+      "branch": "dev"
+    }
   }
 }
