@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The notes pane on the screen's page is titled `notes`, not `posts`, and
+  the footer's Tab hint says the same.
+
 ## [0.5.0] - 2026-10-10
 
 ### Added

@@ -903,13 +903,13 @@ fn draw_detail(frame: &mut Frame, strip: &Line, db: &Db, issue: &Issue, page: &P
     let scroll = page.scroll.min(max);
     frame.render_widget(
         Paragraph::new(lines)
-            .block(pane(Span::raw(" posts "), page.tie.is_none()))
+            .block(pane(Span::raw(" notes "), page.tie.is_none()))
             .scroll((u16::try_from(scroll).unwrap_or(u16::MAX), 0)),
         posts_area,
     );
 
     let keys = if page.tie.is_some() {
-        "j/k pick   Enter follow   Tab posts   Esc back   q quit"
+        "j/k pick   Enter follow   Tab notes   Esc back   q quit"
     } else if about.ties.is_empty() {
         "j/k scroll   g/G ends   Esc back   r reload   q quit"
     } else {
@@ -1914,7 +1914,7 @@ mod tests {
         assert!(wide[1].starts_with("╭ t-000002 "), "{}", wide[1]);
         assert_eq!(col_of(&wide[1], "╭ about "), Some(70), "{}", wide[1]);
         assert!(wide[2].contains("││  P2   task   open "), "{}", wide[2]);
-        let posts = wide.iter().position(|r| r.starts_with("╭ posts ")).unwrap();
+        let posts = wide.iter().position(|r| r.starts_with("╭ notes ")).unwrap();
         let body = &wide[posts + 1];
         assert!(body.starts_with("│ ╭─ just now "), "{body}");
         assert!(
@@ -1925,7 +1925,7 @@ mod tests {
         // narrow: card, about and posts stacked, each full width
         let narrow = rows(60, 30);
         let at = |needle: &str| narrow.iter().position(|r| r.starts_with(needle)).unwrap();
-        let (card, about, posts) = (at("╭ t-000002 "), at("╭ about "), at("╭ posts "));
+        let (card, about, posts) = (at("╭ t-000002 "), at("╭ about "), at("╭ notes "));
         assert!(card < about && about < posts, "{narrow:#?}");
         assert!(narrow[about].ends_with('╮'), "{}", narrow[about]);
     }
