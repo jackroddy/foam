@@ -1,0 +1,28 @@
+{
+  "id": "foam-b2e755",
+  "title": "Review the README before the 0.3.0 release",
+  "body": "Check every command and flag the README names against the binary's --help, the storage and sync section against init and sync, and the screen paragraph against the TUI. Fold in foam-3909f8: add a short command reference at the end naming every command and its flags, so the README stops leaving commands out.",
+  "type": "chore",
+  "status": "open",
+  "priority": 1,
+  "labels": [],
+  "parent": "foam-716694",
+  "blocked_by": [],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-10-10T00:03:35.974804502Z",
+  "updated_at": "2026-10-10T00:03:35.974804502Z",
+  "closed_at": null,
+  "close_reason": null,
+  "resolution": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "34d8e13",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
