@@ -127,19 +127,17 @@ names the three views, list, board and memories, with the one you are on
 bright, and HEAD at the right; under it the filter, or on a page the trail
 of ids you opened to get there, with the counts at the right, run together
 as a powerline, which needs a Nerd or Powerline font for the arrows. The
-screen says `claimed` where the commands say `in_progress`. The screen
-opens on the listing, in a pane with a preview of the chosen issue beside
-it, and the data ref's last commits in a pane across the lower third; the
-board has the same. Tab switches to the board, then to the memories, and
-Enter opens the chosen issue's page, with its notes shown as boxes. The body and the notes render
-a little markdown: `backticked` code, bulleted and numbered lists, fenced
-code blocks, and tables.
+screen says `claimed` where the commands say `in_progress`.
 
-On the listing, `j` and `k` move, `g` and `G` jump to the ends, Space folds
-an issue's children, and `p` hides the preview. `s` and `t` cycle the
-status and kind filters, `a` toggles your own claims, `c` toggles closed
-issues, and `/` lets you type a text match. Esc clears the filter, and Esc
-again quits. `r` reloads and `q` quits.
+The screen opens on the listing, in a pane with a preview of the chosen
+issue beside it, and the data ref's last commits in a pane across the
+lower third; the board has the same. Tab switches to the board, then to
+the memories. On the listing, `j` and `k` move, `g` and `G` jump to the
+ends, Space folds an issue's children, and `p` hides the preview. `s` and
+`t` cycle the status and kind filters, `a` toggles your own claims, `c`
+toggles closed issues, and `/` lets you type a text match. Esc clears the
+filter, and Esc again quits. `r` reloads and `q` quits. The footer shows
+the keys that are not listed here.
 
 The memories are laid out like an issue's page: each one a box, with its
 slug and when it was remembered in the top border and where in the
@@ -148,35 +146,42 @@ stands. `j` and `k` move between them, `/` matches the slug and the text,
 and a memory `foam prime` would mark as old or from another branch says
 so in yellow in its border.
 
-On a page, `j` and `k` move between the body and the top-level notes,
-and the one under the cursor has the bright border. Each box shows five
-lines of its text and says under them how many more there are, and a
-note's border says how many replies its thread holds and when the last
-was written. Enter opens the box in place: the other boxes disappear and
-the box moves to the top of the pane, whole, with every reply of a
-note's thread under it, each hanging from a rail down from what it
-answers, in one pane that scrolls by the line. Ctrl-d and Ctrl-u scroll without moving the cursor. Tab
-moves onto the parent, children, and blockers, Enter follows the one
-you're on, and Esc goes back to the page before, with the cursor where it
-was.
+Enter on the listing or the board opens the chosen issue's page. The body
+and the top-level notes are boxes, and the one under the cursor has the
+bright border; `j` and `k` move between them. Each box shows five lines
+of its text and says under them how many more there are, and a note's
+border says how many replies its thread holds and when the last was
+written. Enter opens the box in place: the other boxes disappear and the
+box moves to the top of the pane, whole, with every reply of a note's
+thread under it, each hanging from a rail down from what it answers, in
+one pane that scrolls by the line. The body and the notes render a little
+markdown: `backticked` code, bulleted and numbered lists, fenced code
+blocks with a language, and tables. Ctrl-d and Ctrl-u scroll without
+moving the cursor. Tab moves onto the parent, children, and blockers,
+Enter follows the one you're on, and Esc goes back to the page before,
+with the cursor where it was.
 
-Notes and issues are written from the screen. On an opened thread `h`
-and `l` select a note, and Enter offers to reply to it or edit it; `n` on
-the issue's page starts a new note. On the list or the board `n` opens a form under
-the chosen row, typing into the title; Enter confirms a field and moves to
-the next, `j` and `k` walk the fields, `h` and `l` turn the kind, the
-priority and the parent, which starts on the chosen issue when that is a
-milestone, and Enter on `create` writes the issue and lands the cursor on
-it. `e` opens the same form filled from the chosen issue, and `save`
-writes the changes. The compose box is drawn where the note will land
+Notes are written from the screen. On an opened thread `h` and `l` select
+a note, and Enter offers to reply to it or edit it; `n` on the issue's
+page starts a new note. The compose box is drawn where the note will land
 and the terminal's cursor sits in it. Enter sends, Shift+Enter breaks the
 line in a terminal that reports the shift, and Alt+Enter or Ctrl-j does
 everywhere; Esc closes the box and keeps the draft until you leave the
 page. The write goes through the same path as `foam note`, and the footer
-says what happened. Claiming, closing and remembering stay with the
-commands. The screen needs both stdin and stdout on a terminal, so a pipe,
-a hook, or an agent running bare `foam` gets the usage and exit code 2. A
-build with `--no-default-features` has no screen.
+says what happened.
+
+Issues are written from the screen too. On the list or the board `n`
+opens a form under the chosen row, typing into the title; Enter confirms
+a field and moves to the next, `j` and `k` walk the fields, `h` and `l`
+turn the kind, the priority and the parent, which starts on the chosen
+issue when that is a milestone, and Enter on `create` writes the issue
+and lands the cursor on it. `e` opens the same form filled from the
+chosen issue, and `save` writes the changes. Claiming, closing and
+remembering stay with the commands.
+
+The screen needs both stdin and stdout on a terminal, so a pipe, a hook,
+or an agent running bare `foam` gets the usage and exit code 2. A build
+with `--no-default-features` has no screen.
 
 #### foam board
 
