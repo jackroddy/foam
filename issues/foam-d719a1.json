@@ -3,26 +3,29 @@
   "title": "A window of three schemas, and a gate that names the version to go through",
   "body": "Steps older than three schemas back are dropped; decode on such a ref says which foam version to install and run first.",
   "type": "task",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 2,
   "labels": [],
   "parent": "foam-a947aa",
   "blocked_by": [],
   "related": [],
   "assignee": "Jack Roddy/6de6737a",
-  "lease_expires": "2026-10-10T00:27:12.376474852Z",
+  "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-10T00:03:11.139774312Z",
-  "updated_at": "2026-10-10T00:12:12.376474852Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-10-10T00:15:19.22881148Z",
+  "closed_at": "2026-10-10T00:15:19.22881148Z",
+  "close_reason": "WINDOW = 3 enforced in the chain, with the retired table naming the foam to go through; unit tests",
+  "resolution": "done",
   "notes": [],
   "stamps": {
     "created": {
       "commit": "34d8e13",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "e57529a",
+      "branch": "dev"
+    }
   }
 }
