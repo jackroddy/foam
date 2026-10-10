@@ -3,7 +3,7 @@
   "title": "Schema migrations",
   "body": "Decided with Jack: a chain of untyped N to N+1 steps over serde_json::Value in the binary, run on read so looking never writes; the ref's meta.json bumped to the binary's schema on the first write by a newer binary, with an obvious coloured message; a window of three schemas back, beyond which the gate names the foam version to go through; stats and doctor show the ref's schema and the binary's; meta.json takes the higher schema on merge; one frozen fixture per schema under tests/ and a test that the chain reads each. An upgrade is walked back by a revert commit on the ref, which fast-forwards everywhere.",
   "type": "milestone",
-  "status": "open",
+  "status": "closed",
   "priority": 2,
   "labels": [],
   "parent": "foam-b3f162",
@@ -13,16 +13,19 @@
   "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-10T00:03:11.110784106Z",
-  "updated_at": "2026-10-10T00:03:11.110784106Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-10-10T00:15:19.273222163Z",
+  "closed_at": "2026-10-10T00:15:19.273222163Z",
+  "close_reason": "every child closed; the chain, the bump, the window, the reporting, the merge rule, the fixture and the sync gate are in",
+  "resolution": "done",
   "notes": [],
   "stamps": {
     "created": {
       "commit": "34d8e13",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "e57529a",
+      "branch": "dev"
+    }
   }
 }
