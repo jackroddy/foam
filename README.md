@@ -149,11 +149,15 @@ and a memory `foam prime` would mark as old or from another branch says
 so in yellow in its border.
 
 On a page, `j` and `k` move between the body and the notes, and the one
-under the cursor has the cyan border. `u` goes to the note it answers,
-`[` and `]` to the ones before and after it in the same thread, and Space
-folds the replies under it away and shows them again. Ctrl-d and Ctrl-u
-scroll without moving the cursor. Tab moves onto the parent, children,
-and blockers, Enter follows the one you're on, and Esc goes back.
+under the cursor has the bright border. Each box shows five lines of its
+text and says in its border how many more there are; Enter opens the
+box's own page, with the whole text and, for a note, the replies under
+it as boxes again, so a deep thread is read by stepping into it. `u`
+goes to the note it answers, `[` and `]` to the ones before and after it
+in the same thread, and Space folds the replies under it away and shows
+them again. Ctrl-d and Ctrl-u scroll without moving the cursor. Tab moves
+onto the parent, children, and blockers, Enter follows the one you're on,
+and Esc goes back to the page before, with the cursor where it was.
 
 You can't change anything from the screen; claim, note, and close with the
 commands. The screen needs both stdin and stdout on a terminal, so a pipe,
