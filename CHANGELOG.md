@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-09
+
 ### Added
 
 - A screen. `foam` with no command, in a terminal, opens what `foam
@@ -25,6 +27,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `foam stats` says how big the data ref has grown: its commits and
   age, the objects only the ref holds and their bytes on disk, what the
   tip holds, and the largest records. `--json` carries the same.
+### Changed
+
+- `foam close` warns about open children once, after the write, rather
+  than once per retry while another clone is writing.
+
+## [0.2.1] - 2026-10-09
+
+### Changed
+
+- "foam is not initialized here" now says that `foam init` fetches the
+  data ref from origin when origin has one.
+- `foam init` says when origin has no data ref yet, and when there is no
+  remote, so sync is not set up.
+- `foam sync` installs the pre-push hook and the refspec when they are
+  missing, so a repo that added its remote after `foam init` needs no
+  `--setup`. The flag remains and reports on the hook.
+- `foam doctor` only reports a missing refspec once origin's data has
+  been fetched.
+- `foam sync` says on stderr what it is about to do before each round
+  trip, so `git push` no longer goes quiet while the hook runs. It skips
+  the push when origin already has the tip, and fetches without asking
+  ls-remote first: two round trips fewer when nothing has changed. Under
+  the hook every line starts with `foam:`; by hand, nothing to move
+  prints "up to date".
+
 - `foam setup claude --help` names both hooks it installs.
 - Listings wrap a long title at the terminal width, with each later line
   under the title column, so the columns stay aligned. `--plain` output
@@ -179,7 +206,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `foam log` shows the data ref's history, optionally only the entries that
   touched one id. Every command accepts `--json`.
 
-[Unreleased]: https://github.com/jackroddy/foam/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/jackroddy/foam/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/jackroddy/foam/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/jackroddy/foam/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/jackroddy/foam/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/jackroddy/foam/releases/tag/v0.1.0
