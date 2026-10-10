@@ -167,9 +167,9 @@ impl View {
 
     fn keys(self) -> &'static str {
         match self {
-            View::List => "j/k move   Enter open   Tab board   r reload   q quit",
-            View::Board => "j/k move   Enter open   Tab memories   r reload   q quit",
-            View::Memories => "j/k move   Enter open   Tab list   r reload   q quit",
+            View::List => "j/k move   enter open   tab board   r reload   q quit",
+            View::Board => "j/k move   enter open   tab memories   r reload   q quit",
+            View::Memories => "j/k move   tab list   r reload   q quit",
         }
     }
 }
@@ -1038,7 +1038,7 @@ fn board_rows(db: &Db, now: Timestamp) -> Vec<Row<'_>> {
     let issue = |issue, suffix| row(db, issue, suffix);
     let mut rows = Vec::new();
     if !board.milestones.is_empty() {
-        rows.push(Row::Header("Milestones"));
+        rows.push(Row::Header("milestones"));
         rows.extend(
             board
                 .milestones
@@ -1048,7 +1048,7 @@ fn board_rows(db: &Db, now: Timestamp) -> Vec<Row<'_>> {
         rows.push(Row::End);
     }
     if !board.in_progress.is_empty() {
-        rows.push(Row::Header("Claimed"));
+        rows.push(Row::Header("claimed"));
         rows.extend(
             board
                 .in_progress
@@ -1057,14 +1057,14 @@ fn board_rows(db: &Db, now: Timestamp) -> Vec<Row<'_>> {
         );
         rows.push(Row::End);
     }
-    rows.push(Row::Header("Ready"));
+    rows.push(Row::Header("ready"));
     if board.ready.is_empty() {
         rows.push(Row::Note("nothing is ready"));
     }
     rows.extend(board.ready.into_iter().map(|i| issue(i, String::new())));
     rows.push(Row::End);
     if !board.blocked.is_empty() {
-        rows.push(Row::Header("Blocked"));
+        rows.push(Row::Header("blocked"));
         rows.extend(
             board
                 .blocked
@@ -1214,19 +1214,28 @@ fn draw_rows(
         frame.render_widget(block, rows_area);
         inside
     };
-    // the gutter takes two columns from every row
-    let width = usize::from(rows_area.width.saturating_sub(2));
+    // the gutter takes two columns from every row of the list; on
+    // the board the marker sits inside the box
+    let width = usize::from(rows_area.width).saturating_sub(if boxed { 0 } else { 2 });
     let columns = Columns::at(if boxed {
-        width.saturating_sub(4)
+        width.saturating_sub(6)
     } else {
         width
+    });
+    // the section the cursor is in has the bright title, as a pane
+    // with the cursor does
+    let section = state.selected().and_then(|i| {
+        (0..=i)
+            .rev()
+            .find(|&k| matches!(screen.rows[k], Row::Header(_)))
     });
     let items: Vec<ListItem> = screen
         .rows
         .iter()
         .enumerate()
         .map(|(n, row)| {
-            let mut line = line(row, &screen.widths, width, columns, boxed);
+            let chosen = state.selected() == Some(n) || section == Some(n);
+            let mut line = line(row, &screen.widths, width, columns, boxed, chosen);
             // a boxed row shades only what is inside its edges
             if boxed && state.selected() == Some(n) {
                 let last = line.spans.len().saturating_sub(1);
@@ -1241,7 +1250,7 @@ fn draw_rows(
     // in view when the cursor is on its first or last issue
     let list = List::new(items)
         .highlight_style(if boxed { Style::new() } else { CHOSEN })
-        .highlight_symbol("› ")
+        .highlight_symbol(if boxed { "" } else { "› " })
         .highlight_spacing(HighlightSpacing::Always)
         .scroll_padding(1);
     frame.render_stateful_widget(list, rows_area, state);
@@ -1257,7 +1266,7 @@ fn draw_rows(
         );
     }
     let keys = format!(
-        "{}   Space fold   p {}   s/t/a/c / filter",
+        "{}   space fold   p {}   s/t/a/c / filter",
         screen.view.keys(),
         if preview { "no preview" } else { "preview" }
     );
@@ -1273,7 +1282,7 @@ fn draw_recent(frame: &mut Frame, area: Rect, screen: &Screen) {
         .recent
         .iter()
         .take(usize::from(inside.height))
-        .map(|r| line(r, &screen.widths, width, Columns::at(width), false))
+        .map(|r| line(r, &screen.widths, width, Columns::at(width), false, false))
         .collect();
     if lines.is_empty() {
         lines.push(Line::from(Span::raw("nothing yet").dim()));
@@ -1429,7 +1438,7 @@ fn draw_memories(
             .scroll((u16::try_from(shelf.scroll).unwrap_or(u16::MAX), 0)),
         boxes_area,
     );
-    let keys = "j/k move   g/G ends   ^d/^u scroll   Tab list   / filter   r reload   q quit";
+    let keys = "j/k move   g/G ends   ^d/^u scroll   tab list   / filter   r reload   q quit";
     frame.render_widget(Paragraph::new(keys).dim(), foot);
     Limits {
         scroll: max,
@@ -1547,11 +1556,11 @@ fn draw_detail(
     );
 
     let keys = if page.tie.is_some() {
-        "j/k pick   Enter follow   Tab notes   Esc back   q quit"
+        "j/k pick   enter follow   tab notes   esc back   q quit"
     } else if about.ties.is_empty() {
-        "j/k notes   Space fold   u/[/] thread   ^d/^u scroll   Esc back   q quit"
+        "j/k notes   space fold   u/[/] thread   ^d/^u scroll   esc back   q quit"
     } else {
-        "j/k notes   Space fold   u/[/] thread   ^d/^u scroll   Tab ties   Esc back   q quit"
+        "j/k notes   space fold   u/[/] thread   ^d/^u scroll   tab ties   esc back   q quit"
     };
     frame.render_widget(Paragraph::new(keys).dim(), foot);
     Limits {
@@ -1622,7 +1631,7 @@ fn priority_badge(p: u8) -> Span<'static> {
         2 => palette::QUIET,
         _ => palette::SHADE,
     };
-    badge(&format!("P{p}"), bg)
+    badge(&format!("p{p}"), bg)
 }
 
 fn status_colour(s: Status) -> Color {
@@ -1892,8 +1901,8 @@ fn post_box(p: &Post, style: &render::Style, width: usize, chosen: bool) -> Vec<
         Style::new().add_modifier(Modifier::DIM)
     };
     let edge = |s: String| Span::styled(s, border);
-    let mut top = vec![edge("╭─ ".into())];
-    let mut used = 2 + 1 + 1;
+    let mut top = vec![edge("╭ ".into())];
+    let mut used = 2 + 1;
     if let Some((author, style)) = p.author {
         let who = style.add_modifier(Modifier::BOLD);
         top.push(Span::styled(author.to_string(), who));
@@ -2035,6 +2044,7 @@ fn line<'a>(
     width: usize,
     columns: Columns,
     boxed: bool,
+    chosen: bool,
 ) -> Line<'a> {
     let edge = |s: String| Span::styled(s, Style::new().add_modifier(Modifier::DIM));
     let inside = |spans: Vec<Span<'a>>| -> Line<'a> {
@@ -2042,21 +2052,30 @@ fn line<'a>(
             return Line::from(spans);
         }
         let used: usize = spans.iter().map(|s| s.content.chars().count()).sum();
-        let mut out = vec![edge("│ ".into())];
+        let mut out = vec![
+            edge("│ ".into()),
+            Span::raw(if chosen { "› " } else { "  " }),
+        ];
         out.extend(spans);
         // the padding is its own span, so a shade over the inside
         // of the box reaches its right edge
-        out.push(Span::raw(" ".repeat(width.saturating_sub(4 + used))));
+        out.push(Span::raw(" ".repeat(width.saturating_sub(6 + used))));
         out.push(edge(" │".into()));
         Line::from(out)
     };
     match row {
+        // a section is a pane: its title bright when the cursor is
+        // in it, dim otherwise
         Row::Header(h) if boxed => Line::from(vec![
-            edge("╭─ ".into()),
-            Span::raw(*h).bold(),
+            edge("╭ ".into()),
+            if chosen {
+                Span::raw(*h).bold().fg(palette::FOCUS)
+            } else {
+                Span::raw(*h).dim()
+            },
             edge(format!(
                 " {}╮",
-                "─".repeat(width.saturating_sub(h.chars().count() + 5))
+                "─".repeat(width.saturating_sub(h.chars().count() + 4))
             )),
         ]),
         Row::Header(h) => Line::from(Span::raw(*h).bold()),
@@ -2125,7 +2144,7 @@ fn line<'a>(
                 tail.push(Span::raw(format!("  ▸ {hidden} folded")).dim());
             }
             let room = if boxed {
-                width.saturating_sub(4)
+                width.saturating_sub(6)
             } else {
                 width
             }
@@ -2146,7 +2165,7 @@ fn priority(p: u8) -> Span<'static> {
         4 => Style::new().add_modifier(Modifier::DIM),
         _ => Style::new(),
     };
-    Span::styled(format!("P{p}"), style)
+    Span::styled(format!("p{p}"), style)
 }
 
 fn status(s: Status, width: usize) -> Span<'static> {
@@ -2258,33 +2277,33 @@ mod tests {
             kind: 9,
             rollup: 3,
         };
-        let child = line(&rows[2], &widths, 80, Columns::ALL, false);
+        let child = line(&rows[2], &widths, 80, Columns::ALL, false, false);
         assert_eq!(child.spans[0].content, "  └─ ");
         assert!(child.spans[0].style.add_modifier.contains(Modifier::DIM));
         assert_eq!(child.spans[1].content, "t-000002");
         assert_eq!(child.spans[1].style.fg, Some(Color::Cyan));
-        let held = line(&rows[0], &widths, 80, Columns::ALL, false);
+        let held = line(&rows[0], &widths, 80, Columns::ALL, false, false);
         let last = held.spans.last().unwrap();
         assert_eq!(last.content, "t-000002");
         assert_eq!(last.style.fg, Some(Color::Cyan));
         assert_eq!(
-            line(&rows[1], &widths, 80, Columns::ALL, false)
+            line(&rows[1], &widths, 80, Columns::ALL, false, false)
                 .to_string()
                 .trim_end(),
-            "t-000001       P2  open  milestone  0/1  t"
+            "t-000001       p2  open  milestone  0/1  t"
         );
         // a narrow terminal drops the kind, then the status
         assert_eq!(
-            line(&rows[1], &widths, 70, Columns::at(70), false)
+            line(&rows[1], &widths, 70, Columns::at(70), false, false)
                 .to_string()
                 .trim_end(),
-            "t-000001       P2  open  0/1  t"
+            "t-000001       p2  open  0/1  t"
         );
         assert_eq!(
-            line(&rows[1], &widths, 50, Columns::at(50), false)
+            line(&rows[1], &widths, 50, Columns::at(50), false, false)
                 .to_string()
                 .trim_end(),
-            "t-000001       P2  0/1  t"
+            "t-000001       p2  0/1  t"
         );
         // every list row takes the cursor
         assert_eq!(step(&rows, None, 1), Some(0));
@@ -2303,7 +2322,7 @@ mod tests {
         let db = db(vec![m, busy, free, held]);
         let rows = board_rows(&db, Timestamp::now());
         let headers: Vec<&str> = rows.iter().filter_map(header).collect();
-        assert_eq!(headers, ["Milestones", "Claimed", "Ready", "Blocked"]);
+        assert_eq!(headers, ["milestones", "claimed", "ready", "blocked"]);
         // the milestone waits on nothing listed, so it is ready too
         assert_eq!(
             ids(&rows),
@@ -2340,12 +2359,12 @@ mod tests {
         let widths = widths(&rows);
         let lines: Vec<String> = rows
             .iter()
-            .map(|r| line(r, &widths, 40, Columns::at(36), true).to_string())
+            .map(|r| line(r, &widths, 40, Columns::at(34), true, false).to_string())
             .collect();
         assert!(lines.iter().all(|l| l.chars().count() == 40), "{lines:#?}");
-        assert!(lines[0].starts_with("╭─ Milestones ─"), "{}", lines[0]);
+        assert!(lines[0].starts_with("╭ milestones ─"), "{}", lines[0]);
         assert!(lines[0].ends_with("─╮"), "{}", lines[0]);
-        assert!(lines[1].starts_with("│ t-000001  P2  "), "{}", lines[1]);
+        assert!(lines[1].starts_with("│   t-000001  p2  "), "{}", lines[1]);
         assert!(lines[1].ends_with(" │"), "{}", lines[1]);
         assert!(lines[2].starts_with("╰─"), "{}", lines[2]);
         assert!(lines[2].ends_with("─╯"), "{}", lines[2]);
@@ -2357,7 +2376,7 @@ mod tests {
         busy.status = Status::InProgress;
         let db = db(vec![busy]);
         let rows = board_rows(&db, Timestamp::now());
-        assert!(matches!(rows[3], Row::Header("Ready")));
+        assert!(matches!(rows[3], Row::Header("ready")));
         assert!(matches!(rows[4], Row::Note("nothing is ready")));
         assert!(matches!(rows[5], Row::End));
         assert_eq!(step(&rows, None, 1), Some(1));
@@ -2450,7 +2469,7 @@ mod tests {
             at(&wide, "│ a title that is long enough").is_some(),
             "{wide:#?}"
         );
-        assert!(at(&wide, "│  P2   task   open ").is_some(), "{wide:#?}");
+        assert!(at(&wide, "│  p2   task   open ").is_some(), "{wide:#?}");
         assert!(at(&wide, "│ one paragraph").is_some(), "{wide:#?}");
         // the rows keep their columns at the narrower width, inside
         // the list's pane
@@ -2488,7 +2507,7 @@ mod tests {
         let rows = list_rows(&db, &Filter::default(), "ann", &top);
         assert_eq!(hidden(&rows), [("t-000001".to_string(), 2)]);
         let widths = widths(&rows);
-        let text = line(&rows[0], &widths, 80, Columns::ALL, false).to_string();
+        let text = line(&rows[0], &widths, 80, Columns::ALL, false, false).to_string();
         assert!(text.trim_end().ends_with("t  ▸ 2 folded"), "{text}");
         let middle: HashSet<String> = ["t-000002".to_string()].into();
         let rows = list_rows(&db, &Filter::default(), "ann", &middle);
@@ -2616,7 +2635,7 @@ mod tests {
         let (db, i) = fixture();
         let about = about(&db, &i, 26, Some(1));
         let lines = strings(&about.lines);
-        assert_eq!(lines[0], " P2   task   open ");
+        assert_eq!(lines[0], " p2   task   open ");
         assert_eq!(lines[1], "");
         assert_eq!(lines[2], "created   just now");
         assert_eq!(lines[3], "");
@@ -2646,13 +2665,13 @@ mod tests {
             "{lines:#?}"
         );
         // the body carries the creation stamp and no author
-        assert!(lines[0].starts_with("╭─ just now ─"), "{}", lines[0]);
+        assert!(lines[0].starts_with("╭ just now ─"), "{}", lines[0]);
         assert_eq!(lines[1], format!("│ {:<36} │", "one paragraph"));
         assert_eq!(lines[2], format!("│ {:<36} │", ""));
         assert_eq!(lines[3], format!("│ {:<36} │", "another"));
         assert!(lines[4].ends_with(" main @ none ─╯"), "{}", lines[4]);
         assert_eq!(lines[5], "");
-        assert!(lines[6].starts_with("╭─ ann · just now ─"), "{}", lines[6]);
+        assert!(lines[6].starts_with("╭ ann · just now ─"), "{}", lines[6]);
         assert!(lines[6].ends_with("─╮"), "{}", lines[6]);
         assert_eq!(
             lines[7],
@@ -2736,10 +2755,10 @@ mod tests {
         assert!(wide[2].starts_with("────"), "{}", wide[2]);
         assert!(wide[3].starts_with("╭ t-000002 "), "{}", wide[3]);
         assert_eq!(col_of(&wide[3], "╭ about "), Some(70), "{}", wide[3]);
-        assert!(wide[4].contains("││  P2   task   open "), "{}", wide[4]);
+        assert!(wide[4].contains("││  p2   task   open "), "{}", wide[4]);
         let posts = wide.iter().position(|r| r.starts_with("╭ notes ")).unwrap();
         let body = &wide[posts + 1];
-        assert!(body.starts_with("│ ╭─ just now "), "{body}");
+        assert!(body.starts_with("│ ╭ just now "), "{body}");
         assert!(
             body.ends_with("╮ ││                            │"),
             "{body}"
@@ -3269,21 +3288,18 @@ mod tests {
         assert!(rows[1].ends_with(" 1 open "), "{}", rows[1]);
         assert!(rows[3].starts_with("╭ memories "), "{}", rows[3]);
         assert!(rows[3].contains("╭ about "), "{}", rows[3]);
-        assert!(
-            rows[4].starts_with("│ ╭─ prefix · just now "),
-            "{}",
-            rows[4]
-        );
+        assert!(rows[4].starts_with("│ ╭ prefix · just now "), "{}", rows[4]);
         assert!(rows[4].contains("│ review "), "{}", rows[4]);
         assert!(rows[5].contains("│ ids use the prefix t "), "{}", rows[5]);
         let review = rows
             .iter()
-            .position(|r| r.contains("╭─ review · just now · on dev, may no longer hold "))
+            .position(|r| r.contains("╭ review · just now · on dev, may no longer hold "))
             .unwrap();
         assert_eq!(limits.boxes.len(), 2);
         assert_eq!(limits.boxes[1].lines.start + 4, review);
         // the chosen box is cyan, the other dim, and the flag yellow
-        let x = u16::try_from(rows[review].find("╭─ review").unwrap()).unwrap();
+        let at = rows[review].find("╭ review").unwrap();
+        let x = u16::try_from(rows[review][..at].chars().count()).unwrap();
         assert_eq!(buffer[(2, 4)].fg, Color::Reset);
         assert_eq!(
             buffer[(x, u16::try_from(review).unwrap())].fg,
@@ -3378,13 +3394,13 @@ mod tests {
                 };
                 let (text, buffer) = shown(st);
                 assert!(
-                    text.contains(&format!("› │ {chosen}")),
+                    text.contains(&format!("│ › {chosen}")),
                     "{chosen} off screen:\n{text}"
                 );
                 // the shade stays inside the box: not under the
                 // gutter or the edges, under the row's inside and
                 // its padding
-                let y = text.lines().position(|l| l.starts_with("› │")).unwrap();
+                let y = text.lines().position(|l| l.starts_with("│ › ")).unwrap();
                 let y = u16::try_from(y).unwrap();
                 // the box's own right edge: the second │ on the row
                 let row = text.lines().nth(usize::from(y)).unwrap();
@@ -3392,7 +3408,8 @@ mod tests {
                 let right = right + row.chars().skip(right).position(|c| c == '│').unwrap();
                 let right = u16::try_from(right).unwrap();
                 assert_ne!(buffer[(0, y)].bg, palette::SHADE);
-                assert_ne!(buffer[(2, y)].bg, palette::SHADE);
+                assert_ne!(buffer[(1, y)].bg, palette::SHADE);
+                assert_eq!(buffer[(2, y)].bg, palette::SHADE);
                 assert_eq!(buffer[(4, y)].bg, palette::SHADE);
                 assert_eq!(buffer[(right - 2, y)].bg, palette::SHADE);
                 assert_ne!(buffer[(right, y)].bg, palette::SHADE);
@@ -3404,20 +3421,20 @@ mod tests {
         // at either end the section's border row shows too
         let text = walk(&mut st, KeyCode::Char('j'));
         assert_eq!(st.list.selected(), Some(screen.rows.len() - 2));
-        assert!(text.contains("  ╰─"), "the last box's bottom:\n{text}");
+        assert!(text.contains("\n╰─"), "the last box's bottom:\n{text}");
         let text = walk(&mut st, KeyCode::Char('k'));
         assert_eq!(st.list.selected(), Some(1));
         assert!(
-            text.contains("╭─ Milestones "),
+            text.contains("╭ milestones "),
             "the first box's top:\n{text}"
         );
         let text = walk(&mut st, KeyCode::Char('G'));
         assert_eq!(st.list.selected(), Some(screen.rows.len() - 2));
-        assert!(text.contains("  ╰─"), "the last box's bottom:\n{text}");
+        assert!(text.contains("\n╰─"), "the last box's bottom:\n{text}");
         let text = walk(&mut st, KeyCode::Char('g'));
         assert_eq!(st.list.selected(), Some(1));
         assert!(
-            text.contains("╭─ Milestones "),
+            text.contains("╭ milestones "),
             "the first box's top:\n{text}"
         );
     }

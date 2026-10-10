@@ -42,6 +42,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The screen's board sits flush with the list and recent panes, with the
+  cursor's marker inside each section's box instead of a gutter before
+  it; a section's title is bright when the cursor is in it and dim
+  otherwise, as a pane's is; and every box opens with the pane's corner.
+  Every label and key name on the screen is lowercase, `p2` included.
 - The screen draws from a palette of eight colours, one per concept:
   cyan for what is named (ids, slugs, the prefix, a branch and commit),
   green for open and what opens, yellow for claimed and the claim, blue
