@@ -1,0 +1,30 @@
+{
+  "id": "foam-197d7b",
+  "title": "Answer a note or add one from the page, in a compose box",
+  "body": "",
+  "type": "task",
+  "status": "open",
+  "priority": 2,
+  "labels": [],
+  "parent": "foam-72e952",
+  "blocked_by": [
+    "foam-c8e527"
+  ],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-10-10T01:09:23.178848301Z",
+  "updated_at": "2026-10-10T01:09:23.178848301Z",
+  "closed_at": null,
+  "close_reason": null,
+  "resolution": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "bb39c08",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
