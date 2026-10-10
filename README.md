@@ -122,10 +122,14 @@ board, open an issue now and then, and step in with `foam create`,
 
 #### the screen
 
-Run `foam` with no command in a terminal and you get a screen. It opens on
-the listing, with a preview of the chosen issue beside it. Tab switches to
-the board, then to the memories, and Enter opens the chosen issue's page,
-with its notes shown as boxes, or the chosen memory's. The body and the notes render a little markdown: `backticked`
+Run `foam` with no command in a terminal and you get a screen. The header
+names the three views, list, board and memories, with the one you are on
+bright, and on a page the trail of ids you opened to get there; under it
+are the counts, and the filter or the page's kind at the right. The screen
+opens on the listing, with a preview of the chosen issue beside it. Tab
+switches to the board, then to the memories, and Enter opens the chosen
+issue's page, with its notes shown as boxes, or the chosen memory's, laid
+out the same way. The body and the notes render a little markdown: `backticked`
 code, bulleted and numbered lists, fenced code blocks, and tables.
 
 On the listing, `j` and `k` move, `g` and `G` jump to the ends, Space folds
@@ -137,7 +141,7 @@ slug and the text, and a memory `foam prime` would mark as old or from
 another branch has its age in yellow.
 
 On a page, `j` and `k` move between the body and the notes, and the one
-under the cursor has the bright border. `u` goes to the note it answers,
+under the cursor has the cyan border. `u` goes to the note it answers,
 `[` and `]` to the ones before and after it in the same thread, and Space
 folds the replies under it away and shows them again. Ctrl-d and Ctrl-u
 scroll without moving the cursor. Tab moves onto the parent, children,

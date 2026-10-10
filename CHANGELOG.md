@@ -13,8 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   BackTab goes the other way round. Each row is the slug, the first line
   of the text, and how far behind HEAD it was remembered, in yellow when
   `foam prime` would mark it. The preview shows the whole text, `/`
-  matches the slug and the text, and Enter opens a page with the text at
-  full width.
+  matches the slug and the text, and Enter opens a page laid out as an
+  issue's: a card, an about pane, and the text in a box.
 - The screen renders a little markdown in the body and the notes:
   `backticked` code on a grey background, bulleted and numbered lists
   with a hanging indent, fenced code blocks as a panel with the language
@@ -25,13 +25,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sh, json, toml, yaml or diff has its comments dim, strings green,
   numbers magenta and keywords blue; any other tag stays plain.
 - The screen's page has a cursor over the body and the notes. `j` and
-  `k` move it and the chosen box has the bright border; `u` goes to the
+  `k` move it and the chosen box has the cyan border; `u` goes to the
   note it answers, `[` and `]` to its neighbours in the thread, Space
   folds the replies under it, and Ctrl-d and Ctrl-u scroll without
   moving it.
 
 ### Changed
 
+- The screen's header is three rows: the prefix and the three views with
+  the one in use bright, or on a page that view and the trail of ids
+  opened from it, with HEAD at the right; the counts, with the filter or
+  the page's kind at the right; and a rule.
 - The notes pane on the screen's page is titled `notes`, not `posts`, and
   the footer's Tab hint says the same.
 

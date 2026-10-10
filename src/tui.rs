@@ -351,8 +351,8 @@ enum Row<'a> {
     Note(&'static str),
     Memory {
         memory: &'a Memory,
-        /// How far behind HEAD it was remembered, in a few words.
-        age: String,
+        /// How far behind HEAD it was remembered.
+        distance: Distance,
         /// Whether it may no longer hold: old, or from another
         /// branch, by the rule prime uses.
         marked: bool,
@@ -380,9 +380,17 @@ struct Widths {
 
 struct Screen<'a> {
     view: View,
-    strip: Line<'static>,
+    header: Header,
     rows: Vec<Row<'a>>,
     widths: Widths,
+}
+
+/// What every screen says at the top: the prefix, where HEAD is,
+/// and the counts as badges in the status colours.
+struct Header {
+    prefix: String,
+    stamp: String,
+    counts: Vec<Span<'static>>,
 }
 
 /// Everything a key can change.
@@ -455,10 +463,10 @@ fn screen(terminal: &mut DefaultTerminal, store: &Store, actor: &str) -> Result<
             let mut limits = Limits::default();
             match &mut st.mode {
                 Mode::Rows => {
-                    let right = match (st.typing, st.filter.describe(st.view)) {
-                        (true, _) => format!("/{}▏", st.filter.text),
-                        (false, on) if on.is_empty() => st.view.name().to_string(),
-                        (false, on) => format!("{on}   {}", st.view.name()),
+                    let right = if st.typing {
+                        format!("/{}▏", st.filter.text)
+                    } else {
+                        st.filter.describe(st.view)
                     };
                     let (list, preview) = (&mut st.list, st.preview);
                     terminal
@@ -467,25 +475,31 @@ fn screen(terminal: &mut DefaultTerminal, store: &Store, actor: &str) -> Result<
                 Mode::Detail(page) => {
                     let issue = &snap.db.issues[page.id()];
                     terminal.draw(|frame| {
-                        limits = draw_detail(frame, &screen.strip, &snap.db, issue, page);
+                        limits = draw_detail(frame, &screen.header, st.view, &snap.db, issue, page);
                     })?;
                 }
                 Mode::Recall(recall) => {
+                    let memory = &snap.db.memories[&recall.slug];
                     let row = screen.rows.iter().find_map(|r| match r {
                         Row::Memory {
-                            memory,
-                            age,
-                            marked,
-                        } if memory.slug == recall.slug => Some((*memory, age.as_str(), *marked)),
+                            memory, distance, ..
+                        } if memory.slug == recall.slug => Some(*distance),
                         _ => None,
                     });
-                    let (memory, age, marked) = match row {
-                        Some(found) => found,
-                        // the rows are another view's: no age to show
-                        None => (&snap.db.memories[&recall.slug], "", false),
-                    };
+                    // the rows may be another view's
+                    let distance = row.unwrap_or_else(|| store.git.distance(&memory.stamp.commit));
+                    let marked =
+                        !matches!(distance, Distance::Behind(n) if n < snap.db.meta.stale_after);
                     terminal.draw(|frame| {
-                        limits = draw_recall(frame, &screen.strip, memory, age, marked, recall);
+                        limits = draw_recall(
+                            frame,
+                            &screen.header,
+                            st.view,
+                            memory,
+                            distance,
+                            marked,
+                            recall,
+                        );
                     })?;
                 }
             }
@@ -743,7 +757,7 @@ fn build<'a>(
 ) -> Result<Screen<'a>> {
     let now = Timestamp::now();
     let stamp = store.git.head_stamp()?;
-    let strip = strip(db, &stamp);
+    let header = header(db, &stamp);
     let mut rows = match view {
         View::List => list_rows(db, filter, actor, folded),
         View::Board => board_rows(db, now),
@@ -771,7 +785,7 @@ fn build<'a>(
     let widths = widths(&rows);
     Ok(Screen {
         view,
-        strip,
+        header,
         rows,
         widths,
     })
@@ -819,7 +833,7 @@ fn memory_rows<'a>(
             let d = distance(&m.stamp.commit);
             Row::Memory {
                 memory: m,
-                age: short_age(&m.stamp, d),
+                distance: d,
                 marked: !matches!(d, Distance::Behind(n) if n < db.meta.stale_after),
             }
         })
@@ -845,14 +859,9 @@ fn short_age(stamp: &Stamp, distance: Distance) -> String {
     }
 }
 
-/// The bar above the rows: the prefix, where HEAD is, and the
-/// counts as badges in the status colours.
-fn strip(db: &Db, stamp: &Stamp) -> Line<'static> {
+fn header(db: &Db, stamp: &Stamp) -> Header {
     let count = |s: Status| db.issues.values().filter(|i| i.status == s).count();
-    let mut spans = vec![
-        Span::raw(db.meta.prefix.clone()).bold().cyan(),
-        Span::raw(format!("  {} @ {}  ", stamp.branch, stamp.commit)).dim(),
-    ];
+    let mut counts = Vec::new();
     for (n, s) in [
         Status::Open,
         Status::InProgress,
@@ -863,22 +872,69 @@ fn strip(db: &Db, stamp: &Stamp) -> Line<'static> {
     .enumerate()
     {
         if n > 0 {
-            spans.push(Span::raw(" "));
+            counts.push(Span::raw(" "));
         }
-        spans.push(badge(&format!("{} {}", count(s), s), status_colour(s)));
+        counts.push(badge(&format!("{} {}", count(s), s), status_colour(s)));
     }
-    Line::from(spans)
+    Header {
+        prefix: db.meta.prefix.clone(),
+        stamp: format!("{} @ {}", stamp.branch, stamp.commit),
+        counts,
+    }
 }
 
-/// Draw the strip with `right` against the right edge.
-fn draw_strip(frame: &mut Frame, area: Rect, strip: &Line, right: &str) {
-    let [left, end] = Layout::horizontal([
-        Constraint::Min(0),
-        Constraint::Length(u16::try_from(right.chars().count()).unwrap_or(u16::MAX)),
-    ])
-    .areas(area);
-    frame.render_widget(Paragraph::new(strip.clone()), left);
-    frame.render_widget(Paragraph::new(right).dim(), end);
+/// The header's rows: the prefix and the views, with the one in
+/// use bright and the trail of pages opened from it after it, and
+/// HEAD at the right edge; the counts, with `right` at the edge;
+/// a rule.
+fn header_lines(
+    h: &Header,
+    view: View,
+    trail: &[&str],
+    right: &str,
+    width: usize,
+) -> [Line<'static>; 3] {
+    let mut top = vec![Span::raw(h.prefix.clone()).bold().cyan()];
+    // on a page only the view it was opened from shows, with the
+    // trail hanging off it
+    let views: Vec<View> = if trail.is_empty() {
+        vec![View::List, View::Board, View::Memories]
+    } else {
+        vec![view]
+    };
+    for v in views {
+        top.push(Span::raw("  "));
+        top.push(if v == view {
+            Span::raw(v.name()).bold().cyan()
+        } else {
+            Span::raw(v.name()).dim()
+        });
+    }
+    for (n, id) in trail.iter().enumerate() {
+        top.push(Span::raw(" › ").dim());
+        top.push(if n + 1 == trail.len() {
+            Span::raw(id.to_string()).bold().cyan()
+        } else {
+            Span::raw(id.to_string()).cyan()
+        });
+    }
+    let against = |mut spans: Vec<Span<'static>>, right: &str| {
+        let used: usize = spans.iter().map(|s| s.content.chars().count()).sum();
+        let gap = width.saturating_sub(used + right.chars().count());
+        spans.push(Span::raw(" ".repeat(gap)));
+        spans.push(Span::raw(right.to_string()).dim());
+        Line::from(spans)
+    };
+    [
+        against(top, &h.stamp),
+        against(h.counts.clone(), right),
+        Line::from(Span::raw("─".repeat(width)).dim()),
+    ]
+}
+
+fn draw_header(frame: &mut Frame, area: Rect, h: &Header, view: View, trail: &[&str], right: &str) {
+    let lines = header_lines(h, view, trail, right, usize::from(area.width));
+    frame.render_widget(Paragraph::new(lines.to_vec()), area);
 }
 
 /// What `foam list` prints: open and in-progress issues by
@@ -1055,7 +1111,7 @@ fn cut_spans(spans: Vec<Span<'static>>, room: usize) -> Vec<Span<'static>> {
 
 fn frame_areas(frame: &Frame) -> [Rect; 3] {
     Layout::vertical([
-        Constraint::Length(1),
+        Constraint::Length(3),
         Constraint::Min(0),
         Constraint::Length(1),
     ])
@@ -1075,7 +1131,7 @@ fn draw_rows(
     right: &str,
 ) {
     let [top, body, foot] = frame_areas(frame);
-    draw_strip(frame, top, &screen.strip, right);
+    draw_header(frame, top, &screen.header, screen.view, &[], right);
     let chosen = match state.selected().map(|i| &screen.rows[i]) {
         Some(row @ (Row::Issue { .. } | Row::Memory { .. })) if preview => Some(row),
         _ => None,
@@ -1125,12 +1181,12 @@ fn draw_rows(
         (
             Some(Row::Memory {
                 memory,
-                age,
+                distance,
                 marked,
             }),
             Some(area),
         ) => {
-            let lines = memory_lines(memory, age, *marked, inner(area.width));
+            let lines = memory_lines(memory, *distance, *marked, inner(area.width));
             frame.render_widget(
                 Paragraph::new(lines)
                     .block(pane(Span::raw(format!(" {} ", memory.slug)).cyan(), false)),
@@ -1168,49 +1224,112 @@ fn preview_lines(db: &Db, issue: &Issue, width: usize) -> Vec<Line<'static>> {
     lines
 }
 
-/// What the preview and the page show of a memory: the text, then
-/// when it was remembered and how far behind HEAD that is.
-fn memory_lines(m: &Memory, age: &str, marked: bool, width: usize) -> Vec<Line<'static>> {
+/// What the about pane says of a memory: when it was remembered
+/// and changed, where, and whether that still holds.
+fn memory_about(m: &Memory, distance: Distance, marked: bool) -> Vec<Line<'static>> {
     let style = human();
-    let mut lines = md::render(&m.text, width.max(10));
-    lines.push(Line::default());
-    let mut when = format!("remembered {}", style.when(m.created_at));
+    let label = |l: &str| Span::raw(pad(l, 12)).dim();
+    let mut lines = vec![Line::from(vec![
+        label("remembered"),
+        Span::raw(style.when(m.created_at)),
+    ])];
     if m.updated_at != m.created_at {
-        when.push_str(&format!(", last {}", style.when(m.updated_at)));
+        lines.push(Line::from(vec![
+            label("changed"),
+            Span::raw(style.when(m.updated_at)),
+        ]));
     }
-    lines.push(Line::from(Span::raw(when).dim()));
-    let mut at = format!("at {}", m.stamp.commit);
-    if !age.is_empty() {
-        at.push_str(&format!(", {age}"));
-    }
+    lines.push(Line::from(vec![
+        label("on"),
+        Span::raw(format!("{} @ {}", m.stamp.branch, m.stamp.commit)).cyan(),
+    ]));
+    lines.push(Line::default());
+    let age = short_age(&m.stamp, distance);
     lines.push(Line::from(if marked {
-        Span::raw(at).yellow()
+        Span::raw(format!("{age}: may no longer hold")).yellow()
     } else {
-        Span::raw(at).dim()
+        Span::raw(age).dim()
     }));
     lines
 }
 
-/// Draw a memory's page: its text at full width.
+/// What the preview shows of a memory: the slug, the about block,
+/// and the text.
+fn memory_lines(m: &Memory, distance: Distance, marked: bool, width: usize) -> Vec<Line<'static>> {
+    let mut lines = vec![Line::from(Span::raw(m.slug.clone()).bold())];
+    lines.push(Line::default());
+    lines.extend(memory_about(m, distance, marked));
+    lines.push(Line::default());
+    lines.extend(md::render(&m.text, width.max(10)));
+    lines
+}
+
+/// Draw a memory's page as an issue's: the card, the about pane
+/// and the text in a box.
 fn draw_recall(
     frame: &mut Frame,
-    strip: &Line,
+    header: &Header,
+    view: View,
     memory: &Memory,
-    age: &str,
+    distance: Distance,
     marked: bool,
     recall: &mut Recall,
 ) -> Limits {
     let [top, body, foot] = frame_areas(frame);
-    draw_strip(frame, top, strip, "memory");
-    let lines = memory_lines(memory, age, marked, inner(body.width));
-    let rows = rows_in(body.height);
+    draw_header(frame, top, header, view, &[&memory.slug], "memory");
+    let wide = body.width >= WIDE;
+    let about = memory_about(memory, distance, marked);
+    let heading = Line::from(Span::raw(memory.slug.clone()).bold());
+    let (card, about_area, text_area) = if wide {
+        let [left, right] =
+            Layout::horizontal([Constraint::Min(0), Constraint::Length(ABOUT_WIDTH)]).areas(body);
+        let [card, text] =
+            Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).areas(left);
+        (card, right, text)
+    } else {
+        let about_h = u16::try_from(about.len())
+            .unwrap_or(u16::MAX)
+            .saturating_add(2)
+            .min(body.height / 2);
+        let [card, about_area, text] = Layout::vertical([
+            Constraint::Length(3),
+            Constraint::Length(about_h),
+            Constraint::Min(0),
+        ])
+        .areas(body);
+        (card, about_area, text)
+    };
+    frame.render_widget(
+        Paragraph::new(heading).block(pane(Span::raw(" memory ").cyan(), false)),
+        card,
+    );
+    frame.render_widget(
+        Paragraph::new(about).block(pane(Span::raw(" about "), false)),
+        about_area,
+    );
+    let lines = post_box(
+        &Post {
+            id: None,
+            author: None,
+            edited: (memory.updated_at != memory.created_at).then_some(memory.updated_at),
+            at: memory.created_at,
+            text: &memory.text,
+            branch: &memory.stamp.branch,
+            commit: &memory.stamp.commit,
+            hidden: 0,
+        },
+        &human(),
+        inner(text_area.width).max(20),
+        true,
+    );
+    let rows = rows_in(text_area.height);
     let max = lines.len().saturating_sub(rows);
     recall.scroll = recall.scroll.min(max);
     frame.render_widget(
         Paragraph::new(lines)
-            .block(pane(Span::raw(format!(" {} ", memory.slug)).cyan(), true))
+            .block(pane(Span::raw(" text "), true))
             .scroll((u16::try_from(recall.scroll).unwrap_or(u16::MAX), 0)),
-        body,
+        text_area,
     );
     let keys = "j/k scroll   g/G ends   ^d/^u page   Esc back   r reload   q quit";
     frame.render_widget(Paragraph::new(keys).dim(), foot);
@@ -1235,9 +1354,17 @@ const WIDE: u16 = 90;
 
 /// Draw an issue's page: the header card, the about pane and the
 /// posts, side by side or stacked.
-fn draw_detail(frame: &mut Frame, strip: &Line, db: &Db, issue: &Issue, page: &mut Page) -> Limits {
+fn draw_detail(
+    frame: &mut Frame,
+    header: &Header,
+    view: View,
+    db: &Db,
+    issue: &Issue,
+    page: &mut Page,
+) -> Limits {
     let [top, body, foot] = frame_areas(frame);
-    draw_strip(frame, top, strip, "issue");
+    let trail: Vec<&str> = page.ids.iter().map(String::as_str).collect();
+    draw_header(frame, top, header, view, &trail, "issue");
     let wide = body.width >= WIDE;
     let left_w = if wide {
         body.width - ABOUT_WIDTH
@@ -1643,11 +1770,11 @@ struct Post<'a> {
 
 /// A post as a rounded box `width` columns wide: who and when in
 /// the top border, the text inside, where it was written in the
-/// bottom border. The box under the cursor is `plain`, the rest
-/// dim.
-fn post_box(p: &Post, style: &render::Style, width: usize, plain: bool) -> Vec<Line<'static>> {
-    let border = if plain {
-        Style::new()
+/// bottom border. The box under the cursor is `chosen`, in the
+/// accent colour; the rest are dim.
+fn post_box(p: &Post, style: &render::Style, width: usize, chosen: bool) -> Vec<Line<'static>> {
+    let border = if chosen {
+        Style::new().fg(Color::Cyan)
     } else {
         Style::new().add_modifier(Modifier::DIM)
     };
@@ -1777,7 +1904,7 @@ fn line<'a>(
         Row::Note(n) => inside(vec![Span::raw(*n).dim()]),
         Row::Memory {
             memory,
-            age,
+            distance,
             marked,
         } => {
             let mut spans = vec![
@@ -1785,12 +1912,13 @@ fn line<'a>(
                 Span::raw("  "),
             ];
             let used = widths.slug + 2;
+            let age = short_age(&memory.stamp, *distance);
             let tail = vec![
                 Span::raw("  "),
                 if *marked {
-                    Span::raw(age.clone()).yellow()
+                    Span::raw(age).yellow()
                 } else {
-                    Span::raw(age.clone()).dim()
+                    Span::raw(age).dim()
                 },
             ];
             let first = memory.text.lines().next().unwrap_or("");
@@ -2132,6 +2260,14 @@ mod tests {
         lines.iter().map(Line::to_string).collect()
     }
 
+    fn test_header() -> Header {
+        Header {
+            prefix: "t".into(),
+            stamp: "dev @ abc1234".into(),
+            counts: vec![badge("1 open", Color::Green)],
+        }
+    }
+
     #[test]
     fn the_preview_stands_beside_the_rows_or_under_them() {
         use ratatui::Terminal;
@@ -2140,7 +2276,7 @@ mod tests {
         let rows = list_rows(&db, &Filter::default(), "ann", &HashSet::new());
         let screen = Screen {
             view: View::List,
-            strip: Line::from("t"),
+            header: test_header(),
             widths: widths(&rows),
             rows,
         };
@@ -2165,10 +2301,10 @@ mod tests {
         // beside: the pane starts where the rows end, and shows the
         // title, the badges and the body
         let wide = render(120, 30, true);
-        let col = wide[1]
+        let col = wide[3]
             .find("╭ t-000002 ")
-            .map(|b| wide[1][..b].chars().count());
-        assert_eq!(col, Some(76), "{}", wide[1]);
+            .map(|b| wide[3][..b].chars().count());
+        assert_eq!(col, Some(76), "{}", wide[3]);
         assert!(
             at(&wide, "│ a title that is long enough").is_some(),
             "{wide:#?}"
@@ -2176,10 +2312,10 @@ mod tests {
         assert!(at(&wide, "│  P2   task   open ").is_some(), "{wide:#?}");
         assert!(at(&wide, "│ one paragraph").is_some(), "{wide:#?}");
         // the rows keep their columns at the narrower width
-        assert!(wide[1].starts_with("  t-000001"), "{}", wide[1]);
+        assert!(wide[3].starts_with("  t-000001"), "{}", wide[3]);
         // under: the pane takes the lower half
         let narrow = render(70, 30, true);
-        assert!(narrow[15].starts_with("╭ t-000002 "), "{}", narrow[15]);
+        assert!(narrow[16].starts_with("╭ t-000002 "), "{}", narrow[16]);
         // off: no pane at all
         let off = render(120, 30, false);
         assert!(at(&off, "╭ t-000002 ").is_none(), "{off:#?}");
@@ -2269,14 +2405,37 @@ mod tests {
             commit: "abc1234".into(),
             branch: "dev".into(),
         };
-        let line = strip(&db, &stamp);
+        let h = super::header(&db, &stamp);
+        let lines = header_lines(&h, View::Board, &[], "mine", 60);
+        let text = strings(&lines);
         assert_eq!(
-            line.to_string(),
-            "t  dev @ abc1234   1 open   1 in_progress   0 deferred   0 closed "
+            text[0],
+            "t  list  board  memories                       dev @ abc1234"
         );
-        assert_eq!(line.spans[0].style.fg, Some(Color::Cyan));
-        assert_eq!(line.spans[2].style.bg, Some(Color::Green));
-        assert_eq!(line.spans[4].style.bg, Some(Color::Yellow));
+        assert_eq!(
+            text[1],
+            " 1 open   1 in_progress   0 deferred   0 closed         mine"
+        );
+        assert_eq!(text[2], "─".repeat(60));
+        assert_eq!(lines[0].spans[0].style.fg, Some(Color::Cyan));
+        let board = lines[0]
+            .spans
+            .iter()
+            .find(|s| s.content == "board")
+            .unwrap();
+        assert!(board.style.add_modifier.contains(Modifier::BOLD));
+        let list = lines[0].spans.iter().find(|s| s.content == "list").unwrap();
+        assert!(list.style.add_modifier.contains(Modifier::DIM));
+        assert_eq!(lines[1].spans[0].style.bg, Some(Color::Green));
+        assert_eq!(lines[1].spans[2].style.bg, Some(Color::Yellow));
+        // on a page only the view it came from shows, then the trail
+        let lines = header_lines(&h, View::List, &["t-000001", "t-000002"], "issue", 60);
+        let text = strings(&lines);
+        assert_eq!(
+            text[0],
+            "t  list › t-000001 › t-000002                  dev @ abc1234"
+        );
+        assert!(text[1].ends_with("issue"));
     }
 
     #[test]
@@ -2367,14 +2526,14 @@ mod tests {
         use ratatui::Terminal;
         use ratatui::backend::TestBackend;
         let (db, i) = fixture();
-        let title = Line::from("t");
+        let title = test_header();
         let render = |width: u16, height: u16, tie: Option<usize>| {
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
             let mut page = Page::open(i.id.clone());
             page.tie = tie;
             terminal
                 .draw(|f| {
-                    draw_detail(f, &title, &db, &i, &mut page);
+                    draw_detail(f, &title, View::List, &db, &i, &mut page);
                 })
                 .unwrap();
             terminal.backend().buffer().clone()
@@ -2393,18 +2552,22 @@ mod tests {
         // id in the about pane is cyan
         let dim = |cell: &ratatui::buffer::Cell| cell.modifier.contains(Modifier::DIM);
         let buffer = render(100, 30, None);
-        assert!(!dim(&buffer[(0, 4)]) && dim(&buffer[(70, 1)]));
-        assert_eq!(buffer[(74, 7)].fg, Color::Cyan);
+        assert!(!dim(&buffer[(0, 6)]) && dim(&buffer[(70, 3)]));
+        assert_eq!(buffer[(74, 9)].fg, Color::Cyan);
         let buffer = render(100, 30, Some(0));
-        assert!(dim(&buffer[(0, 4)]) && !dim(&buffer[(70, 1)]));
+        assert!(dim(&buffer[(0, 6)]) && !dim(&buffer[(70, 3)]));
         let col_of = |row: &str, needle: &str| row.find(needle).map(|b| row[..b].chars().count());
 
         // wide: the card and the posts on the left, the about pane
-        // at the right edge, all starting under the title line
+        // at the right edge, all starting under the header
         let wide = rows(100, 30);
-        assert!(wide[1].starts_with("╭ t-000002 "), "{}", wide[1]);
-        assert_eq!(col_of(&wide[1], "╭ about "), Some(70), "{}", wide[1]);
-        assert!(wide[2].contains("││  P2   task   open "), "{}", wide[2]);
+        assert!(wide[0].starts_with("t  list › t-000002"), "{}", wide[0]);
+        assert!(wide[0].ends_with("dev @ abc1234"), "{}", wide[0]);
+        assert!(wide[1].ends_with("issue"), "{}", wide[1]);
+        assert!(wide[2].starts_with("────"), "{}", wide[2]);
+        assert!(wide[3].starts_with("╭ t-000002 "), "{}", wide[3]);
+        assert_eq!(col_of(&wide[3], "╭ about "), Some(70), "{}", wide[3]);
+        assert!(wide[4].contains("││  P2   task   open "), "{}", wide[4]);
         let posts = wide.iter().position(|r| r.starts_with("╭ notes ")).unwrap();
         let body = &wide[posts + 1];
         assert!(body.starts_with("│ ╭─ just now "), "{body}");
@@ -2734,7 +2897,7 @@ mod tests {
         let (lines, boxes) = posts(&i, 40, &page, true);
         let plain = |l: &Line| {
             let corner = l.spans.iter().find(|s| s.content.contains('╭')).unwrap();
-            corner.style.add_modifier.is_empty()
+            corner.style.fg == Some(Color::Cyan)
         };
         assert!(plain(&lines[boxes[0].lines.start]));
         assert!(!plain(&lines[boxes[1].lines.start]));
@@ -2747,12 +2910,12 @@ mod tests {
         assert!(!plain(&lines[boxes[1].lines.start]));
 
         let (db, _) = fixture();
-        let title = Line::from("t");
+        let title = test_header();
         let mut terminal = Terminal::new(TestBackend::new(60, 24)).unwrap();
         let mut draw = |page: &mut Page| {
             let mut limits = Limits::default();
             terminal
-                .draw(|f| limits = draw_detail(f, &title, &db, &i, page))
+                .draw(|f| limits = draw_detail(f, &title, View::List, &db, &i, page))
                 .unwrap();
             limits
         };
@@ -2808,22 +2971,22 @@ mod tests {
     fn memory_rows_match_the_text_and_mark_the_old_ones() {
         let db = with_memories();
         let rows = memory_rows(&db, &Filter::default(), distance);
-        let ages: Vec<(&str, &str, bool)> = rows
+        let ages: Vec<(&str, Distance, bool)> = rows
             .iter()
             .map(|r| match r {
                 Row::Memory {
                     memory,
-                    age,
+                    distance,
                     marked,
-                } => (memory.slug.as_str(), age.as_str(), *marked),
+                } => (memory.slug.as_str(), *distance, *marked),
                 _ => panic!("a memory row"),
             })
             .collect();
         assert_eq!(
             ages,
             [
-                ("prefix", "1 commit ago", false),
-                ("review", "on dev", true)
+                ("prefix", Distance::Behind(1), false),
+                ("review", Distance::Elsewhere, true)
             ]
         );
         let filter = Filter {
@@ -2902,20 +3065,28 @@ mod tests {
     }
 
     #[test]
-    fn a_memory_page_shows_the_text_and_where_it_was_remembered() {
+    fn a_memory_page_is_laid_out_as_an_issue_page() {
         use ratatui::Terminal;
         use ratatui::backend::TestBackend;
         let db = with_memories();
         let m = &db.memories["review"];
-        let title = Line::from("t");
-        let mut terminal = Terminal::new(TestBackend::new(50, 10)).unwrap();
+        let header = test_header();
+        let mut terminal = Terminal::new(TestBackend::new(100, 14)).unwrap();
         let mut recall = Recall {
             slug: "review".into(),
             scroll: 0,
         };
         terminal
             .draw(|f| {
-                draw_recall(f, &title, m, "on dev", true, &mut recall);
+                draw_recall(
+                    f,
+                    &header,
+                    View::Memories,
+                    m,
+                    Distance::Elsewhere,
+                    true,
+                    &mut recall,
+                );
             })
             .unwrap();
         let buffer = terminal.backend().buffer().clone();
@@ -2926,19 +3097,30 @@ mod tests {
                     .collect()
             })
             .collect();
-        assert!(rows[0].ends_with("memory"), "{}", rows[0]);
-        assert!(rows[1].starts_with("╭ review "), "{}", rows[1]);
+        assert!(rows[0].starts_with("t  memories › review"), "{}", rows[0]);
+        assert!(rows[1].ends_with("memory"), "{}", rows[1]);
+        assert!(rows[3].starts_with("╭ memory "), "{}", rows[3]);
+        assert!(rows[3].contains("╭ about "), "{}", rows[3]);
+        assert!(rows[4].starts_with("│ review "), "{}", rows[4]);
+        assert!(rows[6].starts_with("╭ text "), "{}", rows[6]);
+        assert!(rows[7].contains("╭─ just now "), "{}", rows[7]);
         assert!(
-            rows[2].contains("the review found nine issues"),
+            rows[8].contains("│ the review found nine issues"),
             "{}",
-            rows[2]
+            rows[8]
         );
-        let at = rows
+        let on = rows
             .iter()
-            .find(|r| r.contains("at bbbbbbb, on dev"))
+            .position(|r| r.contains("on          dev @ bbbbbbb"))
             .unwrap();
-        let x = u16::try_from(at.find("at bbbbbbb").unwrap()).unwrap();
-        let y = u16::try_from(rows.iter().position(|r| r == at).unwrap()).unwrap();
+        let warn = rows
+            .iter()
+            .find(|r| r.contains("on dev: may no longer hold"))
+            .unwrap();
+        let at = warn.find("on dev:").unwrap();
+        let x = u16::try_from(warn[..at].chars().count()).unwrap();
+        let y = u16::try_from(rows.iter().position(|r| r == warn).unwrap()).unwrap();
+        assert!(y > u16::try_from(on).unwrap());
         assert_eq!(buffer[(x, y)].fg, Color::Yellow);
     }
 }
