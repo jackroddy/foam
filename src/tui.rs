@@ -173,18 +173,26 @@ impl View {
     }
 }
 
-/// Where the person is: on the rows, on an issue's page, or on a
-/// memory's.
+/// Where the person is: on the rows, or on an issue's page.
 enum Mode {
     Rows,
     Detail(Page),
-    Recall(Recall),
 }
 
-/// A memory on screen, and how far its text has scrolled.
-struct Recall {
-    slug: String,
+/// The cursor over the memories, each a box.
+#[derive(Default)]
+struct Shelf {
+    cursor: usize,
     scroll: usize,
+    /// Whether the next draw scrolls the chosen box into view.
+    reveal: bool,
+}
+
+impl Shelf {
+    fn go(&mut self, to: usize) {
+        self.cursor = to;
+        self.reveal = true;
+    }
 }
 
 /// An issue on screen, the issues followed to reach it under it,
@@ -375,7 +383,6 @@ struct Widths {
     status: usize,
     kind: usize,
     rollup: usize,
-    slug: usize,
 }
 
 struct Screen<'a> {
@@ -390,7 +397,7 @@ struct Screen<'a> {
 struct Header {
     prefix: String,
     stamp: String,
-    counts: Vec<Span<'static>>,
+    stats: Vec<Span<'static>>,
 }
 
 /// Everything a key can change.
@@ -403,6 +410,7 @@ struct State {
     /// Whether keys go into the filter's text.
     typing: bool,
     folded: HashSet<String>,
+    shelf: Shelf,
 }
 
 impl State {
@@ -415,6 +423,7 @@ impl State {
             filter: Filter::default(),
             typing: false,
             folded: HashSet::new(),
+            shelf: Shelf::default(),
         }
     }
 }
@@ -449,57 +458,37 @@ fn screen(terminal: &mut DefaultTerminal, store: &Store, actor: &str) -> Result<
         let mut screen = build(store, &snap.db, st.view, &st.filter, actor, &st.folded)?;
         keep(&mut st.list, &screen.rows);
         // a page whose issues a reload took away falls back
-        match &mut st.mode {
-            Mode::Detail(page) => {
-                page.prune(&snap.db);
-                if page.ids.is_empty() {
-                    st.mode = Mode::Rows;
-                }
+        if let Mode::Detail(page) = &mut st.mode {
+            page.prune(&snap.db);
+            if page.ids.is_empty() {
+                st.mode = Mode::Rows;
             }
-            Mode::Recall(r) if !snap.db.memories.contains_key(&r.slug) => st.mode = Mode::Rows,
-            _ => {}
         }
         loop {
             let mut limits = Limits::default();
             match &mut st.mode {
                 Mode::Rows => {
-                    let right = if st.typing {
-                        format!("/{}▏", st.filter.text)
+                    let context = if st.typing {
+                        vec![Span::raw(format!("/{}▏", st.filter.text))]
                     } else {
-                        st.filter.describe(st.view)
+                        vec![Span::raw(st.filter.describe(st.view)).dim()]
                     };
-                    let (list, preview) = (&mut st.list, st.preview);
-                    terminal
-                        .draw(|frame| draw_rows(frame, &screen, list, &snap.db, preview, &right))?;
+                    if st.view == View::Memories {
+                        let shelf = &mut st.shelf;
+                        terminal.draw(|frame| {
+                            limits = draw_memories(frame, &screen, shelf, &context);
+                        })?;
+                    } else {
+                        let (list, preview) = (&mut st.list, st.preview);
+                        terminal.draw(|frame| {
+                            draw_rows(frame, &screen, list, &snap.db, preview, &context)
+                        })?;
+                    }
                 }
                 Mode::Detail(page) => {
                     let issue = &snap.db.issues[page.id()];
                     terminal.draw(|frame| {
                         limits = draw_detail(frame, &screen.header, st.view, &snap.db, issue, page);
-                    })?;
-                }
-                Mode::Recall(recall) => {
-                    let memory = &snap.db.memories[&recall.slug];
-                    let row = screen.rows.iter().find_map(|r| match r {
-                        Row::Memory {
-                            memory, distance, ..
-                        } if memory.slug == recall.slug => Some(*distance),
-                        _ => None,
-                    });
-                    // the rows may be another view's
-                    let distance = row.unwrap_or_else(|| store.git.distance(&memory.stamp.commit));
-                    let marked =
-                        !matches!(distance, Distance::Behind(n) if n < snap.db.meta.stale_after);
-                    terminal.draw(|frame| {
-                        limits = draw_recall(
-                            frame,
-                            &screen.header,
-                            st.view,
-                            memory,
-                            distance,
-                            marked,
-                            recall,
-                        );
                     })?;
                 }
             }
@@ -552,28 +541,7 @@ fn handle(st: &mut State, key: KeyEvent, rows: &[Row], db: &Db, limits: &Limits)
         _ => {}
     }
     match &mut st.mode {
-        Mode::Rows => handle_rows(st, key.code, rows, db),
-        Mode::Recall(recall) => {
-            match key.code {
-                KeyCode::Esc | KeyCode::Char('h') | KeyCode::Left | KeyCode::Backspace => {
-                    st.mode = Mode::Rows;
-                }
-                KeyCode::Char('d') if ctrl => {
-                    recall.scroll = (recall.scroll + limits.rows / 2).min(limits.scroll);
-                }
-                KeyCode::Char('u') if ctrl => {
-                    recall.scroll = recall.scroll.saturating_sub(limits.rows / 2);
-                }
-                KeyCode::Char('j') | KeyCode::Down => {
-                    recall.scroll = (recall.scroll + 1).min(limits.scroll);
-                }
-                KeyCode::Char('k') | KeyCode::Up => recall.scroll = recall.scroll.saturating_sub(1),
-                KeyCode::Char('g') | KeyCode::Home => recall.scroll = 0,
-                KeyCode::Char('G') | KeyCode::End => recall.scroll = limits.scroll,
-                _ => {}
-            }
-            Action::Draw
-        }
+        Mode::Rows => handle_rows(st, key.code, ctrl, rows, db, limits),
         Mode::Detail(page) => {
             let last_tie = limits.ties.len().saturating_sub(1);
             match key.code {
@@ -627,19 +595,43 @@ fn handle(st: &mut State, key: KeyEvent, rows: &[Row], db: &Db, limits: &Limits)
 }
 
 /// A key on the rows.
-fn handle_rows(st: &mut State, code: KeyCode, rows: &[Row], db: &Db) -> Action {
+fn handle_rows(
+    st: &mut State,
+    code: KeyCode,
+    ctrl: bool,
+    rows: &[Row],
+    db: &Db,
+    limits: &Limits,
+) -> Action {
+    match code {
+        KeyCode::Esc if st.filter.is_empty() => return Action::Quit,
+        KeyCode::Esc => {
+            st.filter = Filter::default();
+            return Action::Rebuild(After::Kept);
+        }
+        KeyCode::Char('/') => {
+            st.typing = true;
+            return Action::Rebuild(After::Kept);
+        }
+        KeyCode::Tab => {
+            st.view = st.view.next();
+            return Action::Rebuild(After::First);
+        }
+        KeyCode::BackTab => {
+            st.view = st.view.previous();
+            return Action::Rebuild(After::First);
+        }
+        _ => {}
+    }
+    if st.view == View::Memories {
+        return handle_shelf(&mut st.shelf, code, ctrl, limits);
+    }
     let row = st.list.selected().and_then(|i| rows.get(i));
     let chosen = match row {
         Some(Row::Issue { issue, .. }) => Some(*issue),
         _ => None,
     };
-    let memories = st.view == View::Memories;
     match code {
-        KeyCode::Esc if st.filter.is_empty() => Action::Quit,
-        KeyCode::Esc => {
-            st.filter = Filter::default();
-            Action::Rebuild(After::Kept)
-        }
         KeyCode::Char('p') => {
             st.preview = !st.preview;
             Action::Draw
@@ -653,7 +645,6 @@ fn handle_rows(st: &mut State, code: KeyCode, rows: &[Row], db: &Db) -> Action {
             }
             _ => Action::Draw,
         },
-        KeyCode::Char('s' | 't' | 'a' | 'c') if memories => Action::Draw,
         KeyCode::Char('s') => {
             st.filter.status = cycle(st.filter.status);
             Action::Rebuild(After::Kept)
@@ -670,30 +661,9 @@ fn handle_rows(st: &mut State, code: KeyCode, rows: &[Row], db: &Db) -> Action {
             st.filter.closed = !st.filter.closed;
             Action::Rebuild(After::Kept)
         }
-        KeyCode::Char('/') => {
-            st.typing = true;
-            Action::Rebuild(After::Kept)
-        }
-        KeyCode::Tab => {
-            st.view = st.view.next();
-            Action::Rebuild(After::First)
-        }
-        KeyCode::BackTab => {
-            st.view = st.view.previous();
-            Action::Rebuild(After::First)
-        }
         KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => {
-            match row {
-                Some(Row::Issue { issue, .. }) => {
-                    st.mode = Mode::Detail(Page::open(issue.id.clone()));
-                }
-                Some(Row::Memory { memory, .. }) => {
-                    st.mode = Mode::Recall(Recall {
-                        slug: memory.slug.clone(),
-                        scroll: 0,
-                    });
-                }
-                _ => {}
+            if let Some(issue) = chosen {
+                st.mode = Mode::Detail(Page::open(issue.id.clone()));
             }
             Action::Draw
         }
@@ -715,6 +685,25 @@ fn handle_rows(st: &mut State, code: KeyCode, rows: &[Row], db: &Db) -> Action {
         }
         _ => Action::Draw,
     }
+}
+
+/// A key on the memories.
+fn handle_shelf(shelf: &mut Shelf, code: KeyCode, ctrl: bool, limits: &Limits) -> Action {
+    let last = limits.boxes.len().saturating_sub(1);
+    match code {
+        KeyCode::Char('d') if ctrl => {
+            shelf.scroll = (shelf.scroll + limits.rows / 2).min(limits.scroll);
+        }
+        KeyCode::Char('u') if ctrl => {
+            shelf.scroll = shelf.scroll.saturating_sub(limits.rows / 2);
+        }
+        KeyCode::Char('j') | KeyCode::Down => shelf.go((shelf.cursor + 1).min(last)),
+        KeyCode::Char('k') | KeyCode::Up => shelf.go(shelf.cursor.saturating_sub(1)),
+        KeyCode::Char('g') | KeyCode::Home => shelf.go(0),
+        KeyCode::Char('G') | KeyCode::End => shelf.go(last),
+        _ => {}
+    }
+    Action::Draw
 }
 
 /// Keep the cursor where it was across a reload, as long as that
@@ -794,24 +783,19 @@ fn build<'a>(
 fn widths(rows: &[Row]) -> Widths {
     let mut widths = Widths::default();
     for row in rows {
-        match row {
-            Row::Issue {
-                lead,
-                issue,
-                rollup,
-                ..
-            } => {
-                widths.id = widths
-                    .id
-                    .max(lead.chars().count() + issue.id.chars().count());
-                widths.status = widths.status.max(issue.status.to_string().len());
-                widths.kind = widths.kind.max(issue.kind.to_string().len());
-                widths.rollup = widths.rollup.max(rollup_text(*rollup).len());
-            }
-            Row::Memory { memory, .. } => {
-                widths.slug = widths.slug.max(memory.slug.chars().count());
-            }
-            _ => {}
+        if let Row::Issue {
+            lead,
+            issue,
+            rollup,
+            ..
+        } = row
+        {
+            widths.id = widths
+                .id
+                .max(lead.chars().count() + issue.id.chars().count());
+            widths.status = widths.status.max(issue.status.to_string().len());
+            widths.kind = widths.kind.max(issue.kind.to_string().len());
+            widths.rollup = widths.rollup.max(rollup_text(*rollup).len());
         }
     }
     widths
@@ -861,79 +845,96 @@ fn short_age(stamp: &Stamp, distance: Distance) -> String {
 
 fn header(db: &Db, stamp: &Stamp) -> Header {
     let count = |s: Status| db.issues.values().filter(|i| i.status == s).count();
-    let mut counts = Vec::new();
-    for (n, s) in [
+    let mut stats = Vec::new();
+    for s in [
         Status::Open,
         Status::InProgress,
         Status::Deferred,
         Status::Closed,
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        if n > 0 {
-            counts.push(Span::raw(" "));
-        }
-        counts.push(badge(&format!("{} {}", count(s), s), status_colour(s)));
+    ] {
+        stats.push(badge(
+            &format!("{} {} {}", status_glyph(s), count(s), s),
+            status_colour(s),
+        ));
+        stats.push(Span::raw(" "));
     }
+    stats.push(badge(
+        &format!("✦ {} memories", db.memories.len()),
+        Color::Cyan,
+    ));
     Header {
         prefix: db.meta.prefix.clone(),
         stamp: format!("{} @ {}", stamp.branch, stamp.commit),
-        counts,
+        stats,
     }
 }
 
-/// The header's rows: the prefix and the views, with the one in
-/// use bright and the trail of pages opened from it after it, and
-/// HEAD at the right edge; the counts, with `right` at the edge;
-/// a rule.
+fn status_glyph(s: Status) -> &'static str {
+    match s {
+        Status::Open => "○",
+        Status::InProgress => "◐",
+        Status::Deferred => "◌",
+        Status::Closed => "●",
+    }
+}
+
+/// The header's rows: the prefix as a badge and the views with
+/// the one in use bright, HEAD at the right edge; `context`, what
+/// the screen under it is about, with the stats at the edge; a
+/// rule.
 fn header_lines(
     h: &Header,
     view: View,
-    trail: &[&str],
-    right: &str,
+    context: &[Span<'static>],
     width: usize,
 ) -> [Line<'static>; 3] {
-    let mut top = vec![Span::raw(h.prefix.clone()).bold().cyan()];
-    // on a page only the view it was opened from shows, with the
-    // trail hanging off it
-    let views: Vec<View> = if trail.is_empty() {
-        vec![View::List, View::Board, View::Memories]
-    } else {
-        vec![view]
-    };
-    for v in views {
-        top.push(Span::raw("  "));
+    let dim = |s: &str| Span::raw(s.to_string()).dim();
+    let mut top = vec![badge(&h.prefix, Color::Cyan), Span::raw("  "), dim("[ ")];
+    for (n, v) in [View::List, View::Board, View::Memories]
+        .into_iter()
+        .enumerate()
+    {
+        if n > 0 {
+            top.push(dim(" │ "));
+        }
         top.push(if v == view {
             Span::raw(v.name()).bold().cyan()
         } else {
-            Span::raw(v.name()).dim()
+            dim(v.name())
         });
     }
-    for (n, id) in trail.iter().enumerate() {
-        top.push(Span::raw(" › ").dim());
-        top.push(if n + 1 == trail.len() {
-            Span::raw(id.to_string()).bold().cyan()
-        } else {
-            Span::raw(id.to_string()).cyan()
-        });
-    }
-    let against = |mut spans: Vec<Span<'static>>, right: &str| {
-        let used: usize = spans.iter().map(|s| s.content.chars().count()).sum();
-        let gap = width.saturating_sub(used + right.chars().count());
+    top.push(dim(" ]"));
+    let against = |mut spans: Vec<Span<'static>>, right: Vec<Span<'static>>| {
+        let len =
+            |spans: &[Span]| -> usize { spans.iter().map(|s| s.content.chars().count()).sum() };
+        let gap = width.saturating_sub(len(&spans) + len(&right));
         spans.push(Span::raw(" ".repeat(gap)));
-        spans.push(Span::raw(right.to_string()).dim());
+        spans.extend(right);
         Line::from(spans)
     };
     [
-        against(top, &h.stamp),
-        against(h.counts.clone(), right),
+        against(top, vec![dim(&h.stamp)]),
+        against(context.to_vec(), h.stats.clone()),
         Line::from(Span::raw("─".repeat(width)).dim()),
     ]
 }
 
-fn draw_header(frame: &mut Frame, area: Rect, h: &Header, view: View, trail: &[&str], right: &str) {
-    let lines = header_lines(h, view, trail, right, usize::from(area.width));
+/// The trail of pages opened from a view, as the header's context.
+fn trail_spans(view: View, ids: &[String]) -> Vec<Span<'static>> {
+    let mut spans = vec![Span::raw(view.name()).dim()];
+    for (n, id) in ids.iter().enumerate() {
+        spans.push(Span::raw(" › ").dim());
+        spans.push(if n + 1 == ids.len() {
+            Span::raw(id.clone()).bold().cyan()
+        } else {
+            Span::raw(id.clone()).cyan()
+        });
+    }
+    spans
+}
+
+fn draw_header(frame: &mut Frame, area: Rect, h: &Header, view: View, context: &[Span<'static>]) {
+    let lines = header_lines(h, view, context, usize::from(area.width));
     frame.render_widget(Paragraph::new(lines.to_vec()), area);
 }
 
@@ -1128,12 +1129,12 @@ fn draw_rows(
     state: &mut ListState,
     db: &Db,
     preview: bool,
-    right: &str,
+    context: &[Span<'static>],
 ) {
     let [top, body, foot] = frame_areas(frame);
-    draw_header(frame, top, &screen.header, screen.view, &[], right);
+    draw_header(frame, top, &screen.header, screen.view, context);
     let chosen = match state.selected().map(|i| &screen.rows[i]) {
-        Some(row @ (Row::Issue { .. } | Row::Memory { .. })) if preview => Some(row),
+        Some(Row::Issue { issue, .. }) if preview => Some(*issue),
         _ => None,
     };
     let (rows_area, preview_area) = match chosen {
@@ -1169,45 +1170,18 @@ fn draw_rows(
         .highlight_symbol("› ")
         .highlight_spacing(HighlightSpacing::Always);
     frame.render_stateful_widget(list, rows_area, state);
-    match (chosen, preview_area) {
-        (Some(Row::Issue { issue, .. }), Some(area)) => {
-            let lines = preview_lines(db, issue, inner(area.width));
-            frame.render_widget(
-                Paragraph::new(lines)
-                    .block(pane(Span::raw(format!(" {} ", issue.id)).cyan(), false)),
-                area,
-            );
-        }
-        (
-            Some(Row::Memory {
-                memory,
-                distance,
-                marked,
-            }),
-            Some(area),
-        ) => {
-            let lines = memory_lines(memory, *distance, *marked, inner(area.width));
-            frame.render_widget(
-                Paragraph::new(lines)
-                    .block(pane(Span::raw(format!(" {} ", memory.slug)).cyan(), false)),
-                area,
-            );
-        }
-        _ => {}
+    if let (Some(issue), Some(area)) = (chosen, preview_area) {
+        let lines = preview_lines(db, issue, inner(area.width));
+        frame.render_widget(
+            Paragraph::new(lines).block(pane(Span::raw(format!(" {} ", issue.id)).cyan(), false)),
+            area,
+        );
     }
-    let keys = if screen.view == View::Memories {
-        format!(
-            "{}   p {}   / filter",
-            screen.view.keys(),
-            if preview { "no preview" } else { "preview" }
-        )
-    } else {
-        format!(
-            "{}   Space fold   p {}   s/t/a/c / filter",
-            screen.view.keys(),
-            if preview { "no preview" } else { "preview" }
-        )
-    };
+    let keys = format!(
+        "{}   Space fold   p {}   s/t/a/c / filter",
+        screen.view.keys(),
+        if preview { "no preview" } else { "preview" }
+    );
     frame.render_widget(Paragraph::new(keys).dim(), foot);
 }
 
@@ -1253,90 +1227,131 @@ fn memory_about(m: &Memory, distance: Distance, marked: bool) -> Vec<Line<'stati
     lines
 }
 
-/// What the preview shows of a memory: the slug, the about block,
-/// and the text.
-fn memory_lines(m: &Memory, distance: Distance, marked: bool, width: usize) -> Vec<Line<'static>> {
-    let mut lines = vec![Line::from(Span::raw(m.slug.clone()).bold())];
-    lines.push(Line::default());
-    lines.extend(memory_about(m, distance, marked));
-    lines.push(Line::default());
-    lines.extend(md::render(&m.text, width.max(10)));
-    lines
-}
-
-/// Draw a memory's page as an issue's: the card, the about pane
-/// and the text in a box.
-fn draw_recall(
+/// Draw the memories as an issue's page: each a box in the main
+/// pane, the one under the cursor in the accent colour, and the
+/// about pane saying where that one stands.
+fn draw_memories(
     frame: &mut Frame,
-    header: &Header,
-    view: View,
-    memory: &Memory,
-    distance: Distance,
-    marked: bool,
-    recall: &mut Recall,
+    screen: &Screen,
+    shelf: &mut Shelf,
+    context: &[Span<'static>],
 ) -> Limits {
     let [top, body, foot] = frame_areas(frame);
-    draw_header(frame, top, header, view, &[&memory.slug], "memory");
+    draw_header(frame, top, &screen.header, screen.view, context);
+    let memories: Vec<(&Memory, Distance, bool)> = screen
+        .rows
+        .iter()
+        .filter_map(|r| match r {
+            Row::Memory {
+                memory,
+                distance,
+                marked,
+            } => Some((*memory, *distance, *marked)),
+            _ => None,
+        })
+        .collect();
+    shelf.cursor = shelf.cursor.min(memories.len().saturating_sub(1));
+    let about = match memories.get(shelf.cursor) {
+        Some((m, d, marked)) => {
+            let mut lines = vec![
+                Line::from(Span::raw(m.slug.clone()).bold()),
+                Line::default(),
+            ];
+            lines.extend(memory_about(m, *d, *marked));
+            lines
+        }
+        None => Vec::new(),
+    };
     let wide = body.width >= WIDE;
-    let about = memory_about(memory, distance, marked);
-    let heading = Line::from(Span::raw(memory.slug.clone()).bold());
-    let (card, about_area, text_area) = if wide {
+    let (boxes_area, about_area) = if wide {
         let [left, right] =
             Layout::horizontal([Constraint::Min(0), Constraint::Length(ABOUT_WIDTH)]).areas(body);
-        let [card, text] =
-            Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).areas(left);
-        (card, right, text)
+        (left, right)
     } else {
         let about_h = u16::try_from(about.len())
             .unwrap_or(u16::MAX)
             .saturating_add(2)
             .min(body.height / 2);
-        let [card, about_area, text] = Layout::vertical([
-            Constraint::Length(3),
-            Constraint::Length(about_h),
-            Constraint::Min(0),
-        ])
-        .areas(body);
-        (card, about_area, text)
+        let [about_area, boxes] =
+            Layout::vertical([Constraint::Length(about_h), Constraint::Min(0)]).areas(body);
+        (boxes, about_area)
     };
-    frame.render_widget(
-        Paragraph::new(heading).block(pane(Span::raw(" memory ").cyan(), false)),
-        card,
-    );
     frame.render_widget(
         Paragraph::new(about).block(pane(Span::raw(" about "), false)),
         about_area,
     );
-    let lines = post_box(
-        &Post {
-            id: None,
-            author: None,
-            edited: (memory.updated_at != memory.created_at).then_some(memory.updated_at),
-            at: memory.created_at,
-            text: &memory.text,
-            branch: &memory.stamp.branch,
-            commit: &memory.stamp.commit,
-            hidden: 0,
-        },
-        &human(),
-        inner(text_area.width).max(20),
-        true,
-    );
-    let rows = rows_in(text_area.height);
+
+    let style = human();
+    let width = inner(boxes_area.width).max(20);
+    let mut lines = Vec::new();
+    let mut boxes = Vec::new();
+    for (k, (m, d, marked)) in memories.iter().enumerate() {
+        if k > 0 {
+            lines.push(Line::default());
+        }
+        let start = lines.len();
+        lines.extend(post_box(
+            &Post {
+                id: None,
+                author: Some(&m.slug),
+                edited: (m.updated_at != m.created_at).then_some(m.updated_at),
+                at: m.created_at,
+                text: &m.text,
+                branch: &m.stamp.branch,
+                commit: &m.stamp.commit,
+                hidden: 0,
+                flag: marked.then(|| format!("{}, may no longer hold", short_age(&m.stamp, *d))),
+            },
+            &style,
+            width,
+            k == shelf.cursor,
+        ));
+        boxes.push(NoteBox {
+            id: Some(m.slug.clone()),
+            reply_to: None,
+            replies: 0,
+            lines: start..lines.len(),
+        });
+    }
+    if memories.is_empty() {
+        for r in &screen.rows {
+            if let Row::Note(n) = r {
+                lines.push(Line::from(Span::raw(*n).dim()));
+            }
+        }
+    }
+    let rows = rows_in(boxes_area.height);
     let max = lines.len().saturating_sub(rows);
-    recall.scroll = recall.scroll.min(max);
+    if shelf.reveal {
+        reveal(&mut shelf.scroll, shelf.cursor, &boxes, rows);
+        shelf.reveal = false;
+    }
+    shelf.scroll = shelf.scroll.min(max);
     frame.render_widget(
         Paragraph::new(lines)
-            .block(pane(Span::raw(" text "), true))
-            .scroll((u16::try_from(recall.scroll).unwrap_or(u16::MAX), 0)),
-        text_area,
+            .block(pane(Span::raw(" memories "), true))
+            .scroll((u16::try_from(shelf.scroll).unwrap_or(u16::MAX), 0)),
+        boxes_area,
     );
-    let keys = "j/k scroll   g/G ends   ^d/^u page   Esc back   r reload   q quit";
+    let keys = "j/k move   g/G ends   ^d/^u scroll   Tab list   / filter   r reload   q quit";
     frame.render_widget(Paragraph::new(keys).dim(), foot);
     Limits {
         scroll: max,
         rows,
-        ..Limits::default()
+        boxes,
+        ties: Vec::new(),
+    }
+}
+
+/// Scroll so the box at `cursor` is in view; a box taller than
+/// the pane shows its top.
+fn reveal(scroll: &mut usize, cursor: usize, boxes: &[NoteBox], rows: usize) {
+    if let Some(b) = boxes.get(cursor) {
+        if b.lines.start < *scroll {
+            *scroll = b.lines.start;
+        } else if b.lines.end > *scroll + rows {
+            *scroll = b.lines.end.saturating_sub(rows).min(b.lines.start);
+        }
     }
 }
 
@@ -1363,8 +1378,7 @@ fn draw_detail(
     page: &mut Page,
 ) -> Limits {
     let [top, body, foot] = frame_areas(frame);
-    let trail: Vec<&str> = page.ids.iter().map(String::as_str).collect();
-    draw_header(frame, top, header, view, &trail, "issue");
+    draw_header(frame, top, header, view, &trail_spans(view, &page.ids));
     let wide = body.width >= WIDE;
     let left_w = if wide {
         body.width - ABOUT_WIDTH
@@ -1422,14 +1436,7 @@ fn draw_detail(
     let max = lines.len().saturating_sub(rows);
     page.cursor = page.cursor.min(boxes.len().saturating_sub(1));
     if page.reveal {
-        if let Some(b) = boxes.get(page.cursor) {
-            if b.lines.start < page.scroll {
-                page.scroll = b.lines.start;
-            } else if b.lines.end > page.scroll + rows {
-                // a box taller than the pane shows its top
-                page.scroll = b.lines.end.saturating_sub(rows).min(b.lines.start);
-            }
-        }
+        reveal(&mut page.scroll, page.cursor, &boxes, rows);
         page.reveal = false;
     }
     page.scroll = page.scroll.min(max);
@@ -1702,6 +1709,7 @@ fn posts(
                 branch: &i.stamps.created.branch,
                 commit: &i.stamps.created.commit,
                 hidden: 0,
+                flag: None,
             },
             &style,
             wide,
@@ -1735,6 +1743,7 @@ fn posts(
                 } else {
                     0
                 },
+                flag: None,
             },
             &style,
             wide - indent,
@@ -1766,6 +1775,8 @@ struct Post<'a> {
     commit: &'a str,
     /// How many replies are folded away under it.
     hidden: usize,
+    /// A warning for the top border.
+    flag: Option<String>,
 }
 
 /// A post as a rounded box `width` columns wide: who and when in
@@ -1798,6 +1809,11 @@ fn post_box(p: &Post, style: &render::Style, width: usize, chosen: bool) -> Vec<
     let when = format!("{} ", style.when(p.at));
     used += when.chars().count();
     top.push(edge(when));
+    if let Some(flag) = &p.flag {
+        let flag = format!("· {flag} ");
+        used += flag.chars().count();
+        top.push(Span::raw(flag).yellow());
+    }
     top.push(edge("─".repeat(width.saturating_sub(used))));
     top.push(edge("╮".into()));
     let mut out = vec![Line::from(top)];
@@ -1902,33 +1918,8 @@ fn line<'a>(
         Row::Header(h) => Line::from(Span::raw(*h).bold().cyan()),
         Row::End => Line::from(edge(format!("╰{}╯", "─".repeat(width.saturating_sub(2))))),
         Row::Note(n) => inside(vec![Span::raw(*n).dim()]),
-        Row::Memory {
-            memory,
-            distance,
-            marked,
-        } => {
-            let mut spans = vec![
-                Span::raw(pad(&memory.slug, widths.slug)).bold().cyan(),
-                Span::raw("  "),
-            ];
-            let used = widths.slug + 2;
-            let age = short_age(&memory.stamp, *distance);
-            let tail = vec![
-                Span::raw("  "),
-                if *marked {
-                    Span::raw(age).yellow()
-                } else {
-                    Span::raw(age).dim()
-                },
-            ];
-            let first = memory.text.lines().next().unwrap_or("");
-            let room = width.saturating_sub(used);
-            let tail_len: usize = tail.iter().map(|s| s.content.chars().count()).sum();
-            let (text_room, tail_room) = split(first.chars().count(), tail_len, room);
-            spans.push(Span::raw(cut(first, text_room)));
-            spans.extend(cut_spans(tail, tail_room));
-            inside(spans)
-        }
+        // the memories are drawn as boxes, never as rows
+        Row::Memory { .. } => Line::default(),
         Row::Log { oid, when, msg } => inside(vec![
             Span::raw(oid.as_str()).dim(),
             Span::raw("  "),
@@ -2120,7 +2111,6 @@ mod tests {
             status: 4,
             kind: 9,
             rollup: 3,
-            slug: 0,
         };
         let child = line(&rows[2], &widths, 80, Columns::ALL, false);
         assert_eq!(child.spans[0].content, "  └─ ");
@@ -2264,7 +2254,7 @@ mod tests {
         Header {
             prefix: "t".into(),
             stamp: "dev @ abc1234".into(),
-            counts: vec![badge("1 open", Color::Green)],
+            stats: vec![badge("1 open", Color::Green)],
         }
     }
 
@@ -2286,7 +2276,7 @@ mod tests {
             // the second row is the issue with the body
             state.select(Some(1));
             terminal
-                .draw(|f| draw_rows(f, &screen, &mut state, &db, preview, "list"))
+                .draw(|f| draw_rows(f, &screen, &mut state, &db, preview, &[]))
                 .unwrap();
             let buffer = terminal.backend().buffer().clone();
             (0..height)
@@ -2406,18 +2396,28 @@ mod tests {
             branch: "dev".into(),
         };
         let h = super::header(&db, &stamp);
-        let lines = header_lines(&h, View::Board, &[], "mine", 60);
+        let lines = header_lines(&h, View::Board, &[Span::raw("mine")], 90);
         let text = strings(&lines);
-        assert_eq!(
-            text[0],
-            "t  list  board  memories                       dev @ abc1234"
+        assert!(
+            text[0].starts_with(" t   [ list │ board │ memories ]"),
+            "{}",
+            text[0]
         );
-        assert_eq!(
-            text[1],
-            " 1 open   1 in_progress   0 deferred   0 closed         mine"
+        assert!(text[0].ends_with("dev @ abc1234"), "{}", text[0]);
+        assert!(text[1].starts_with("mine  "), "{}", text[1]);
+        assert!(
+            text[1].ends_with(
+                " ○ 1 open   ◐ 1 in_progress   ◌ 0 deferred   ● 0 closed   ✦ 0 memories "
+            ),
+            "{}",
+            text[1]
         );
-        assert_eq!(text[2], "─".repeat(60));
-        assert_eq!(lines[0].spans[0].style.fg, Some(Color::Cyan));
+        assert!(
+            text[..2].iter().all(|t| t.chars().count() == 90),
+            "{text:#?}"
+        );
+        assert_eq!(text[2], "─".repeat(90));
+        assert_eq!(lines[0].spans[0].style.bg, Some(Color::Cyan));
         let board = lines[0]
             .spans
             .iter()
@@ -2426,16 +2426,11 @@ mod tests {
         assert!(board.style.add_modifier.contains(Modifier::BOLD));
         let list = lines[0].spans.iter().find(|s| s.content == "list").unwrap();
         assert!(list.style.add_modifier.contains(Modifier::DIM));
-        assert_eq!(lines[1].spans[0].style.bg, Some(Color::Green));
-        assert_eq!(lines[1].spans[2].style.bg, Some(Color::Yellow));
-        // on a page only the view it came from shows, then the trail
-        let lines = header_lines(&h, View::List, &["t-000001", "t-000002"], "issue", 60);
-        let text = strings(&lines);
-        assert_eq!(
-            text[0],
-            "t  list › t-000001 › t-000002                  dev @ abc1234"
-        );
-        assert!(text[1].ends_with("issue"));
+        assert_eq!(lines[1].spans[2].style.bg, Some(Color::Green));
+        assert_eq!(lines[1].spans[4].style.bg, Some(Color::Yellow));
+        // on a page the context is the trail from the view
+        let trail = trail_spans(View::List, &["t-000001".into(), "t-000002".into()]);
+        assert_eq!(Line::from(trail).to_string(), "list › t-000001 › t-000002");
     }
 
     #[test]
@@ -2561,9 +2556,14 @@ mod tests {
         // wide: the card and the posts on the left, the about pane
         // at the right edge, all starting under the header
         let wide = rows(100, 30);
-        assert!(wide[0].starts_with("t  list › t-000002"), "{}", wide[0]);
+        assert!(
+            wide[0].starts_with(" t   [ list │ board │ memories ]"),
+            "{}",
+            wide[0]
+        );
         assert!(wide[0].ends_with("dev @ abc1234"), "{}", wide[0]);
-        assert!(wide[1].ends_with("issue"), "{}", wide[1]);
+        assert!(wide[1].starts_with("list › t-000002"), "{}", wide[1]);
+        assert!(wide[1].ends_with(" 1 open "), "{}", wide[1]);
         assert!(wide[2].starts_with("────"), "{}", wide[2]);
         assert!(wide[3].starts_with("╭ t-000002 "), "{}", wide[3]);
         assert_eq!(col_of(&wide[3], "╭ about "), Some(70), "{}", wide[3]);
@@ -2743,7 +2743,7 @@ mod tests {
         let key = |st: &mut State, code| handle(st, press(code), &rows, &db, &limits);
         let page = |st: &State| match &st.mode {
             Mode::Detail(p) => (p.id().to_string(), p.cursor, p.scroll, p.tie),
-            Mode::Rows | Mode::Recall(_) => panic!("a page"),
+            Mode::Rows => panic!("a page"),
         };
         for _ in 0..4 {
             assert_eq!(key(&mut st, KeyCode::Char('j')), Action::Draw);
@@ -3008,34 +3008,21 @@ mod tests {
     }
 
     #[test]
-    fn a_memory_row_is_the_slug_the_first_line_and_the_age() {
-        let db = with_memories();
-        let rows = memory_rows(&db, &Filter::default(), distance);
-        let widths = widths(&rows);
-        assert_eq!(widths.slug, 6);
-        let columns = Columns::at(60);
-        let lines = strings(&[
-            line(&rows[0], &widths, 60, columns, false),
-            line(&rows[1], &widths, 60, columns, false),
-        ]);
-        assert_eq!(lines[0], "prefix  ids use the prefix `t`  1 commit ago");
-        assert_eq!(lines[1], "review  the review found nine issues  on dev");
-        // too narrow for both, the text and the age share the room
-        let short = strings(&[line(&rows[1], &widths, 30, columns, false)]);
-        assert_eq!(short[0].chars().count(), 30, "{}", short[0]);
-        assert!(short[0].starts_with("review  the review"), "{}", short[0]);
-        assert!(short[0].ends_with("…  on d…"), "{}", short[0]);
-    }
-
-    #[test]
-    fn tab_reaches_the_memories_and_enter_opens_one() {
+    fn tab_reaches_the_memories_and_the_cursor_walks_them() {
         let db = with_memories();
         let rows = memory_rows(&db, &Filter::default(), distance);
         let mut st = State::new();
+        let note_box = |id: &str| NoteBox {
+            id: Some(id.into()),
+            reply_to: None,
+            replies: 0,
+            lines: 0..1,
+        };
         let limits = Limits {
             scroll: 3,
             rows: 4,
-            ..Limits::default()
+            boxes: vec![note_box("prefix"), note_box("review")],
+            ties: Vec::new(),
         };
         let key = |st: &mut State, code| handle(st, press(code), &rows, &db, &limits);
         key(&mut st, KeyCode::Tab);
@@ -3045,19 +3032,30 @@ mod tests {
         assert_eq!(st.view, View::List);
         key(&mut st, KeyCode::BackTab);
         assert_eq!(st.view, View::Memories);
-        // the issue filters do nothing here
+        // the issue filters and Enter do nothing here
         assert_eq!(key(&mut st, KeyCode::Char('s')), Action::Draw);
         assert!(st.filter.status.is_none());
-        st.list.select(Some(1));
         key(&mut st, KeyCode::Enter);
-        assert!(matches!(&st.mode, Mode::Recall(r) if r.slug == "review" && r.scroll == 0));
-        key(&mut st, KeyCode::Char('j'));
-        key(&mut st, KeyCode::Char('G'));
-        assert!(matches!(&st.mode, Mode::Recall(r) if r.scroll == 3));
-        handle(&mut st, ctrl('u'), &rows, &db, &limits);
-        assert!(matches!(&st.mode, Mode::Recall(r) if r.scroll == 1));
-        key(&mut st, KeyCode::Esc);
         assert!(matches!(st.mode, Mode::Rows));
+        st.shelf.reveal = false;
+        key(&mut st, KeyCode::Char('j'));
+        assert_eq!((st.shelf.cursor, st.shelf.reveal), (1, true));
+        key(&mut st, KeyCode::Char('j'));
+        assert_eq!(st.shelf.cursor, 1);
+        key(&mut st, KeyCode::Char('g'));
+        assert_eq!(st.shelf.cursor, 0);
+        key(&mut st, KeyCode::Char('G'));
+        assert_eq!(st.shelf.cursor, 1);
+        handle(&mut st, ctrl('d'), &rows, &db, &limits);
+        assert_eq!(st.shelf.scroll, 2);
+        handle(&mut st, ctrl('u'), &rows, &db, &limits);
+        assert_eq!(st.shelf.scroll, 0);
+        assert_eq!(
+            key(&mut st, KeyCode::Char('/')),
+            Action::Rebuild(After::Kept)
+        );
+        assert!(st.typing);
+        key(&mut st, KeyCode::Esc);
         assert_eq!(st.filter.describe(View::Memories), "");
         st.filter.closed = true;
         st.filter.text = "x".into();
@@ -3065,29 +3063,23 @@ mod tests {
     }
 
     #[test]
-    fn a_memory_page_is_laid_out_as_an_issue_page() {
+    fn the_memories_are_boxes_beside_an_about_pane() {
         use ratatui::Terminal;
         use ratatui::backend::TestBackend;
         let db = with_memories();
-        let m = &db.memories["review"];
-        let header = test_header();
-        let mut terminal = Terminal::new(TestBackend::new(100, 14)).unwrap();
-        let mut recall = Recall {
-            slug: "review".into(),
-            scroll: 0,
+        let rows = memory_rows(&db, &Filter::default(), distance);
+        let screen = Screen {
+            view: View::Memories,
+            header: test_header(),
+            widths: widths(&rows),
+            rows,
         };
+        let mut shelf = Shelf::default();
+        shelf.go(1);
+        let mut terminal = Terminal::new(TestBackend::new(100, 14)).unwrap();
+        let mut limits = Limits::default();
         terminal
-            .draw(|f| {
-                draw_recall(
-                    f,
-                    &header,
-                    View::Memories,
-                    m,
-                    Distance::Elsewhere,
-                    true,
-                    &mut recall,
-                );
-            })
+            .draw(|f| limits = draw_memories(f, &screen, &mut shelf, &[Span::raw("/x")]))
             .unwrap();
         let buffer = terminal.backend().buffer().clone();
         let rows: Vec<String> = (0..buffer.area.height)
@@ -3097,30 +3089,43 @@ mod tests {
                     .collect()
             })
             .collect();
-        assert!(rows[0].starts_with("t  memories › review"), "{}", rows[0]);
-        assert!(rows[1].ends_with("memory"), "{}", rows[1]);
-        assert!(rows[3].starts_with("╭ memory "), "{}", rows[3]);
-        assert!(rows[3].contains("╭ about "), "{}", rows[3]);
-        assert!(rows[4].starts_with("│ review "), "{}", rows[4]);
-        assert!(rows[6].starts_with("╭ text "), "{}", rows[6]);
-        assert!(rows[7].contains("╭─ just now "), "{}", rows[7]);
         assert!(
-            rows[8].contains("│ the review found nine issues"),
+            rows[0].starts_with(" t   [ list │ board │ memories ]"),
             "{}",
-            rows[8]
+            rows[0]
         );
-        let on = rows
+        assert!(rows[0].ends_with("dev @ abc1234"), "{}", rows[0]);
+        assert!(rows[1].starts_with("/x"), "{}", rows[1]);
+        assert!(rows[1].ends_with(" 1 open "), "{}", rows[1]);
+        assert!(rows[3].starts_with("╭ memories "), "{}", rows[3]);
+        assert!(rows[3].contains("╭ about "), "{}", rows[3]);
+        assert!(
+            rows[4].starts_with("│ ╭─ prefix · just now "),
+            "{}",
+            rows[4]
+        );
+        assert!(rows[4].contains("│ review "), "{}", rows[4]);
+        assert!(rows[5].contains("│ ids use the prefix t "), "{}", rows[5]);
+        let review = rows
             .iter()
-            .position(|r| r.contains("on          dev @ bbbbbbb"))
+            .position(|r| r.contains("╭─ review · just now · on dev, may no longer hold "))
             .unwrap();
-        let warn = rows
+        assert_eq!(limits.boxes.len(), 2);
+        assert_eq!(limits.boxes[1].lines.start + 4, review);
+        // the chosen box is cyan, the other dim, and the flag yellow
+        let x = u16::try_from(rows[review].find("╭─ review").unwrap()).unwrap();
+        assert_eq!(buffer[(2, 4)].fg, Color::Reset);
+        assert_eq!(buffer[(x, u16::try_from(review).unwrap())].fg, Color::Cyan);
+        let flag = rows[review].find("on dev, may").unwrap();
+        let x = u16::try_from(rows[review][..flag].chars().count()).unwrap();
+        assert_eq!(
+            buffer[(x, u16::try_from(review).unwrap())].fg,
+            Color::Yellow
+        );
+        let about = rows
             .iter()
             .find(|r| r.contains("on dev: may no longer hold"))
             .unwrap();
-        let at = warn.find("on dev:").unwrap();
-        let x = u16::try_from(warn[..at].chars().count()).unwrap();
-        let y = u16::try_from(rows.iter().position(|r| r == warn).unwrap()).unwrap();
-        assert!(y > u16::try_from(on).unwrap());
-        assert_eq!(buffer[(x, y)].fg, Color::Yellow);
+        assert!(about.contains("││ "), "{about}");
     }
 }

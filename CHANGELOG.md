@@ -10,11 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - The screen shows the memories: Tab goes from the board to them, and
-  BackTab goes the other way round. Each row is the slug, the first line
-  of the text, and how far behind HEAD it was remembered, in yellow when
-  `foam prime` would mark it. The preview shows the whole text, `/`
-  matches the slug and the text, and Enter opens a page laid out as an
-  issue's: a card, an about pane, and the text in a box.
+  BackTab goes the other way round. They are laid out as an issue's page,
+  each memory a box with its slug and when it was remembered in the top
+  border and where in the bottom one, and the about pane beside saying
+  how far behind HEAD the chosen one stands. A memory `foam prime` would
+  mark as old or from another branch says so in yellow in its border.
+  `j` and `k` move between the boxes, and `/` matches the slug and the
+  text.
 - The screen renders a little markdown in the body and the notes:
   `backticked` code on a grey background, bulleted and numbered lists
   with a hanging indent, fenced code blocks as a panel with the language
@@ -32,10 +34,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- The screen's header is three rows: the prefix and the three views with
-  the one in use bright, or on a page that view and the trail of ids
-  opened from it, with HEAD at the right; the counts, with the filter or
-  the page's kind at the right; and a rule.
+- The screen's header is three rows: the prefix as a badge and the three
+  views with the one in use bright, HEAD at the right; the filter, or on
+  a page the trail of ids opened from the view, with the counts at the
+  right as badges, each with a glyph for its status and one more for the
+  memories; and a rule.
 - The notes pane on the screen's page is titled `notes`, not `posts`, and
   the footer's Tab hint says the same.
 
