@@ -1,0 +1,31 @@
+{
+  "id": "fix-92a9d2",
+  "title": "A closed one",
+  "body": "",
+  "type": "task",
+  "status": "closed",
+  "priority": 2,
+  "labels": [],
+  "parent": null,
+  "blocked_by": [],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-10-10T00:18:36.342724117Z",
+  "updated_at": "2026-10-10T00:18:36.350227592Z",
+  "closed_at": "2026-10-10T00:18:36.350227592Z",
+  "close_reason": "done in the fixture",
+  "resolution": "done",
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "1902af9",
+      "branch": "main"
+    },
+    "closed": {
+      "commit": "1902af9",
+      "branch": "main"
+    }
+  }
+}

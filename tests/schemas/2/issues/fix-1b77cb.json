@@ -1,0 +1,28 @@
+{
+  "id": "fix-1b77cb",
+  "title": "A milestone",
+  "body": "The first fixture.",
+  "type": "milestone",
+  "status": "open",
+  "priority": 1,
+  "labels": [],
+  "parent": null,
+  "blocked_by": [],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-10-10T00:18:36.313295368Z",
+  "updated_at": "2026-10-10T00:18:36.313295368Z",
+  "closed_at": null,
+  "close_reason": null,
+  "resolution": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "1902af9",
+      "branch": "main"
+    },
+    "closed": null
+  }
+}

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::git::Stamp;
 
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 pub const LEASE_MINUTES: u32 = 15;
 pub const MEMORY_MAX_BYTES: usize = 512;
@@ -86,11 +86,48 @@ impl fmt::Display for Resolution {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Note {
+    pub id: String,
     pub at: Timestamp,
     pub author: String,
     pub text: String,
     pub commit: String,
     pub branch: String,
+    /// When the text was last changed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edited_at: Option<Timestamp>,
+    /// When the note was removed; it stays as a tombstone so a
+    /// merge does not bring it back.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<Timestamp>,
+}
+
+impl Note {
+    /// When the note last changed in any way.
+    pub fn changed_at(&self) -> Timestamp {
+        self.at
+            .max(self.edited_at.unwrap_or(self.at))
+            .max(self.deleted_at.unwrap_or(self.at))
+    }
+}
+
+/// A fresh note id: eight hex digits.
+pub fn new_note_id() -> String {
+    format!("{:08x}", rand::random::<u32>())
+}
+
+/// The id a note written before notes had ids is given: a hash of
+/// its fields, so every clone derives the same one.
+pub fn note_id_of(at: &str, author: &str, text: &str, commit: &str, branch: &str) -> String {
+    // FNV-1a, 64 bits: a fixed function, so the id depends on
+    // nothing but the fields, on any platform and any Rust
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for part in [at, author, text, commit, branch] {
+        for b in part.bytes().chain(std::iter::once(0)) {
+            h ^= u64::from(b);
+            h = h.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+    format!("{:08x}", (h >> 32) as u32 ^ h as u32)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

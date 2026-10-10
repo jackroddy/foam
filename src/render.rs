@@ -497,7 +497,7 @@ pub fn issue(style: &Style, i: &Issue, db: &Db) -> String {
     if !i.notes.is_empty() {
         out.push('\n');
         for n in &i.notes {
-            let head = format!("[{} {}] ", style.when(n.at), n.author);
+            let head = format!("[{} {} {}] ", n.id, style.when(n.at), n.author);
             let _ = writeln!(
                 out,
                 "{}{}",
@@ -780,6 +780,9 @@ mod tests {
         i.body = "a body that is longer than the forty columns the test style allows".into();
         i.created_at = ago(2 * 3600);
         i.notes.push(crate::model::Note {
+            id: "0a1b2c3d".into(),
+            edited_at: None,
+            deleted_at: None,
             at: ago(60),
             author: "ann".into(),
             text: "a note that also runs past the forty column mark".into(),
@@ -789,7 +792,7 @@ mod tests {
         let text = issue(&HUMAN, &i, &db);
         assert!(text.contains("created: 2h ago\n"), "{text}");
         assert!(text.lines().all(|l| l.chars().count() <= 40), "{text}");
-        assert!(text.contains("[1m ago ann] a note"), "{text}");
+        assert!(text.contains("[0a1b2c3d 1m ago ann] a note"), "{text}");
         assert!(text.contains("\n  "), "{text}");
         let plain = issue(&Style::PLAIN, &i, &db);
         assert!(plain.contains("  on main (none)\n"), "{plain}");

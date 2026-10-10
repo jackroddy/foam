@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use anyhow::{Result, bail};
 use serde_json::Value;
 
-use crate::model::SCHEMA_VERSION;
+use crate::model::{SCHEMA_VERSION, note_id_of};
 
 /// A ref's files as JSON, by path.
 pub type Files = BTreeMap<String, Value>;
@@ -16,7 +16,7 @@ pub type Files = BTreeMap<String, Value>;
 pub const WINDOW: u32 = 3;
 
 /// The foam that first wrote each schema.
-const INTRODUCED: &[(u32, &str)] = &[(1, "0.1.0")];
+const INTRODUCED: &[(u32, &str)] = &[(1, "0.1.0"), (2, "0.4.0")];
 
 /// The first foam that writes `schema`.
 pub fn introduced(schema: u32) -> &'static str {
@@ -33,7 +33,42 @@ struct Step {
 }
 
 /// The steps this foam carries, oldest first.
-const STEPS: &[Step] = &[];
+const STEPS: &[Step] = &[Step {
+    from: 1,
+    run: notes_get_ids,
+}];
+
+/// Schema 2: every note has an id.
+fn notes_get_ids(files: &mut Files) -> Result<()> {
+    for (path, value) in files.iter_mut() {
+        if !path.starts_with("issues/") {
+            continue;
+        }
+        let Some(notes) = value.get_mut("notes").and_then(Value::as_array_mut) else {
+            continue;
+        };
+        for note in notes {
+            if note.get("id").is_some() {
+                continue;
+            }
+            let field = |k: &str| {
+                note.get(k)
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string()
+            };
+            let id = note_id_of(
+                &field("at"),
+                &field("author"),
+                &field("text"),
+                &field("commit"),
+                &field("branch"),
+            );
+            note["id"] = Value::String(id);
+        }
+    }
+    Ok(())
+}
 
 /// Schemas this foam no longer migrates from, each with the last
 /// foam that did.
@@ -156,6 +191,38 @@ mod tests {
         for s in 1..=SCHEMA_VERSION {
             assert_ne!(introduced(s), "a later foam", "schema {s}");
         }
+    }
+
+    #[test]
+    fn schema_two_gives_every_old_note_the_same_id_everywhere() {
+        let mut files = Files::new();
+        files.insert(
+            "issues/t-1.json".into(),
+            serde_json::json!({
+                "id": "t-1",
+                "notes": [
+                    {"at": "2026-09-26T10:00:00Z", "author": "ann", "text": "one",
+                     "commit": "abc", "branch": "main"},
+                    {"id": "deadbeef", "at": "2026-09-26T11:00:00Z", "author": "ann",
+                     "text": "two", "commit": "abc", "branch": "main"}
+                ]
+            }),
+        );
+        files.insert("memories/m.json".into(), serde_json::json!({"slug": "m"}));
+        upgrade(&mut files, 1).unwrap();
+        let notes = files["issues/t-1.json"]["notes"].as_array().unwrap();
+        // the hash is pinned: a change here would give every clone a
+        // different id for the same old note
+        assert_eq!(notes[0]["id"], "e55bb7a7");
+        assert_eq!(notes[1]["id"], "deadbeef");
+        assert_eq!(
+            note_id_of("2026-09-26T10:00:00Z", "ann", "one", "abc", "main"),
+            "e55bb7a7"
+        );
+        assert_ne!(
+            note_id_of("2026-09-26T10:00:00Z", "ann", "one", "abc", "dev"),
+            "e55bb7a7"
+        );
     }
 
     #[test]

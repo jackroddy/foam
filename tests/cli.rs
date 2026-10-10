@@ -798,11 +798,10 @@ fn every_frozen_schema_still_reads_and_is_brought_to_the_current_one() {
             serde_json::from_str(&stdout(foam(dir.path()).args(["--json", "stats"]))).unwrap();
         assert_eq!(v["schema"]["ref"], schema.parse::<u64>().unwrap());
         let current = v["schema"]["foam"].as_u64().unwrap();
-        // a write takes the ref to this foam's schema, and says so
-        // when that is a change
-        let id = stdout(foam(dir.path()).args(["create", "after the seed"]));
+        // the first write takes the ref to this foam's schema and
+        // says so when that is a change; the next is quiet
         let out = foam(dir.path())
-            .args(["note", &id, "written"])
+            .args(["create", "after the seed"])
             .output()
             .unwrap();
         assert!(out.status.success());
@@ -812,6 +811,13 @@ fn every_frozen_schema_still_reads_and_is_brought_to_the_current_one() {
             schema.parse::<u64>().unwrap() < current,
             "schema {schema}"
         );
+        let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        let out = foam(dir.path())
+            .args(["note", &id, "written"])
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        assert!(!String::from_utf8_lossy(&out.stderr).contains("took the data ref"));
         let meta: serde_json::Value =
             serde_json::from_str(&git(dir.path(), &["show", "refs/foam/data:meta.json"])).unwrap();
         assert_eq!(meta["schema_version"], current, "schema {schema}");

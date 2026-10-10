@@ -18,10 +18,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `foam stats` shows the ref's schema beside the foam's, and `foam
   doctor` says when an upgrade is pending on the next write.
 
+- Every note has an id: eight hex digits, random for a new note and a
+  fixed hash of its fields for a note written before ids, so every clone
+  gives an old note the same one. `foam show` prints it before the time,
+  the screen shows it in a post's border, and `--json` carries it as
+  `id` on each note. This is schema 2; a ref at schema 1 is migrated on
+  read and taken to 2 on the first write.
+
 ### Changed
 
 - When two clones changed meta.json, a sync takes the higher schema of
   the two instead of keeping its own.
+- Two clones' notes merge by id, and the same note changed on both sides
+  keeps the later change, rather than both copies.
 
 ## [0.3.0] - 2026-10-09
 

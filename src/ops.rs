@@ -5,7 +5,7 @@ use crate::ConfigKey;
 use crate::graph;
 use crate::model::{
     Issue, Kind, MEMORY_MAX_BYTES, Memory, Meta, Note, Resolution, Stamps, Status, check_slug,
-    new_id,
+    new_id, new_note_id,
 };
 use crate::render::{self, Style};
 use crate::store::{Db, Store};
@@ -282,11 +282,14 @@ pub fn note(store: &Store, id: &str, actor: &str, text: &str) -> Result<Issue> {
         let id = resolve(db, id)?;
         let issue = get_mut(db, &id)?;
         issue.notes.push(Note {
+            id: new_note_id(),
             at: Timestamp::now(),
             author: actor.to_string(),
             text: text.to_string(),
             commit: stamp.commit.clone(),
             branch: stamp.branch.clone(),
+            edited_at: None,
+            deleted_at: None,
         });
         issue.touch();
         Ok((issue.clone(), format!("note {id}")))
@@ -350,11 +353,14 @@ pub fn session_end(store: &Store, actor: &str) -> Result<Vec<Issue>> {
         for issue in db.issues.values_mut() {
             if issue.status == Status::InProgress && issue.assignee.as_deref() == Some(actor) {
                 issue.notes.push(Note {
+                    id: new_note_id(),
                     at: Timestamp::now(),
                     author: actor.to_string(),
                     text: "released at session end".into(),
                     commit: stamp.commit.clone(),
                     branch: stamp.branch.clone(),
+                    edited_at: None,
+                    deleted_at: None,
                 });
                 issue.unclaim();
                 released.push(issue.clone());

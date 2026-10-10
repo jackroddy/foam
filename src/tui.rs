@@ -1134,6 +1134,7 @@ fn posts(i: &Issue, width: usize) -> Vec<Line<'static>> {
     if !i.body.is_empty() {
         out.extend(post_box(
             &Post {
+                id: None,
                 author: None,
                 at: i.created_at,
                 text: &i.body,
@@ -1150,6 +1151,7 @@ fn posts(i: &Issue, width: usize) -> Vec<Line<'static>> {
         }
         out.extend(post_box(
             &Post {
+                id: Some(&n.id),
                 author: Some(&n.author),
                 at: n.at,
                 text: &n.text,
@@ -1166,6 +1168,7 @@ fn posts(i: &Issue, width: usize) -> Vec<Line<'static>> {
 /// What a box on the page shows: a note, or the body as the
 /// issue's own first post.
 struct Post<'a> {
+    id: Option<&'a str>,
     author: Option<&'a str>,
     at: Timestamp,
     text: &'a str,
@@ -1210,6 +1213,10 @@ fn post_box(p: &Post, style: &render::Style, width: usize) -> Vec<Line<'static>>
         ]));
     }
     let mut from = String::new();
+    if let Some(id) = p.id {
+        from.push_str(id);
+        from.push_str(" · ");
+    }
     if !p.branch.is_empty() {
         from.push_str(p.branch);
     }
@@ -1601,6 +1608,9 @@ mod tests {
         i.blocked_by = vec!["t-000003".into(), "t-nope".into()];
         i.body = "one paragraph\n\nanother".into();
         i.notes.push(Note {
+            id: "0a1b2c3d".into(),
+            edited_at: None,
+            deleted_at: None,
             at: Timestamp::now(),
             author: "ann".into(),
             text: "a note long enough that it has to wrap onto a second line".into(),

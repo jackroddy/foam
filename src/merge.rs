@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use std::collections::HashSet;
 
 use crate::model::{Issue, Memory, Note};
@@ -142,15 +144,19 @@ fn sets(base: Option<&Vec<String>>, ours: &[String], theirs: &[String]) -> Vec<S
     out
 }
 
-/// Notes: the base plus everything either side appended, in
+/// Notes: every id any side has, the latest change of each, in
 /// time order.
 fn notes(base: Option<&Vec<Note>>, ours: &[Note], theirs: &[Note]) -> Vec<Note> {
-    let mut out: Vec<Note> = base.cloned().unwrap_or_default();
-    for n in ours.iter().chain(theirs) {
-        if !out.contains(n) {
-            out.push(n.clone());
+    let mut out: BTreeMap<String, Note> = BTreeMap::new();
+    for n in base.into_iter().flatten().chain(ours).chain(theirs) {
+        let stale = out
+            .get(&n.id)
+            .is_some_and(|have| have.changed_at() >= n.changed_at());
+        if !stale {
+            out.insert(n.id.clone(), n.clone());
         }
     }
+    let mut out: Vec<Note> = out.into_values().collect();
     out.sort_by_key(|n| n.at);
     out
 }
@@ -168,11 +174,14 @@ mod tests {
 
     fn note(text: &str, secs: i64) -> Note {
         Note {
+            id: text.into(),
             at: Timestamp::UNIX_EPOCH + jiff::SignedDuration::from_secs(secs),
             author: "a".into(),
             text: text.into(),
             commit: "none".into(),
             branch: "main".into(),
+            edited_at: None,
+            deleted_at: None,
         }
     }
 
@@ -250,6 +259,29 @@ mod tests {
         let m = issue(Some(&base), Some(&ours), Some(&theirs)).unwrap();
         let texts: Vec<&str> = m.notes.iter().map(|n| n.text.as_str()).collect();
         assert_eq!(texts, ["base", "theirs", "ours"]);
+    }
+
+    #[test]
+    fn the_same_note_changed_on_both_sides_takes_the_later_change() {
+        let at = |secs: i64| Timestamp::UNIX_EPOCH + jiff::SignedDuration::from_secs(secs);
+        let mut base = test_issue("t-a");
+        base.notes = vec![note("n", 1)];
+        let mut ours = base.clone();
+        ours.notes[0].text = "ours".into();
+        ours.notes[0].edited_at = Some(at(5));
+        let mut theirs = base.clone();
+        theirs.notes[0].text = "theirs".into();
+        theirs.notes[0].edited_at = Some(at(7));
+        let m = issue(Some(&base), Some(&ours), Some(&theirs)).unwrap();
+        assert_eq!(m.notes.len(), 1);
+        assert_eq!(m.notes[0].text, "theirs");
+        // a later removal beats an earlier edit, and stays as a
+        // tombstone rather than coming back from the base
+        theirs.notes[0].edited_at = None;
+        theirs.notes[0].deleted_at = Some(at(9));
+        let m = issue(Some(&base), Some(&ours), Some(&theirs)).unwrap();
+        assert_eq!(m.notes.len(), 1);
+        assert!(m.notes[0].deleted_at.is_some());
     }
 
     #[test]
