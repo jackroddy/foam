@@ -27,7 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sh, json, toml, yaml or diff has its comments dim, strings green,
   numbers magenta and keywords blue; any other tag stays plain.
 - On the screen's page each box shows five lines of its text and counts
-  the rest in its border; Enter opens the box's page, with the whole
+  the rest under them; Enter opens the box's page, with the whole
   text and, for a note, the replies under it as boxes again. Esc goes
   back with the cursor where it was, and the header's trail names the
   note.

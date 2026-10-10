@@ -252,8 +252,20 @@ impl Page {
         self.reveal = true;
     }
 
-    /// The cursor onto the next box, or the previous one.
-    fn step_box(&mut self, boxes: &[NoteBox], by: isize) {
+    /// The cursor onto the next box, or the previous one; a box
+    /// taller than the pane's `rows` scrolls through first, a line
+    /// a step, so the cursor leaves it only once it has all shown.
+    fn step_box(&mut self, boxes: &[NoteBox], rows: usize, by: isize) {
+        if let Some(b) = boxes.get(self.cursor) {
+            if by.is_positive() && b.lines.end > self.scroll.saturating_add(rows) {
+                self.scroll += 1;
+                return;
+            }
+            if !by.is_positive() && b.lines.start < self.scroll {
+                self.scroll -= 1;
+                return;
+            }
+        }
         let last = boxes.len().saturating_sub(1);
         self.go(match by.is_positive() {
             true => (self.cursor + 1).min(last),
@@ -660,11 +672,11 @@ fn handle(st: &mut State, key: KeyEvent, rows: &[Row], db: &Db, limits: &Limits)
                 }
                 KeyCode::Char('j') | KeyCode::Down => match page.tie {
                     Some(k) => page.tie = Some((k + 1).min(last_tie)),
-                    None => page.step_box(&limits.boxes, 1),
+                    None => page.step_box(&limits.boxes, limits.rows, 1),
                 },
                 KeyCode::Char('k') | KeyCode::Up => match page.tie {
                     Some(k) => page.tie = Some(k.saturating_sub(1)),
-                    None => page.step_box(&limits.boxes, -1),
+                    None => page.step_box(&limits.boxes, limits.rows, -1),
                 },
                 KeyCode::Char('g') | KeyCode::Home => match page.tie {
                     Some(_) => page.tie = Some(0),
@@ -2159,10 +2171,18 @@ fn post_box(p: &Post, style: &render::Style, width: usize, chosen: bool) -> Vec<
         spans.push(edge(" │".into()));
         out.push(Line::from(spans));
     }
-    let mut from = String::new();
+    // what enter would show, in its colour, under the last line
     if more > 0 {
-        from.push_str(&format!("⋯ {more} more · "));
+        out.push(Line::from(vec![
+            edge("│ ".into()),
+            Span::styled(
+                pad(&format!("⋯ {more} more"), inner),
+                Style::new().fg(palette::FOCUS),
+            ),
+            edge(" │".into()),
+        ]));
     }
+    let mut from = String::new();
     if p.hidden > 0 {
         let s = if p.hidden == 1 { "reply" } else { "replies" };
         from.push_str(&format!("▸ {} {s} · ", p.hidden));
@@ -3286,11 +3306,11 @@ mod tests {
         let i = thread();
         let mut page = Page::open(i.id.clone());
         let (_, boxes) = posts(&i, 40, &page, true);
-        page.step_box(&boxes, -1);
+        page.step_box(&boxes, 100, -1);
         assert_eq!(page.cursor, 0);
-        page.step_box(&boxes, 1);
-        page.step_box(&boxes, 1);
-        page.step_box(&boxes, 1);
+        page.step_box(&boxes, 100, 1);
+        page.step_box(&boxes, 100, 1);
+        page.step_box(&boxes, 100, 1);
         assert_eq!(page.cursor, 3);
         // c answers b answers a answers the issue
         page.up(&boxes);
@@ -3314,7 +3334,7 @@ mod tests {
         page.sibling(&boxes, -1);
         assert_eq!(page.cursor, 2);
         page.reveal = false;
-        page.step_box(&boxes, 1);
+        page.step_box(&boxes, 100, 1);
         assert!(page.reveal);
     }
 
@@ -3716,10 +3736,12 @@ mod tests {
         let page = Page::open(i.id.clone());
         let (lines, boxes) = posts(&i, 40, &page, true);
         let body = strings(&lines[boxes[0].lines.clone()]);
-        // top, five lines, bottom
-        assert_eq!(body.len(), 7, "{body:#?}");
+        // top, five lines, the count, bottom
+        assert_eq!(body.len(), 8, "{body:#?}");
         assert!(body[5].starts_with("│ line 3"), "{}", body[5]);
-        assert!(body[6].contains("⋯ 12 more · "), "{}", body[6]);
+        assert!(body[6].starts_with("│ ⋯ 12 more"), "{}", body[6]);
+        assert_eq!(lines[6].spans[1].style.fg, Some(palette::FOCUS));
+        assert!(body[7].starts_with("╰"), "{}", body[7]);
         // the body's own page shows it whole
         let mut page = Page::open(i.id.clone());
         page.enter_box(&boxes);
@@ -3822,5 +3844,38 @@ mod tests {
         assert!(at("replies   1").is_some(), "{rows:#?}");
         assert_eq!(limits.ties, ["t-000009"]);
         assert_eq!(limits.boxes.len(), 2);
+    }
+
+    #[test]
+    fn a_box_taller_than_the_pane_scrolls_through_before_the_cursor_leaves() {
+        let mut i = thread();
+        i.notes[0].text = (1..=12)
+            .map(|n| format!("line {n}"))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        let mut page = Page::open(i.id.clone());
+        page.go(1);
+        page.enter_box(&posts(&i, 40, &page, true).1);
+        let (lines, boxes) = posts(&i, 40, &page, true);
+        // the root is 25 lines in a pane of 10
+        assert_eq!(boxes[0].lines, 0..25, "{boxes:#?}");
+        let rows = 10;
+        reveal(&mut page.scroll, page.cursor, &boxes, rows);
+        assert_eq!(page.scroll, 0);
+        for n in 1..=15 {
+            page.step_box(&boxes, rows, 1);
+            assert_eq!((page.cursor, page.scroll), (0, n));
+        }
+        // the bottom shows: the next step moves on to b
+        page.step_box(&boxes, rows, 1);
+        assert_eq!(page.cursor, 1);
+        reveal(&mut page.scroll, page.cursor, &boxes, rows);
+        assert!(page.scroll + rows >= boxes[1].lines.end);
+        // back up: b stays the box until the top of a shows again
+        page.step_box(&boxes, rows, -1);
+        assert_eq!(page.cursor, 0);
+        reveal(&mut page.scroll, page.cursor, &boxes, rows);
+        assert_eq!(page.scroll, 0);
+        let _ = lines;
     }
 }

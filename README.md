@@ -150,9 +150,10 @@ so in yellow in its border.
 
 On a page, `j` and `k` move between the body and the notes, and the one
 under the cursor has the bright border. Each box shows five lines of its
-text and says in its border how many more there are; Enter opens the
-box's own page, with the whole text and, for a note, the replies under
-it as boxes again, so a deep thread is read by stepping into it. `u`
+text and says under them how many more there are; Enter opens the box's
+own page, with the whole text and, for a note, the replies under it as
+boxes again, so a deep thread is read by stepping into it, and `j` and
+`k` scroll through a box taller than the pane before moving on. `u`
 goes to the note it answers, `[` and `]` to the ones before and after it
 in the same thread, and Space folds the replies under it away and shows
 them again. Ctrl-d and Ctrl-u scroll without moving the cursor. Tab moves
