@@ -47,6 +47,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `foam prime` says to write a body, a note or a memory as markdown and
+  names the four things the screen renders, and the help for `create
+  --body`, `note` and `remember` says the same.
 - The screen's board sits flush with the list and recent panes, with the
   cursor's marker inside each section's box instead of a gutter before
   it; a section's title is bright when the cursor is in it and dim

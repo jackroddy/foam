@@ -22,7 +22,9 @@ Work: `foam ready`, then `foam claim <id>` before touching code. When you find \
 work that has no issue, including anything noticed on the way, `foam create` \
 it and keep going. `foam note <id> <text>` when you decide something or hit a \
 dead end, so the next session does not retry it. `foam close <id> --reason \
-<why>` once it is done, and `foam unclaim <id>` anything you stop working on.
+<why>` once it is done, and `foam unclaim <id>` anything you stop working on. \
+Write a body, a note or a memory as markdown: `code`, bullets, fenced code \
+with a language, a table; the screen renders those and nothing more.
 
 Memories are facts about the code or the world that a next session would \
 otherwise rediscover: `foam remember <slug> <text>`. Remember facts, never \

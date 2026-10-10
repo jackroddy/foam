@@ -77,7 +77,7 @@ enum Cmd {
         /// Parent milestone
         #[arg(long)]
         parent: Option<String>,
-        /// Longer description
+        /// Longer description, as markdown: `code`, bullets, fenced code with a language, a table
         #[arg(long, default_value = "", allow_hyphen_values = true)]
         body: String,
         /// Issue that must close first; repeatable
@@ -184,7 +184,7 @@ enum Cmd {
     /// Append a note to an issue, or edit, remove or trace one of its notes
     Note {
         id: String,
-        /// The note's text; not needed with --rm or --history
+        /// The note's text, as markdown: `code`, bullets, fenced code with a language, a table; not needed with --rm or --history
         #[arg(allow_hyphen_values = true)]
         text: Option<String>,
         /// Answer this note, given as its id or a prefix of it
@@ -205,6 +205,7 @@ enum Cmd {
     /// Store a memory under a slug, replacing any with the same slug
     Remember {
         slug: String,
+        /// The fact, as markdown: `code`, bullets, fenced code with a language, a table
         #[arg(allow_hyphen_values = true)]
         text: String,
     },
