@@ -1,0 +1,28 @@
+{
+  "id": "foam-d719a1",
+  "title": "A window of three schemas, and a gate that names the version to go through",
+  "body": "Steps older than three schemas back are dropped; decode on such a ref says which foam version to install and run first.",
+  "type": "task",
+  "status": "open",
+  "priority": 2,
+  "labels": [],
+  "parent": "foam-a947aa",
+  "blocked_by": [],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-10-10T00:03:11.139774312Z",
+  "updated_at": "2026-10-10T00:03:11.139774312Z",
+  "closed_at": null,
+  "close_reason": null,
+  "resolution": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "34d8e13",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
