@@ -1,0 +1,30 @@
+{
+  "id": "foam-f5577d",
+  "title": "Show memories on the screen: a third view with a preview and a page",
+  "body": "",
+  "type": "task",
+  "status": "open",
+  "priority": 2,
+  "labels": [],
+  "parent": "foam-72e952",
+  "blocked_by": [
+    "foam-15d3d1"
+  ],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-10-10T01:09:23.156530576Z",
+  "updated_at": "2026-10-10T01:09:23.156530576Z",
+  "closed_at": null,
+  "close_reason": null,
+  "resolution": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "bb39c08",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
