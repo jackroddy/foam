@@ -13,11 +13,20 @@
   "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-10T01:09:23.134212552Z",
-  "updated_at": "2026-10-10T01:09:23.134212552Z",
+  "updated_at": "2026-10-10T01:09:23.209539688Z",
   "closed_at": null,
   "close_reason": null,
   "resolution": null,
-  "notes": [],
+  "notes": [
+    {
+      "id": "0d4cc223",
+      "at": "2026-10-10T01:09:23.209538998Z",
+      "author": "Jack Roddy/42dfd115",
+      "text": "Design, proposed 2026-10-09: a hand-rolled line-oriented parser in src/md.rs, no markdown crate. Blocks: paragraph, list (ordered or bulleted, nested by indent), fenced code with an optional language, table. Inlines: text and backticked code only. Layout is a separate pass from parse: blocks to Vec<Line> at a width, wrapping spans rather than strings, so render::wrap_at stays for the CLI. Plain text must render exactly as today; the post_box test pins that.",
+      "commit": "bb39c08",
+      "branch": "dev"
+    }
+  ],
   "stamps": {
     "created": {
       "commit": "bb39c08",
