@@ -15,7 +15,7 @@
   "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-10T01:09:23.178848301Z",
-  "updated_at": "2026-10-10T01:21:03.217674107Z",
+  "updated_at": "2026-10-10T01:21:03.227583425Z",
   "closed_at": null,
   "close_reason": null,
   "resolution": null,
@@ -25,6 +25,14 @@
       "at": "2026-10-10T01:09:23.248130907Z",
       "author": "Jack Roddy/42dfd115",
       "text": "Design, proposed 2026-10-09: n opens a compose box for a new note on the issue, a answers the chosen note (foam's own verb). The box takes the bottom third of the notes pane, bordered and titled with what it answers. Enter is a newline, Ctrl-s writes through ops::note and reloads, Esc hides the box and keeps the draft until the page closes. This is the deliberate way in that commit 34d8e13 asked for: no write happens on a single unmodified key. The README line saying the screen cannot change anything goes.",
+      "commit": "bb39c08",
+      "branch": "dev"
+    },
+    {
+      "id": "99d69a00",
+      "at": "2026-10-10T01:21:03.227582675Z",
+      "author": "Jack Roddy/42dfd115",
+      "text": "Held 2026-10-09: no writes from the screen yet. Jack wants to think long and hard before the screen writes again; do not pick this up until the issue says so. The README's line that the screen changes nothing stays true.",
       "commit": "bb39c08",
       "branch": "dev"
     }
