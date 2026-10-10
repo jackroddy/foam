@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The screen shows the memories: Tab goes from the board to them, and
+  BackTab goes the other way round. Each row is the slug, the first line
+  of the text, and how far behind HEAD it was remembered, in yellow when
+  `foam prime` would mark it. The preview shows the whole text, `/`
+  matches the slug and the text, and Enter opens a page with the text at
+  full width.
 - The screen renders a little markdown in the body and the notes:
   `backticked` code on a grey background, bulleted and numbered lists
   with a hanging indent, fenced code blocks as a panel with the language

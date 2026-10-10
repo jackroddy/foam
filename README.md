@@ -124,15 +124,17 @@ board, open an issue now and then, and step in with `foam create`,
 
 Run `foam` with no command in a terminal and you get a screen. It opens on
 the listing, with a preview of the chosen issue beside it. Tab switches to
-the board, and Enter opens the chosen issue's page, with its notes shown as
-boxes. The body and the notes render a little markdown: `backticked`
+the board, then to the memories, and Enter opens the chosen issue's page,
+with its notes shown as boxes, or the chosen memory's. The body and the notes render a little markdown: `backticked`
 code, bulleted and numbered lists, fenced code blocks, and tables.
 
 On the listing, `j` and `k` move, `g` and `G` jump to the ends, Space folds
 an issue's children, and `p` hides the preview. `s` and `t` cycle the
 status and kind filters, `a` toggles your own claims, `c` toggles closed
 issues, and `/` lets you type a text match. Esc clears the filter, and Esc
-again quits. `r` reloads and `q` quits.
+again quits. `r` reloads and `q` quits. On the memories, `/` matches the
+slug and the text, and a memory `foam prime` would mark as old or from
+another branch has its age in yellow.
 
 On a page, `j` and `k` move between the body and the notes, and the one
 under the cursor has the bright border. `u` goes to the note it answers,

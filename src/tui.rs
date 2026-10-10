@@ -15,10 +15,10 @@ use ratatui::widgets::{
 };
 use ratatui::{DefaultTerminal, Frame};
 
-use crate::git::Stamp;
+use crate::git::{Distance, Stamp};
 use crate::graph::{self, BOARD_LOG};
 use crate::md;
-use crate::model::{Issue, Kind, Status};
+use crate::model::{Issue, Kind, Memory, Status};
 use crate::render;
 use crate::store::{DATA_REF, Db, Store};
 
@@ -65,8 +65,16 @@ impl Filter {
     }
 
     /// What is on, for the strip; empty when nothing is.
-    fn describe(&self) -> String {
+    /// The filter in a few words; on the memories only the text
+    /// applies, so only it shows.
+    fn describe(&self, view: View) -> String {
         let mut parts = Vec::new();
+        if view == View::Memories {
+            if !self.text.is_empty() {
+                parts.push(format!("/{}", self.text));
+            }
+            return parts.join(" · ");
+        }
         if let Some(s) = self.status {
             parts.push(s.to_string());
         }
@@ -83,6 +91,14 @@ impl Filter {
             parts.push("closed".to_string());
         }
         parts.join(" · ")
+    }
+
+    /// Whether a memory's slug or text contains the text.
+    fn keeps_memory(&self, m: &Memory) -> bool {
+        let text = self.text.to_lowercase();
+        text.is_empty()
+            || m.slug.to_lowercase().contains(&text)
+            || m.text.to_lowercase().contains(&text)
     }
 }
 
@@ -119,13 +135,24 @@ enum View {
     /// What `foam board` prints: milestones, in progress, ready,
     /// blocked and the recent log.
     Board,
+    /// What `foam memories` prints, with how far behind each one is.
+    Memories,
 }
 
 impl View {
-    fn other(self) -> View {
+    fn next(self) -> View {
         match self {
             View::List => View::Board,
+            View::Board => View::Memories,
+            View::Memories => View::List,
+        }
+    }
+
+    fn previous(self) -> View {
+        match self {
+            View::List => View::Memories,
             View::Board => View::List,
+            View::Memories => View::Board,
         }
     }
 
@@ -133,21 +160,31 @@ impl View {
         match self {
             View::List => "list",
             View::Board => "board",
+            View::Memories => "memories",
         }
     }
 
     fn keys(self) -> &'static str {
         match self {
             View::List => "j/k move   Enter open   Tab board   r reload   q quit",
-            View::Board => "j/k move   Enter open   Tab list   r reload   q quit",
+            View::Board => "j/k move   Enter open   Tab memories   r reload   q quit",
+            View::Memories => "j/k move   Enter open   Tab list   r reload   q quit",
         }
     }
 }
 
-/// Where the person is: on the rows, or on an issue's page.
+/// Where the person is: on the rows, on an issue's page, or on a
+/// memory's.
 enum Mode {
     Rows,
     Detail(Page),
+    Recall(Recall),
+}
+
+/// A memory on screen, and how far its text has scrolled.
+struct Recall {
+    slug: String,
+    scroll: usize,
 }
 
 /// An issue on screen, the issues followed to reach it under it,
@@ -312,13 +349,21 @@ enum Row<'a> {
         msg: String,
     },
     Note(&'static str),
+    Memory {
+        memory: &'a Memory,
+        /// How far behind HEAD it was remembered, in a few words.
+        age: String,
+        /// Whether it may no longer hold: old, or from another
+        /// branch, by the rule prime uses.
+        marked: bool,
+    },
     /// The bottom edge of a section's box on the board.
     End,
 }
 
 impl Row<'_> {
     fn selectable(&self) -> bool {
-        matches!(self, Row::Issue { .. })
+        matches!(self, Row::Issue { .. } | Row::Memory { .. })
     }
 }
 
@@ -330,6 +375,7 @@ struct Widths {
     status: usize,
     kind: usize,
     rollup: usize,
+    slug: usize,
 }
 
 struct Screen<'a> {
@@ -395,17 +441,21 @@ fn screen(terminal: &mut DefaultTerminal, store: &Store, actor: &str) -> Result<
         let mut screen = build(store, &snap.db, st.view, &st.filter, actor, &st.folded)?;
         keep(&mut st.list, &screen.rows);
         // a page whose issues a reload took away falls back
-        if let Mode::Detail(page) = &mut st.mode {
-            page.prune(&snap.db);
-            if page.ids.is_empty() {
-                st.mode = Mode::Rows;
+        match &mut st.mode {
+            Mode::Detail(page) => {
+                page.prune(&snap.db);
+                if page.ids.is_empty() {
+                    st.mode = Mode::Rows;
+                }
             }
+            Mode::Recall(r) if !snap.db.memories.contains_key(&r.slug) => st.mode = Mode::Rows,
+            _ => {}
         }
         loop {
             let mut limits = Limits::default();
             match &mut st.mode {
                 Mode::Rows => {
-                    let right = match (st.typing, st.filter.describe()) {
+                    let right = match (st.typing, st.filter.describe(st.view)) {
                         (true, _) => format!("/{}▏", st.filter.text),
                         (false, on) if on.is_empty() => st.view.name().to_string(),
                         (false, on) => format!("{on}   {}", st.view.name()),
@@ -418,6 +468,24 @@ fn screen(terminal: &mut DefaultTerminal, store: &Store, actor: &str) -> Result<
                     let issue = &snap.db.issues[page.id()];
                     terminal.draw(|frame| {
                         limits = draw_detail(frame, &screen.strip, &snap.db, issue, page);
+                    })?;
+                }
+                Mode::Recall(recall) => {
+                    let row = screen.rows.iter().find_map(|r| match r {
+                        Row::Memory {
+                            memory,
+                            age,
+                            marked,
+                        } if memory.slug == recall.slug => Some((*memory, age.as_str(), *marked)),
+                        _ => None,
+                    });
+                    let (memory, age, marked) = match row {
+                        Some(found) => found,
+                        // the rows are another view's: no age to show
+                        None => (&snap.db.memories[&recall.slug], "", false),
+                    };
+                    terminal.draw(|frame| {
+                        limits = draw_recall(frame, &screen.strip, memory, age, marked, recall);
                     })?;
                 }
             }
@@ -471,6 +539,27 @@ fn handle(st: &mut State, key: KeyEvent, rows: &[Row], db: &Db, limits: &Limits)
     }
     match &mut st.mode {
         Mode::Rows => handle_rows(st, key.code, rows, db),
+        Mode::Recall(recall) => {
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('h') | KeyCode::Left | KeyCode::Backspace => {
+                    st.mode = Mode::Rows;
+                }
+                KeyCode::Char('d') if ctrl => {
+                    recall.scroll = (recall.scroll + limits.rows / 2).min(limits.scroll);
+                }
+                KeyCode::Char('u') if ctrl => {
+                    recall.scroll = recall.scroll.saturating_sub(limits.rows / 2);
+                }
+                KeyCode::Char('j') | KeyCode::Down => {
+                    recall.scroll = (recall.scroll + 1).min(limits.scroll);
+                }
+                KeyCode::Char('k') | KeyCode::Up => recall.scroll = recall.scroll.saturating_sub(1),
+                KeyCode::Char('g') | KeyCode::Home => recall.scroll = 0,
+                KeyCode::Char('G') | KeyCode::End => recall.scroll = limits.scroll,
+                _ => {}
+            }
+            Action::Draw
+        }
         Mode::Detail(page) => {
             let last_tie = limits.ties.len().saturating_sub(1);
             match key.code {
@@ -525,10 +614,12 @@ fn handle(st: &mut State, key: KeyEvent, rows: &[Row], db: &Db, limits: &Limits)
 
 /// A key on the rows.
 fn handle_rows(st: &mut State, code: KeyCode, rows: &[Row], db: &Db) -> Action {
-    let chosen = st.list.selected().and_then(|i| match rows.get(i) {
+    let row = st.list.selected().and_then(|i| rows.get(i));
+    let chosen = match row {
         Some(Row::Issue { issue, .. }) => Some(*issue),
         _ => None,
-    });
+    };
+    let memories = st.view == View::Memories;
     match code {
         KeyCode::Esc if st.filter.is_empty() => Action::Quit,
         KeyCode::Esc => {
@@ -548,6 +639,7 @@ fn handle_rows(st: &mut State, code: KeyCode, rows: &[Row], db: &Db) -> Action {
             }
             _ => Action::Draw,
         },
+        KeyCode::Char('s' | 't' | 'a' | 'c') if memories => Action::Draw,
         KeyCode::Char('s') => {
             st.filter.status = cycle(st.filter.status);
             Action::Rebuild(After::Kept)
@@ -568,13 +660,26 @@ fn handle_rows(st: &mut State, code: KeyCode, rows: &[Row], db: &Db) -> Action {
             st.typing = true;
             Action::Rebuild(After::Kept)
         }
-        KeyCode::Tab | KeyCode::BackTab => {
-            st.view = st.view.other();
+        KeyCode::Tab => {
+            st.view = st.view.next();
+            Action::Rebuild(After::First)
+        }
+        KeyCode::BackTab => {
+            st.view = st.view.previous();
             Action::Rebuild(After::First)
         }
         KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => {
-            if let Some(issue) = chosen {
-                st.mode = Mode::Detail(Page::open(issue.id.clone()));
+            match row {
+                Some(Row::Issue { issue, .. }) => {
+                    st.mode = Mode::Detail(Page::open(issue.id.clone()));
+                }
+                Some(Row::Memory { memory, .. }) => {
+                    st.mode = Mode::Recall(Recall {
+                        slug: memory.slug.clone(),
+                        scroll: 0,
+                    });
+                }
+                _ => {}
             }
             Action::Draw
         }
@@ -642,6 +747,7 @@ fn build<'a>(
     let mut rows = match view {
         View::List => list_rows(db, filter, actor, folded),
         View::Board => board_rows(db, now),
+        View::Memories => memory_rows(db, filter, |commit| store.git.distance(commit)),
     };
     if view == View::Board {
         let log = store.git.log(DATA_REF, BOARD_LOG, None)?;
@@ -674,22 +780,69 @@ fn build<'a>(
 fn widths(rows: &[Row]) -> Widths {
     let mut widths = Widths::default();
     for row in rows {
-        if let Row::Issue {
-            lead,
-            issue,
-            rollup,
-            ..
-        } = row
-        {
-            widths.id = widths
-                .id
-                .max(lead.chars().count() + issue.id.chars().count());
-            widths.status = widths.status.max(issue.status.to_string().len());
-            widths.kind = widths.kind.max(issue.kind.to_string().len());
-            widths.rollup = widths.rollup.max(rollup_text(*rollup).len());
+        match row {
+            Row::Issue {
+                lead,
+                issue,
+                rollup,
+                ..
+            } => {
+                widths.id = widths
+                    .id
+                    .max(lead.chars().count() + issue.id.chars().count());
+                widths.status = widths.status.max(issue.status.to_string().len());
+                widths.kind = widths.kind.max(issue.kind.to_string().len());
+                widths.rollup = widths.rollup.max(rollup_text(*rollup).len());
+            }
+            Row::Memory { memory, .. } => {
+                widths.slug = widths.slug.max(memory.slug.chars().count());
+            }
+            _ => {}
         }
     }
     widths
+}
+
+/// What `foam memories` prints: every memory the filter's text
+/// matches, by slug, with how far behind HEAD each was remembered
+/// and whether that marks it, by the rule prime uses.
+fn memory_rows<'a>(
+    db: &'a Db,
+    filter: &Filter,
+    distance: impl Fn(&str) -> Distance,
+) -> Vec<Row<'a>> {
+    let rows: Vec<Row> = db
+        .memories
+        .values()
+        .filter(|m| filter.keeps_memory(m))
+        .map(|m| {
+            let d = distance(&m.stamp.commit);
+            Row::Memory {
+                memory: m,
+                age: short_age(&m.stamp, d),
+                marked: !matches!(d, Distance::Behind(n) if n < db.meta.stale_after),
+            }
+        })
+        .collect();
+    if rows.is_empty() {
+        return vec![Row::Note(if filter.text.is_empty() {
+            "nothing remembered yet"
+        } else {
+            "no memory matches"
+        })];
+    }
+    rows
+}
+
+/// A memory's distance from HEAD in a few words.
+fn short_age(stamp: &Stamp, distance: Distance) -> String {
+    match distance {
+        Distance::Behind(0) => "this commit".into(),
+        Distance::Behind(1) => "1 commit ago".into(),
+        Distance::Behind(n) => format!("{n} commits ago"),
+        Distance::Elsewhere => format!("on {}", stamp.branch),
+        Distance::Unknown => "a commit this clone lacks".into(),
+    }
 }
 
 /// The bar above the rows: the prefix, where HEAD is, and the
@@ -924,7 +1077,7 @@ fn draw_rows(
     let [top, body, foot] = frame_areas(frame);
     draw_strip(frame, top, &screen.strip, right);
     let chosen = match state.selected().map(|i| &screen.rows[i]) {
-        Some(Row::Issue { issue, .. }) if preview => Some(*issue),
+        Some(row @ (Row::Issue { .. } | Row::Memory { .. })) if preview => Some(row),
         _ => None,
     };
     let (rows_area, preview_area) = match chosen {
@@ -960,18 +1113,45 @@ fn draw_rows(
         .highlight_symbol("› ")
         .highlight_spacing(HighlightSpacing::Always);
     frame.render_stateful_widget(list, rows_area, state);
-    if let (Some(issue), Some(area)) = (chosen, preview_area) {
-        let lines = preview_lines(db, issue, inner(area.width));
-        frame.render_widget(
-            Paragraph::new(lines).block(pane(Span::raw(format!(" {} ", issue.id)).cyan(), false)),
-            area,
-        );
+    match (chosen, preview_area) {
+        (Some(Row::Issue { issue, .. }), Some(area)) => {
+            let lines = preview_lines(db, issue, inner(area.width));
+            frame.render_widget(
+                Paragraph::new(lines)
+                    .block(pane(Span::raw(format!(" {} ", issue.id)).cyan(), false)),
+                area,
+            );
+        }
+        (
+            Some(Row::Memory {
+                memory,
+                age,
+                marked,
+            }),
+            Some(area),
+        ) => {
+            let lines = memory_lines(memory, age, *marked, inner(area.width));
+            frame.render_widget(
+                Paragraph::new(lines)
+                    .block(pane(Span::raw(format!(" {} ", memory.slug)).cyan(), false)),
+                area,
+            );
+        }
+        _ => {}
     }
-    let keys = format!(
-        "{}   Space fold   p {}   s/t/a/c / filter",
-        screen.view.keys(),
-        if preview { "no preview" } else { "preview" }
-    );
+    let keys = if screen.view == View::Memories {
+        format!(
+            "{}   p {}   / filter",
+            screen.view.keys(),
+            if preview { "no preview" } else { "preview" }
+        )
+    } else {
+        format!(
+            "{}   Space fold   p {}   s/t/a/c / filter",
+            screen.view.keys(),
+            if preview { "no preview" } else { "preview" }
+        )
+    };
     frame.render_widget(Paragraph::new(keys).dim(), foot);
 }
 
@@ -986,6 +1166,59 @@ fn preview_lines(db: &Db, issue: &Issue, width: usize) -> Vec<Line<'static>> {
         lines.extend(md::render(&issue.body, width.max(10)));
     }
     lines
+}
+
+/// What the preview and the page show of a memory: the text, then
+/// when it was remembered and how far behind HEAD that is.
+fn memory_lines(m: &Memory, age: &str, marked: bool, width: usize) -> Vec<Line<'static>> {
+    let style = human();
+    let mut lines = md::render(&m.text, width.max(10));
+    lines.push(Line::default());
+    let mut when = format!("remembered {}", style.when(m.created_at));
+    if m.updated_at != m.created_at {
+        when.push_str(&format!(", last {}", style.when(m.updated_at)));
+    }
+    lines.push(Line::from(Span::raw(when).dim()));
+    let mut at = format!("at {}", m.stamp.commit);
+    if !age.is_empty() {
+        at.push_str(&format!(", {age}"));
+    }
+    lines.push(Line::from(if marked {
+        Span::raw(at).yellow()
+    } else {
+        Span::raw(at).dim()
+    }));
+    lines
+}
+
+/// Draw a memory's page: its text at full width.
+fn draw_recall(
+    frame: &mut Frame,
+    strip: &Line,
+    memory: &Memory,
+    age: &str,
+    marked: bool,
+    recall: &mut Recall,
+) -> Limits {
+    let [top, body, foot] = frame_areas(frame);
+    draw_strip(frame, top, strip, "memory");
+    let lines = memory_lines(memory, age, marked, inner(body.width));
+    let rows = rows_in(body.height);
+    let max = lines.len().saturating_sub(rows);
+    recall.scroll = recall.scroll.min(max);
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(pane(Span::raw(format!(" {} ", memory.slug)).cyan(), true))
+            .scroll((u16::try_from(recall.scroll).unwrap_or(u16::MAX), 0)),
+        body,
+    );
+    let keys = "j/k scroll   g/G ends   ^d/^u page   Esc back   r reload   q quit";
+    frame.render_widget(Paragraph::new(keys).dim(), foot);
+    Limits {
+        scroll: max,
+        rows,
+        ..Limits::default()
+    }
 }
 
 /// The row under the cursor: a background under its colours,
@@ -1542,6 +1775,32 @@ fn line<'a>(
         Row::Header(h) => Line::from(Span::raw(*h).bold().cyan()),
         Row::End => Line::from(edge(format!("╰{}╯", "─".repeat(width.saturating_sub(2))))),
         Row::Note(n) => inside(vec![Span::raw(*n).dim()]),
+        Row::Memory {
+            memory,
+            age,
+            marked,
+        } => {
+            let mut spans = vec![
+                Span::raw(pad(&memory.slug, widths.slug)).bold().cyan(),
+                Span::raw("  "),
+            ];
+            let used = widths.slug + 2;
+            let tail = vec![
+                Span::raw("  "),
+                if *marked {
+                    Span::raw(age.clone()).yellow()
+                } else {
+                    Span::raw(age.clone()).dim()
+                },
+            ];
+            let first = memory.text.lines().next().unwrap_or("");
+            let room = width.saturating_sub(used);
+            let tail_len: usize = tail.iter().map(|s| s.content.chars().count()).sum();
+            let (text_room, tail_room) = split(first.chars().count(), tail_len, room);
+            spans.push(Span::raw(cut(first, text_room)));
+            spans.extend(cut_spans(tail, tail_room));
+            inside(spans)
+        }
         Row::Log { oid, when, msg } => inside(vec![
             Span::raw(oid.as_str()).dim(),
             Span::raw("  "),
@@ -1733,6 +1992,7 @@ mod tests {
             status: 4,
             kind: 9,
             rollup: 3,
+            slug: 0,
         };
         let child = line(&rows[2], &widths, 80, Columns::ALL, false);
         assert_eq!(child.spans[0].content, "  └─ ");
@@ -1963,14 +2223,14 @@ mod tests {
                 .collect()
         };
         let mut f = Filter::default();
-        assert!(f.is_empty() && f.describe().is_empty());
+        assert!(f.is_empty() && f.describe(View::List).is_empty());
         assert_eq!(ids(&f), ["t-000001", "t-000002", "t-000004"]);
         // closed joins the default set, and a status replaces it
         f.closed = true;
         assert_eq!(ids(&f).len(), 4);
         f.status = Some(Status::Closed);
         assert_eq!(ids(&f), ["t-000003"]);
-        assert_eq!(f.describe(), "closed · closed");
+        assert_eq!(f.describe(View::List), "closed · closed");
         f = Filter::default();
         // the kind, text in any case, and mine across sessions
         f.kind = Some(Kind::Milestone);
@@ -1987,7 +2247,7 @@ mod tests {
         db.issues.get_mut("t-000004").unwrap().assignee = Some("ann/s2".into());
         let rows = list_rows(&db, &f, "ann/s1", &HashSet::new());
         assert_eq!(rows.len(), 1);
-        assert_eq!(f.describe(), "mine");
+        assert_eq!(f.describe(View::List), "mine");
         // s and t cycle through every value and back to off
         let mut s = None;
         let mut seen = Vec::new();
@@ -2320,7 +2580,7 @@ mod tests {
         let key = |st: &mut State, code| handle(st, press(code), &rows, &db, &limits);
         let page = |st: &State| match &st.mode {
             Mode::Detail(p) => (p.id().to_string(), p.cursor, p.scroll, p.tie),
-            Mode::Rows => panic!("a page"),
+            Mode::Rows | Mode::Recall(_) => panic!("a page"),
         };
         for _ in 0..4 {
             assert_eq!(key(&mut st, KeyCode::Char('j')), Action::Draw);
@@ -2506,5 +2766,179 @@ mod tests {
         page.go(0);
         draw(&mut page);
         assert_eq!(page.scroll, 0);
+    }
+
+    fn memory(slug: &str, text: &str, commit: &str) -> Memory {
+        let now = Timestamp::now();
+        Memory {
+            slug: slug.into(),
+            text: text.into(),
+            created_at: now,
+            updated_at: now,
+            stamp: Stamp {
+                commit: commit.into(),
+                branch: "dev".into(),
+            },
+        }
+    }
+
+    fn with_memories() -> Db {
+        let mut db = test_db();
+        for m in [
+            memory("prefix", "ids use the prefix `t`", "aaaaaaa"),
+            memory(
+                "review",
+                "the review found nine issues\nall fixed",
+                "bbbbbbb",
+            ),
+        ] {
+            db.memories.insert(m.slug.clone(), m);
+        }
+        db
+    }
+
+    fn distance(commit: &str) -> Distance {
+        match commit {
+            "aaaaaaa" => Distance::Behind(1),
+            _ => Distance::Elsewhere,
+        }
+    }
+
+    #[test]
+    fn memory_rows_match_the_text_and_mark_the_old_ones() {
+        let db = with_memories();
+        let rows = memory_rows(&db, &Filter::default(), distance);
+        let ages: Vec<(&str, &str, bool)> = rows
+            .iter()
+            .map(|r| match r {
+                Row::Memory {
+                    memory,
+                    age,
+                    marked,
+                } => (memory.slug.as_str(), age.as_str(), *marked),
+                _ => panic!("a memory row"),
+            })
+            .collect();
+        assert_eq!(
+            ages,
+            [
+                ("prefix", "1 commit ago", false),
+                ("review", "on dev", true)
+            ]
+        );
+        let filter = Filter {
+            text: "NINE".into(),
+            ..Filter::default()
+        };
+        let rows = memory_rows(&db, &filter, distance);
+        assert!(matches!(&rows[..], [Row::Memory { memory, .. }] if memory.slug == "review"));
+        let filter = Filter {
+            text: "nope".into(),
+            ..Filter::default()
+        };
+        let rows = memory_rows(&db, &filter, distance);
+        assert!(matches!(&rows[..], [Row::Note("no memory matches")]));
+        assert!(matches!(
+            &memory_rows(&test_db(), &Filter::default(), distance)[..],
+            [Row::Note("nothing remembered yet")]
+        ));
+    }
+
+    #[test]
+    fn a_memory_row_is_the_slug_the_first_line_and_the_age() {
+        let db = with_memories();
+        let rows = memory_rows(&db, &Filter::default(), distance);
+        let widths = widths(&rows);
+        assert_eq!(widths.slug, 6);
+        let columns = Columns::at(60);
+        let lines = strings(&[
+            line(&rows[0], &widths, 60, columns, false),
+            line(&rows[1], &widths, 60, columns, false),
+        ]);
+        assert_eq!(lines[0], "prefix  ids use the prefix `t`  1 commit ago");
+        assert_eq!(lines[1], "review  the review found nine issues  on dev");
+        // too narrow for both, the text and the age share the room
+        let short = strings(&[line(&rows[1], &widths, 30, columns, false)]);
+        assert_eq!(short[0].chars().count(), 30, "{}", short[0]);
+        assert!(short[0].starts_with("review  the review"), "{}", short[0]);
+        assert!(short[0].ends_with("…  on d…"), "{}", short[0]);
+    }
+
+    #[test]
+    fn tab_reaches_the_memories_and_enter_opens_one() {
+        let db = with_memories();
+        let rows = memory_rows(&db, &Filter::default(), distance);
+        let mut st = State::new();
+        let limits = Limits {
+            scroll: 3,
+            rows: 4,
+            ..Limits::default()
+        };
+        let key = |st: &mut State, code| handle(st, press(code), &rows, &db, &limits);
+        key(&mut st, KeyCode::Tab);
+        key(&mut st, KeyCode::Tab);
+        assert_eq!(st.view, View::Memories);
+        assert_eq!(key(&mut st, KeyCode::Tab), Action::Rebuild(After::First));
+        assert_eq!(st.view, View::List);
+        key(&mut st, KeyCode::BackTab);
+        assert_eq!(st.view, View::Memories);
+        // the issue filters do nothing here
+        assert_eq!(key(&mut st, KeyCode::Char('s')), Action::Draw);
+        assert!(st.filter.status.is_none());
+        st.list.select(Some(1));
+        key(&mut st, KeyCode::Enter);
+        assert!(matches!(&st.mode, Mode::Recall(r) if r.slug == "review" && r.scroll == 0));
+        key(&mut st, KeyCode::Char('j'));
+        key(&mut st, KeyCode::Char('G'));
+        assert!(matches!(&st.mode, Mode::Recall(r) if r.scroll == 3));
+        handle(&mut st, ctrl('u'), &rows, &db, &limits);
+        assert!(matches!(&st.mode, Mode::Recall(r) if r.scroll == 1));
+        key(&mut st, KeyCode::Esc);
+        assert!(matches!(st.mode, Mode::Rows));
+        assert_eq!(st.filter.describe(View::Memories), "");
+        st.filter.closed = true;
+        st.filter.text = "x".into();
+        assert_eq!(st.filter.describe(View::Memories), "/x");
+    }
+
+    #[test]
+    fn a_memory_page_shows_the_text_and_where_it_was_remembered() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+        let db = with_memories();
+        let m = &db.memories["review"];
+        let title = Line::from("t");
+        let mut terminal = Terminal::new(TestBackend::new(50, 10)).unwrap();
+        let mut recall = Recall {
+            slug: "review".into(),
+            scroll: 0,
+        };
+        terminal
+            .draw(|f| {
+                draw_recall(f, &title, m, "on dev", true, &mut recall);
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let rows: Vec<String> = (0..buffer.area.height)
+            .map(|y| {
+                (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol().to_string())
+                    .collect()
+            })
+            .collect();
+        assert!(rows[0].ends_with("memory"), "{}", rows[0]);
+        assert!(rows[1].starts_with("╭ review "), "{}", rows[1]);
+        assert!(
+            rows[2].contains("the review found nine issues"),
+            "{}",
+            rows[2]
+        );
+        let at = rows
+            .iter()
+            .find(|r| r.contains("at bbbbbbb, on dev"))
+            .unwrap();
+        let x = u16::try_from(at.find("at bbbbbbb").unwrap()).unwrap();
+        let y = u16::try_from(rows.iter().position(|r| r == at).unwrap()).unwrap();
+        assert_eq!(buffer[(x, y)].fg, Color::Yellow);
     }
 }
