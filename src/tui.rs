@@ -5,7 +5,7 @@ use std::collections::HashSet;
 
 use anyhow::Result;
 use jiff::Timestamp;
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
@@ -109,7 +109,7 @@ fn cycle<T: clap::ValueEnum + Copy + PartialEq>(cur: Option<T>) -> Option<T> {
 }
 
 /// Which rows are up.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum View {
     /// What `foam list` prints: open and in-progress issues as
     /// a tree.
@@ -253,40 +253,80 @@ struct Screen<'a> {
     widths: Widths,
 }
 
+/// Everything a key can change.
+struct State {
+    view: View,
+    mode: Mode,
+    list: ListState,
+    preview: bool,
+    filter: Filter,
+    /// Whether keys go into the filter's text.
+    typing: bool,
+    folded: HashSet<String>,
+}
+
+impl State {
+    fn new() -> State {
+        State {
+            view: View::List,
+            mode: Mode::Rows,
+            list: ListState::default(),
+            preview: true,
+            filter: Filter::default(),
+            typing: false,
+            folded: HashSet::new(),
+        }
+    }
+}
+
+/// What the loop does once a key has changed the state.
+#[derive(Debug, PartialEq, Eq)]
+enum Action {
+    Quit,
+    /// Read the ref again and build the rows from scratch.
+    Reload,
+    Draw,
+    /// Build the rows again from the same data, and put the
+    /// cursor where the variant says.
+    Rebuild(After),
+}
+
+/// Where the cursor lands after the rows are rebuilt.
+#[derive(Debug, PartialEq, Eq)]
+enum After {
+    /// Where it was, if that is still an issue row.
+    Kept,
+    First,
+    On(String),
+}
+
 fn screen(terminal: &mut DefaultTerminal, store: &Store, actor: &str) -> Result<()> {
-    let mut view = View::List;
-    let mut mode = Mode::Rows;
-    let mut state = ListState::default();
-    let mut preview = true;
-    let mut filter = Filter::default();
-    // whether keys go into the filter's text
-    let mut typing = false;
-    let mut folded: HashSet<String> = HashSet::new();
+    let mut st = State::new();
     loop {
         let snap = store
             .load()?
             .ok_or_else(|| anyhow::anyhow!("{}", crate::store::NOT_INITIALIZED))?;
-        let mut screen = build(store, &snap.db, view, &filter, actor, &folded)?;
-        keep(&mut state, &screen.rows);
+        let mut screen = build(store, &snap.db, st.view, &st.filter, actor, &st.folded)?;
+        keep(&mut st.list, &screen.rows);
         // a page whose issues a reload took away falls back
-        if let Mode::Detail(page) = &mut mode {
+        if let Mode::Detail(page) = &mut st.mode {
             page.prune(&snap.db);
             if page.ids.is_empty() {
-                mode = Mode::Rows;
+                st.mode = Mode::Rows;
             }
         }
         loop {
             let mut limits = Limits::default();
-            match &mode {
+            match &st.mode {
                 Mode::Rows => {
-                    let right = match (typing, filter.describe()) {
-                        (true, _) => format!("/{}▏", filter.text),
-                        (false, on) if on.is_empty() => view.name().to_string(),
-                        (false, on) => format!("{on}   {}", view.name()),
+                    let right = match (st.typing, st.filter.describe()) {
+                        (true, _) => format!("/{}▏", st.filter.text),
+                        (false, on) if on.is_empty() => st.view.name().to_string(),
+                        (false, on) => format!("{on}   {}", st.view.name()),
                     };
-                    terminal.draw(|frame| {
-                        draw_rows(frame, &screen, &mut state, &snap.db, preview, &right)
-                    })?;
+                    let (list, preview) = (&mut st.list, st.preview);
+                    terminal
+                        .draw(|frame| draw_rows(frame, &screen, list, &snap.db, preview, &right))?;
                 }
                 Mode::Detail(page) => {
                     let issue = &snap.db.issues[page.id()];
@@ -301,136 +341,164 @@ fn screen(terminal: &mut DefaultTerminal, store: &Store, actor: &str) -> Result<
             if key.kind != KeyEventKind::Press {
                 continue;
             }
-            let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-            if typing {
-                match key.code {
-                    KeyCode::Esc | KeyCode::Enter => typing = false,
-                    KeyCode::Backspace => {
-                        filter.text.pop();
-                    }
-                    KeyCode::Char(c) if !ctrl => filter.text.push(c),
-                    KeyCode::Char('c') => return Ok(()),
-                    _ => {}
-                }
-                screen = build(store, &snap.db, view, &filter, actor, &folded)?;
-                keep(&mut state, &screen.rows);
-                continue;
-            }
-            match key.code {
-                KeyCode::Char('q') => return Ok(()),
-                KeyCode::Char('c') if ctrl => return Ok(()),
-                KeyCode::Char('r') => break,
-                _ => {}
-            }
-            match &mut mode {
-                Mode::Rows => match key.code {
-                    KeyCode::Esc if filter.is_empty() => return Ok(()),
-                    KeyCode::Esc => {
-                        filter = Filter::default();
-                        screen = build(store, &snap.db, view, &filter, actor, &folded)?;
-                        keep(&mut state, &screen.rows);
-                    }
-                    KeyCode::Char('p') => preview = !preview,
-                    KeyCode::Char(' ') => {
-                        let chosen = match state.selected().map(|i| &screen.rows[i]) {
-                            Some(Row::Issue { issue, .. })
-                                if !graph::children(&snap.db, &issue.id).is_empty() =>
-                            {
-                                Some(issue.id.clone())
-                            }
-                            _ => None,
-                        };
-                        if let Some(id) = chosen {
-                            if !folded.remove(&id) {
-                                folded.insert(id.clone());
-                            }
-                            screen = build(store, &snap.db, view, &filter, actor, &folded)?;
-                            state.select(screen.rows.iter().position(
+            match handle(&mut st, key, &screen.rows, &snap.db, &limits) {
+                Action::Quit => return Ok(()),
+                Action::Reload => break,
+                Action::Draw => {}
+                Action::Rebuild(after) => {
+                    screen = build(store, &snap.db, st.view, &st.filter, actor, &st.folded)?;
+                    match after {
+                        After::Kept => keep(&mut st.list, &screen.rows),
+                        After::First => st.list.select(step(&screen.rows, None, 1)),
+                        After::On(id) => {
+                            st.list.select(screen.rows.iter().position(
                                 |r| matches!(r, Row::Issue { issue, .. } if issue.id == id),
-                            ));
+                            ))
                         }
-                    }
-                    KeyCode::Char('s')
-                    | KeyCode::Char('t')
-                    | KeyCode::Char('a')
-                    | KeyCode::Char('c')
-                    | KeyCode::Char('/') => {
-                        match key.code {
-                            KeyCode::Char('s') => filter.status = cycle(filter.status),
-                            KeyCode::Char('t') => filter.kind = cycle(filter.kind),
-                            KeyCode::Char('a') => filter.mine = !filter.mine,
-                            KeyCode::Char('c') => filter.closed = !filter.closed,
-                            _ => typing = true,
-                        }
-                        screen = build(store, &snap.db, view, &filter, actor, &folded)?;
-                        keep(&mut state, &screen.rows);
-                    }
-                    KeyCode::Tab | KeyCode::BackTab => {
-                        view = view.other();
-                        screen = build(store, &snap.db, view, &filter, actor, &folded)?;
-                        state.select(step(&screen.rows, None, 1));
-                    }
-                    KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => {
-                        if let Some(Row::Issue { issue, .. }) =
-                            state.selected().map(|i| &screen.rows[i])
-                        {
-                            mode = Mode::Detail(Page::open(issue.id.clone()));
-                        }
-                    }
-                    KeyCode::Char('j') | KeyCode::Down => {
-                        state.select(step(&screen.rows, state.selected(), 1));
-                    }
-                    KeyCode::Char('k') | KeyCode::Up => {
-                        state.select(step(&screen.rows, state.selected(), -1));
-                    }
-                    KeyCode::Char('g') | KeyCode::Home => {
-                        state.select(step(&screen.rows, None, 1));
-                    }
-                    KeyCode::Char('G') | KeyCode::End => {
-                        state.select(step(&screen.rows, None, -1));
-                    }
-                    _ => {}
-                },
-                Mode::Detail(page) => {
-                    let last_tie = limits.ties.len().saturating_sub(1);
-                    match key.code {
-                        KeyCode::Esc | KeyCode::Char('h') | KeyCode::Left | KeyCode::Backspace => {
-                            if !page.back() {
-                                mode = Mode::Rows;
-                            }
-                        }
-                        KeyCode::Tab | KeyCode::BackTab => {
-                            page.tie = match page.tie {
-                                None if !limits.ties.is_empty() => Some(0),
-                                _ => None,
-                            };
-                        }
-                        KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => {
-                            if let Some(id) = page.tie.and_then(|k| limits.ties.get(k)) {
-                                page.follow(id.clone());
-                            }
-                        }
-                        KeyCode::Char('j') | KeyCode::Down => match page.tie {
-                            Some(k) => page.tie = Some((k + 1).min(last_tie)),
-                            None => page.scroll = (page.scroll + 1).min(limits.scroll),
-                        },
-                        KeyCode::Char('k') | KeyCode::Up => match page.tie {
-                            Some(k) => page.tie = Some(k.saturating_sub(1)),
-                            None => page.scroll = page.scroll.saturating_sub(1),
-                        },
-                        KeyCode::Char('g') | KeyCode::Home => match page.tie {
-                            Some(_) => page.tie = Some(0),
-                            None => page.scroll = 0,
-                        },
-                        KeyCode::Char('G') | KeyCode::End => match page.tie {
-                            Some(_) => page.tie = Some(last_tie),
-                            None => page.scroll = limits.scroll,
-                        },
-                        _ => {}
                     }
                 }
             }
         }
+    }
+}
+
+/// Apply one key to the state and say what the loop does next.
+fn handle(st: &mut State, key: KeyEvent, rows: &[Row], db: &Db, limits: &Limits) -> Action {
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    if st.typing {
+        match key.code {
+            KeyCode::Esc | KeyCode::Enter => st.typing = false,
+            KeyCode::Backspace => {
+                st.filter.text.pop();
+            }
+            KeyCode::Char(c) if !ctrl => st.filter.text.push(c),
+            KeyCode::Char('c') => return Action::Quit,
+            _ => {}
+        }
+        return Action::Rebuild(After::Kept);
+    }
+    match key.code {
+        KeyCode::Char('q') => return Action::Quit,
+        KeyCode::Char('c') if ctrl => return Action::Quit,
+        KeyCode::Char('r') => return Action::Reload,
+        _ => {}
+    }
+    match &mut st.mode {
+        Mode::Rows => handle_rows(st, key.code, rows, db),
+        Mode::Detail(page) => {
+            let last_tie = limits.ties.len().saturating_sub(1);
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('h') | KeyCode::Left | KeyCode::Backspace => {
+                    if !page.back() {
+                        st.mode = Mode::Rows;
+                    }
+                }
+                KeyCode::Tab | KeyCode::BackTab => {
+                    page.tie = match page.tie {
+                        None if !limits.ties.is_empty() => Some(0),
+                        _ => None,
+                    };
+                }
+                KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => {
+                    if let Some(id) = page.tie.and_then(|k| limits.ties.get(k)) {
+                        page.follow(id.clone());
+                    }
+                }
+                KeyCode::Char('j') | KeyCode::Down => match page.tie {
+                    Some(k) => page.tie = Some((k + 1).min(last_tie)),
+                    None => page.scroll = (page.scroll + 1).min(limits.scroll),
+                },
+                KeyCode::Char('k') | KeyCode::Up => match page.tie {
+                    Some(k) => page.tie = Some(k.saturating_sub(1)),
+                    None => page.scroll = page.scroll.saturating_sub(1),
+                },
+                KeyCode::Char('g') | KeyCode::Home => match page.tie {
+                    Some(_) => page.tie = Some(0),
+                    None => page.scroll = 0,
+                },
+                KeyCode::Char('G') | KeyCode::End => match page.tie {
+                    Some(_) => page.tie = Some(last_tie),
+                    None => page.scroll = limits.scroll,
+                },
+                _ => {}
+            }
+            Action::Draw
+        }
+    }
+}
+
+/// A key on the rows.
+fn handle_rows(st: &mut State, code: KeyCode, rows: &[Row], db: &Db) -> Action {
+    let chosen = st.list.selected().and_then(|i| match rows.get(i) {
+        Some(Row::Issue { issue, .. }) => Some(*issue),
+        _ => None,
+    });
+    match code {
+        KeyCode::Esc if st.filter.is_empty() => Action::Quit,
+        KeyCode::Esc => {
+            st.filter = Filter::default();
+            Action::Rebuild(After::Kept)
+        }
+        KeyCode::Char('p') => {
+            st.preview = !st.preview;
+            Action::Draw
+        }
+        KeyCode::Char(' ') => match chosen {
+            Some(issue) if !graph::children(db, &issue.id).is_empty() => {
+                if !st.folded.remove(&issue.id) {
+                    st.folded.insert(issue.id.clone());
+                }
+                Action::Rebuild(After::On(issue.id.clone()))
+            }
+            _ => Action::Draw,
+        },
+        KeyCode::Char('s') => {
+            st.filter.status = cycle(st.filter.status);
+            Action::Rebuild(After::Kept)
+        }
+        KeyCode::Char('t') => {
+            st.filter.kind = cycle(st.filter.kind);
+            Action::Rebuild(After::Kept)
+        }
+        KeyCode::Char('a') => {
+            st.filter.mine = !st.filter.mine;
+            Action::Rebuild(After::Kept)
+        }
+        KeyCode::Char('c') => {
+            st.filter.closed = !st.filter.closed;
+            Action::Rebuild(After::Kept)
+        }
+        KeyCode::Char('/') => {
+            st.typing = true;
+            Action::Rebuild(After::Kept)
+        }
+        KeyCode::Tab | KeyCode::BackTab => {
+            st.view = st.view.other();
+            Action::Rebuild(After::First)
+        }
+        KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => {
+            if let Some(issue) = chosen {
+                st.mode = Mode::Detail(Page::open(issue.id.clone()));
+            }
+            Action::Draw
+        }
+        KeyCode::Char('j') | KeyCode::Down => {
+            st.list.select(step(rows, st.list.selected(), 1));
+            Action::Draw
+        }
+        KeyCode::Char('k') | KeyCode::Up => {
+            st.list.select(step(rows, st.list.selected(), -1));
+            Action::Draw
+        }
+        KeyCode::Char('g') | KeyCode::Home => {
+            st.list.select(step(rows, None, 1));
+            Action::Draw
+        }
+        KeyCode::Char('G') | KeyCode::End => {
+            st.list.select(step(rows, None, -1));
+            Action::Draw
+        }
+        _ => Action::Draw,
     }
 }
 
@@ -1952,5 +2020,152 @@ mod tests {
         assert_eq!(spans.len(), 2);
         assert_eq!(spans[1].content, "c…");
         assert_eq!(spans[1].style.fg, Some(Color::Cyan));
+    }
+
+    fn press(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    fn ctrl(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)
+    }
+
+    /// The fixture's rows, a state with the cursor on the first
+    /// one, and the fixture's db.
+    fn on_rows() -> (Db, State) {
+        let (db, _) = fixture();
+        let mut st = State::new();
+        let rows = list_rows(&db, &Filter::default(), "ann", &HashSet::new());
+        st.list.select(step(&rows, None, 1));
+        (db, st)
+    }
+
+    fn chosen<'a>(st: &State, rows: &[Row<'a>]) -> &'a str {
+        match &rows[st.list.selected().unwrap()] {
+            Row::Issue { issue, .. } => issue.id.as_str(),
+            _ => panic!("an issue row"),
+        }
+    }
+
+    #[test]
+    fn keys_on_the_rows_move_open_and_come_back() {
+        let (db, mut st) = on_rows();
+        let rows = list_rows(&db, &Filter::default(), "ann", &HashSet::new());
+        let limits = Limits::default();
+        let key = |st: &mut State, code| handle(st, press(code), &rows, &db, &limits);
+        assert_eq!(chosen(&st, &rows), "t-000001");
+        assert_eq!(key(&mut st, KeyCode::Char('j')), Action::Draw);
+        assert_eq!(chosen(&st, &rows), "t-000002");
+        assert_eq!(key(&mut st, KeyCode::Char('G')), Action::Draw);
+        assert_eq!(chosen(&st, &rows), "t-000004");
+        assert_eq!(key(&mut st, KeyCode::Char('k')), Action::Draw);
+        assert_eq!(key(&mut st, KeyCode::Enter), Action::Draw);
+        assert!(matches!(&st.mode, Mode::Detail(p) if p.id() == "t-000002"));
+        assert_eq!(key(&mut st, KeyCode::Esc), Action::Draw);
+        assert!(matches!(st.mode, Mode::Rows));
+        assert_eq!(key(&mut st, KeyCode::Esc), Action::Quit);
+        assert_eq!(key(&mut st, KeyCode::Char('q')), Action::Quit);
+        assert_eq!(key(&mut st, KeyCode::Char('r')), Action::Reload);
+        assert_eq!(
+            handle(&mut st, ctrl('c'), &rows, &db, &limits),
+            Action::Quit
+        );
+    }
+
+    #[test]
+    fn the_filter_takes_typed_text_and_esc_clears_it() {
+        let (db, mut st) = on_rows();
+        let rows = list_rows(&db, &Filter::default(), "ann", &HashSet::new());
+        let limits = Limits::default();
+        let key = |st: &mut State, code| handle(st, press(code), &rows, &db, &limits);
+        assert_eq!(
+            key(&mut st, KeyCode::Char('/')),
+            Action::Rebuild(After::Kept)
+        );
+        assert!(st.typing);
+        // q and j are text while typing, not keys
+        assert_eq!(
+            key(&mut st, KeyCode::Char('q')),
+            Action::Rebuild(After::Kept)
+        );
+        assert_eq!(
+            key(&mut st, KeyCode::Char('j')),
+            Action::Rebuild(After::Kept)
+        );
+        assert_eq!(
+            key(&mut st, KeyCode::Backspace),
+            Action::Rebuild(After::Kept)
+        );
+        assert_eq!(st.filter.text, "q");
+        assert_eq!(key(&mut st, KeyCode::Enter), Action::Rebuild(After::Kept));
+        assert!(!st.typing);
+        assert_eq!(
+            key(&mut st, KeyCode::Char('c')),
+            Action::Rebuild(After::Kept)
+        );
+        assert!(st.filter.closed);
+        assert_eq!(key(&mut st, KeyCode::Esc), Action::Rebuild(After::Kept));
+        assert!(st.filter.is_empty());
+        st.typing = true;
+        assert_eq!(
+            handle(&mut st, ctrl('c'), &rows, &db, &limits),
+            Action::Quit
+        );
+    }
+
+    #[test]
+    fn space_folds_an_issue_with_children_and_tab_swaps_the_view() {
+        let (db, mut st) = on_rows();
+        let rows = list_rows(&db, &Filter::default(), "ann", &HashSet::new());
+        let limits = Limits::default();
+        let key = |st: &mut State, code| handle(st, press(code), &rows, &db, &limits);
+        assert_eq!(
+            key(&mut st, KeyCode::Char(' ')),
+            Action::Rebuild(After::On("t-000001".into()))
+        );
+        assert!(st.folded.contains("t-000001"));
+        assert_eq!(
+            key(&mut st, KeyCode::Char(' ')),
+            Action::Rebuild(After::On("t-000001".into()))
+        );
+        assert!(st.folded.is_empty());
+        key(&mut st, KeyCode::Char('G'));
+        assert_eq!(key(&mut st, KeyCode::Char(' ')), Action::Draw);
+        assert_eq!(key(&mut st, KeyCode::Tab), Action::Rebuild(After::First));
+        assert_eq!(st.view, View::Board);
+        assert_eq!(key(&mut st, KeyCode::Char('p')), Action::Draw);
+        assert!(!st.preview);
+    }
+
+    #[test]
+    fn keys_on_a_page_scroll_the_notes_or_walk_the_ties() {
+        let (db, mut st) = on_rows();
+        let rows = list_rows(&db, &Filter::default(), "ann", &HashSet::new());
+        st.mode = Mode::Detail(Page::open("t-000002".into()));
+        let limits = Limits {
+            scroll: 2,
+            ties: vec!["t-000001".into(), "t-000004".into()],
+        };
+        let key = |st: &mut State, code| handle(st, press(code), &rows, &db, &limits);
+        let page = |st: &State| match &st.mode {
+            Mode::Detail(p) => (p.id().to_string(), p.scroll, p.tie),
+            Mode::Rows => panic!("a page"),
+        };
+        for _ in 0..4 {
+            assert_eq!(key(&mut st, KeyCode::Char('j')), Action::Draw);
+        }
+        assert_eq!(page(&st), ("t-000002".into(), 2, None));
+        key(&mut st, KeyCode::Char('g'));
+        assert_eq!(page(&st).1, 0);
+        key(&mut st, KeyCode::Tab);
+        key(&mut st, KeyCode::Char('j'));
+        key(&mut st, KeyCode::Char('j'));
+        assert_eq!(page(&st).2, Some(1));
+        key(&mut st, KeyCode::Enter);
+        assert_eq!(page(&st), ("t-000004".into(), 0, None));
+        key(&mut st, KeyCode::Char('h'));
+        assert_eq!(page(&st).0, "t-000002");
+        key(&mut st, KeyCode::Backspace);
+        assert!(matches!(st.mode, Mode::Rows));
     }
 }
