@@ -1,0 +1,28 @@
+{
+  "id": "foam-a611ce",
+  "title": "Rename in_progress to claimed in the schema, and shorten keywords across it",
+  "body": "",
+  "type": "task",
+  "status": "open",
+  "priority": 3,
+  "labels": [],
+  "parent": null,
+  "blocked_by": [],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-10-10T02:18:54.559953585Z",
+  "updated_at": "2026-10-10T02:18:54.559953585Z",
+  "closed_at": null,
+  "close_reason": null,
+  "resolution": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "d3d8a3a",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
