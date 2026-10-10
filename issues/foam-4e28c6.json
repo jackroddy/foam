@@ -1,0 +1,28 @@
+{
+  "id": "foam-4e28c6",
+  "title": "Review the README before the 0.5.0 release",
+  "body": "The note command's flags in the reference and the narrative: --reply-to, --edit, --rm, --history, prefix addressing; the show example shows a reply; schema 3 named where schemas are explained.",
+  "type": "chore",
+  "status": "open",
+  "priority": 1,
+  "labels": [],
+  "parent": "foam-12ec90",
+  "blocked_by": [],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-10-10T00:35:00.772930562Z",
+  "updated_at": "2026-10-10T00:35:00.772930562Z",
+  "closed_at": null,
+  "close_reason": null,
+  "resolution": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "bbf3cee",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
