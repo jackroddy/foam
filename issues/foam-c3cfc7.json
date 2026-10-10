@@ -1,0 +1,28 @@
+{
+  "id": "foam-c3cfc7",
+  "title": "Edit a note in place, with edited_at",
+  "body": "foam note edit <note> <text>. History comes from the ref: foam note history <note> walks foam log for the issue and diffs the one field.",
+  "type": "task",
+  "status": "open",
+  "priority": 2,
+  "labels": [],
+  "parent": "foam-12ec90",
+  "blocked_by": [],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-10-10T00:03:11.229688218Z",
+  "updated_at": "2026-10-10T00:03:11.229688218Z",
+  "closed_at": null,
+  "close_reason": null,
+  "resolution": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "34d8e13",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
