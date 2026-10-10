@@ -3,20 +3,20 @@
   "title": "Notes addressable by id prefix on the command line",
   "body": "The same prefix shortening issues have, scoped to an issue.",
   "type": "task",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 2,
   "labels": [],
   "parent": "foam-12ec90",
   "blocked_by": [],
   "related": [],
   "assignee": "Jack Roddy/6de6737a",
-  "lease_expires": "2026-10-10T00:43:53.651370669Z",
+  "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-10T00:03:11.212111277Z",
-  "updated_at": "2026-10-10T00:28:53.651370669Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-10-10T00:31:31.946466656Z",
+  "closed_at": "2026-10-10T00:31:31.946466656Z",
+  "close_reason": "resolve_note: exact id or unique prefix on the issue; used by --edit, --rm, --history and reply",
+  "resolution": "done",
   "notes": [
     {
       "id": "fc73b772",
@@ -32,6 +32,9 @@
       "commit": "34d8e13",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "04e0935",
+      "branch": "dev"
+    }
   }
 }
