@@ -13,11 +13,20 @@
   "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-10T02:30:47.726082286Z",
-  "updated_at": "2026-10-10T02:30:47.726082286Z",
+  "updated_at": "2026-10-10T02:30:47.738479176Z",
   "closed_at": null,
   "close_reason": null,
   "resolution": null,
-  "notes": [],
+  "notes": [
+    {
+      "id": "df044c5f",
+      "at": "2026-10-10T02:30:47.738478526Z",
+      "author": "Jack Roddy/42dfd115",
+      "text": "Two things to explore, filed 2026-10-09. (1) Refresh over time: event::poll with a timeout instead of a blocking read, then compare the data ref's tip oid to the one drawn and rebuild when it moved; the oid check is one rev-parse, cheap enough every second or two. (2) A write from the CLI tells a running screen: options are the screen watching the ref itself (inotify on .git/refs/foam/data and packed-refs, no messaging needed, but packed refs and worktrees complicate the path), or a socket or pid file the screen leaves in .git for the CLI to poke after a write. Decide after (1) lands, since polling the oid may make (2) unnecessary.",
+      "commit": "d1971c3",
+      "branch": "dev"
+    }
+  ],
   "stamps": {
     "created": {
       "commit": "d1971c3",
