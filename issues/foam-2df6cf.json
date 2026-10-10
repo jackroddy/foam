@@ -3,7 +3,7 @@
   "title": "v0.6.0",
   "body": "",
   "type": "milestone",
-  "status": "open",
+  "status": "closed",
   "priority": 1,
   "labels": [],
   "parent": null,
@@ -13,16 +13,19 @@
   "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-10T04:53:56.682501647Z",
-  "updated_at": "2026-10-10T04:53:56.682501647Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-10-10T04:54:55.607423852Z",
+  "closed_at": "2026-10-10T04:54:55.607423852Z",
+  "close_reason": "tagged v0.6.0 at 3ca5a0b",
+  "resolution": "done",
   "notes": [],
   "stamps": {
     "created": {
       "commit": "357ddd8",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "c8446ad",
+      "branch": "dev"
+    }
   }
 }
