@@ -175,6 +175,7 @@ mod tests {
     fn note(text: &str, secs: i64) -> Note {
         Note {
             id: text.into(),
+            reply_to: None,
             at: Timestamp::UNIX_EPOCH + jiff::SignedDuration::from_secs(secs),
             author: "a".into(),
             text: text.into(),

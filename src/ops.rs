@@ -386,13 +386,23 @@ pub fn heartbeat(store: &Store, id: &str, actor: &str) -> Result<Issue> {
     })
 }
 
-pub fn note(store: &Store, id: &str, actor: &str, text: &str) -> Result<Issue> {
+pub fn note(
+    store: &Store,
+    id: &str,
+    actor: &str,
+    text: &str,
+    reply_to: Option<&str>,
+) -> Result<Issue> {
     let stamp = store.git.head_stamp()?;
     store.write_named(|db| {
         let id = resolve(db, id)?;
         let issue = get_mut(db, &id)?;
+        let reply_to = reply_to
+            .map(|q| live_note(issue, q).map(|n| n.id.clone()))
+            .transpose()?;
         issue.notes.push(Note {
             id: new_note_id(),
+            reply_to,
             at: Timestamp::now(),
             author: actor.to_string(),
             text: text.to_string(),
@@ -464,6 +474,7 @@ pub fn session_end(store: &Store, actor: &str) -> Result<Vec<Issue>> {
             if issue.status == Status::InProgress && issue.assignee.as_deref() == Some(actor) {
                 issue.notes.push(Note {
                     id: new_note_id(),
+                    reply_to: None,
                     at: Timestamp::now(),
                     author: actor.to_string(),
                     text: "released at session end".into(),

@@ -16,7 +16,7 @@ pub type Files = BTreeMap<String, Value>;
 pub const WINDOW: u32 = 3;
 
 /// The foam that first wrote each schema.
-const INTRODUCED: &[(u32, &str)] = &[(1, "0.1.0"), (2, "0.4.0")];
+const INTRODUCED: &[(u32, &str)] = &[(1, "0.1.0"), (2, "0.4.0"), (3, "0.5.0")];
 
 /// The first foam that writes `schema`.
 pub fn introduced(schema: u32) -> &'static str {
@@ -33,10 +33,22 @@ struct Step {
 }
 
 /// The steps this foam carries, oldest first.
-const STEPS: &[Step] = &[Step {
-    from: 1,
-    run: notes_get_ids,
-}];
+const STEPS: &[Step] = &[
+    Step {
+        from: 1,
+        run: notes_get_ids,
+    },
+    Step {
+        from: 2,
+        run: notes_may_answer,
+    },
+];
+
+/// Schema 3: a note may answer another. Nothing to rewrite; the
+/// number alone keeps a foam that drops the field from writing.
+fn notes_may_answer(_: &mut Files) -> Result<()> {
+    Ok(())
+}
 
 /// Schema 2: every note has an id.
 fn notes_get_ids(files: &mut Files) -> Result<()> {

@@ -181,6 +181,9 @@ enum Cmd {
         /// The note's text; not needed with --rm or --history
         #[arg(allow_hyphen_values = true)]
         text: Option<String>,
+        /// Answer this note, given as its id or a prefix of it
+        #[arg(long, value_name = "NOTE", conflicts_with_all = ["edit", "rm", "history"])]
+        reply_to: Option<String>,
         /// Replace the text of this note, given as its id or a prefix of it
         #[arg(long, value_name = "NOTE", conflicts_with_all = ["rm", "history"])]
         edit: Option<String>,

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::git::Stamp;
 
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
 pub const LEASE_MINUTES: u32 = 15;
 pub const MEMORY_MAX_BYTES: usize = 512;
@@ -99,6 +99,48 @@ pub struct Note {
     /// merge does not bring it back.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deleted_at: Option<Timestamp>,
+    /// The note this one answers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reply_to: Option<String>,
+}
+
+/// The notes still showing, as threads: each with its depth,
+/// replies under what they answer, oldest first at every level.
+/// A reply to a note that is gone stands at the top.
+pub fn threaded(notes: &[Note]) -> Vec<(usize, &Note)> {
+    fn under<'a>(
+        notes: &[&'a Note],
+        parent: Option<&str>,
+        depth: usize,
+        out: &mut Vec<(usize, &'a Note)>,
+    ) {
+        for n in notes.iter().filter(|n| n.reply_to.as_deref() == parent) {
+            out.push((depth, n));
+            under(notes, Some(&n.id), depth + 1, out);
+        }
+    }
+    let mut live: Vec<&Note> = notes.iter().filter(|n| n.deleted_at.is_none()).collect();
+    live.sort_by_key(|n| n.at);
+    let mut out = Vec::new();
+    under(&live, None, 0, &mut out);
+    // a reply whose parent is removed or missing has not been
+    // placed yet; it goes last, at the top level, with its own
+    // replies under it
+    let orphans: Vec<&Note> = live
+        .iter()
+        .copied()
+        .filter(|n| !out.iter().any(|(_, p)| p.id == n.id))
+        .filter(|n| {
+            n.reply_to
+                .as_deref()
+                .is_none_or(|p| !live.iter().any(|l| l.id == p))
+        })
+        .collect();
+    for n in orphans {
+        out.push((0, n));
+        under(&live, Some(&n.id), 1, &mut out);
+    }
+    out
 }
 
 impl Note {

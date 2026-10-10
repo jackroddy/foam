@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Notes answer, change and go. `foam note <issue> <text> --reply-to
+  <note>` answers a note, and `foam show` and the screen draw the thread,
+  each reply under what it answers. `--edit <note> <text>` replaces a
+  note's text and marks when; `--rm <note>` removes it, which `show` and
+  the screen honour and `--json` records with `deleted_at`; `--history
+  <note>` prints every text the note has had, oldest first, from the
+  ref's history. A note is named by its id or any prefix of it that is
+  unique on the issue. Replies are schema 3; a ref at 2 is taken there
+  on the first write.
+
 ## [0.4.0] - 2026-10-10
 
 ### Added

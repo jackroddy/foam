@@ -261,10 +261,22 @@ pub fn run(cli: Cli, command: Cmd) -> Result<()> {
         Cmd::Note {
             id,
             text,
+            reply_to,
             edit,
             rm,
             history,
-        } => note_command(&store, &cli, &id, text, edit, rm, history),
+        } => note_command(
+            &store,
+            &cli,
+            &id,
+            NoteArgs {
+                text,
+                reply_to,
+                edit,
+                rm,
+                history,
+            },
+        ),
         Cmd::Search { query } => {
             let snap = load(&store)?;
             let q = query.to_lowercase();
@@ -1222,15 +1234,23 @@ fn actor_in_session(store: &Store, cli: &Options, session: Option<&str>) -> Stri
 }
 
 /// Print an issue a write just committed.
-fn note_command(
-    store: &Store,
-    cli: &Options,
-    id: &str,
+/// What `foam note` was asked to do beyond naming the issue.
+struct NoteArgs {
     text: Option<String>,
+    reply_to: Option<String>,
     edit: Option<String>,
     rm: Option<String>,
     history: Option<String>,
-) -> Result<()> {
+}
+
+fn note_command(store: &Store, cli: &Options, id: &str, args: NoteArgs) -> Result<()> {
+    let NoteArgs {
+        text,
+        reply_to,
+        edit,
+        rm,
+        history,
+    } = args;
     if let Some(note) = history {
         let snap = load(store)?;
         let versions = ops::note_history(store, &snap.db, id, &note)?;
@@ -1265,7 +1285,7 @@ fn note_command(
         };
         match edit {
             Some(note) => ops::edit_note(store, id, &note, &text)?,
-            None => ops::note(store, id, &actor, &text)?,
+            None => ops::note(store, id, &actor, &text, reply_to.as_deref())?,
         }
     };
     print_written(&issue, cli)

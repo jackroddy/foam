@@ -496,8 +496,9 @@ pub fn issue(style: &Style, i: &Issue, db: &Db) -> String {
     }
     if !i.notes.is_empty() {
         out.push('\n');
-        for n in i.notes.iter().filter(|n| n.deleted_at.is_none()) {
-            let mut head = format!("[{} {} {}", n.id, style.when(n.at), n.author);
+        for (depth, n) in crate::model::threaded(&i.notes) {
+            let indent = " ".repeat(depth * 2);
+            let mut head = format!("{indent}[{} {} {}", n.id, style.when(n.at), n.author);
             if let Some(e) = n.edited_at {
                 head.push_str(&format!(" · edited {}", style.when(e)));
             }
@@ -506,7 +507,7 @@ pub fn issue(style: &Style, i: &Issue, db: &Db) -> String {
                 out,
                 "{}{}",
                 style.dim(&head),
-                style.wrapped(&n.text, head.chars().count(), 2)
+                style.wrapped(&n.text, head.chars().count(), depth * 2 + 2)
             );
         }
     }
@@ -785,6 +786,7 @@ mod tests {
         i.created_at = ago(2 * 3600);
         i.notes.push(crate::model::Note {
             id: "0a1b2c3d".into(),
+            reply_to: None,
             edited_at: None,
             deleted_at: None,
             at: ago(60),

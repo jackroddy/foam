@@ -469,6 +469,45 @@ fn a_note_can_be_edited_removed_and_traced_by_a_prefix_of_its_id() {
 }
 
 #[test]
+fn a_reply_sits_under_what_it_answers() {
+    let dir = repo();
+    stdout(foam(dir.path()).args(["init", "--prefix", "t"]));
+    let id = stdout(foam(dir.path()).args(["create", "one"]));
+    stdout(foam(dir.path()).args(["note", &id, "question"]));
+    let v: serde_json::Value =
+        serde_json::from_str(&stdout(foam(dir.path()).args(["--json", "show", &id]))).unwrap();
+    let first = v["notes"][0]["id"].as_str().unwrap().to_string();
+    stdout(foam(dir.path()).args(["note", &id, "later, at the top"]));
+    stdout(foam(dir.path()).args(["note", &id, "answer", "--reply-to", &first[..4]]));
+    let shown = stdout(foam(dir.path()).args(["show", &id]));
+    let lines: Vec<&str> = shown.lines().filter(|l| l.contains('[')).collect();
+    // the answer comes before the later top-level note, indented
+    assert!(lines[0].starts_with(&format!("[{first}")), "{shown}");
+    assert!(
+        lines[1].starts_with("  [") && lines[1].ends_with("answer"),
+        "{shown}"
+    );
+    assert!(
+        lines[2].starts_with('[') && lines[2].ends_with("later, at the top"),
+        "{shown}"
+    );
+    let v: serde_json::Value =
+        serde_json::from_str(&stdout(foam(dir.path()).args(["--json", "show", &id]))).unwrap();
+    assert_eq!(v["notes"][2]["reply_to"], first);
+    assert!(v["notes"][0].get("reply_to").is_none());
+    // a removed note cannot be answered, and its answers move up
+    stdout(foam(dir.path()).args(["note", &id, "--rm", &first]));
+    let out = foam(dir.path())
+        .args(["note", &id, "again", "--reply-to", &first])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let shown = stdout(foam(dir.path()).args(["show", &id]));
+    assert!(!shown.contains("  ["), "{shown}");
+    assert!(shown.contains("answer"), "{shown}");
+}
+
+#[test]
 fn notes_search_and_memories() {
     let dir = repo();
     commit(dir.path(), "one");

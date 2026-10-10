@@ -1146,11 +1146,13 @@ fn posts(i: &Issue, width: usize) -> Vec<Line<'static>> {
             wide,
         ));
     }
-    for n in i.notes.iter().filter(|n| n.deleted_at.is_none()) {
+    for (depth, n) in crate::model::threaded(&i.notes) {
         if !out.is_empty() {
             out.push(Line::default());
         }
-        out.extend(post_box(
+        // a reply sits two columns in from what it answers
+        let indent = (depth * 2).min(wide.saturating_sub(20));
+        let mut lines = post_box(
             &Post {
                 id: Some(&n.id),
                 author: Some(&n.author),
@@ -1161,8 +1163,12 @@ fn posts(i: &Issue, width: usize) -> Vec<Line<'static>> {
                 commit: &n.commit,
             },
             &style,
-            wide,
-        ));
+            wide - indent,
+        );
+        for line in &mut lines {
+            line.spans.insert(0, Span::raw(" ".repeat(indent)));
+        }
+        out.extend(lines);
     }
     out
 }
@@ -1615,6 +1621,7 @@ mod tests {
         i.body = "one paragraph\n\nanother".into();
         i.notes.push(Note {
             id: "0a1b2c3d".into(),
+            reply_to: None,
             edited_at: None,
             deleted_at: None,
             at: Timestamp::now(),

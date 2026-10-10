@@ -1,0 +1,10 @@
+{
+  "slug": "water",
+  "text": "water is wet",
+  "created_at": "2026-10-10T00:34:51.036545171Z",
+  "updated_at": "2026-10-10T00:34:51.036545171Z",
+  "stamp": {
+    "commit": "9474bfc",
+    "branch": "main"
+  }
+}
