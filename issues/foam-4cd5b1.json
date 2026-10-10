@@ -1,0 +1,28 @@
+{
+  "id": "foam-4cd5b1",
+  "title": "Cut the page's boxes only when they do not all fit, sharing the pane's rows",
+  "body": "",
+  "type": "feature",
+  "status": "open",
+  "priority": 2,
+  "labels": [],
+  "parent": "foam-a3d399",
+  "blocked_by": [],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-10-10T05:01:46.080364969Z",
+  "updated_at": "2026-10-10T05:01:46.080364969Z",
+  "closed_at": null,
+  "close_reason": null,
+  "resolution": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "c8446ad",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
