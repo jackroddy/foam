@@ -18,12 +18,13 @@ use common::*;
 
 type Run = fn(&mut Scenario);
 
-const SCENARIOS: [(&str, Run); 5] = [
+const SCENARIOS: [(&str, Run); 6] = [
     ("one-session", one_session),
     ("two-agents", two_agents),
     ("dead-agent", dead_agent),
     ("milestone-mid-task", milestone_mid_task),
     ("big-backlog", big_backlog),
+    ("markdown", markdown),
 ];
 
 fn main() {
@@ -245,4 +246,148 @@ fn big_backlog(s: &mut Scenario) {
         ));
     }
     s.session(&r, "ann");
+}
+
+/// One issue written the way the prime asks: a body with every
+/// markdown feature the screen renders, a thread of notes by a
+/// person and an agent, and two memories, one old enough to be
+/// marked. For looking at `foam` in `.sandbox/markdown/repo`.
+fn markdown(s: &mut Scenario) {
+    let r = s.repo("repo");
+    stdout(foam(&r).args(["init", "--prefix", "s"]));
+    // two commits after a memory is enough to mark it
+    stdout(foam(&r).args(["config", "stale-after", "2"]));
+    stdout(foam(&r).args([
+        "remember",
+        "layout",
+        "The ref holds `issues/<id>.json` and `memories/<slug>.json`; `foam stats` says how big it is.",
+    ]));
+    let body = "\
+The screen draws a small subset of markdown and leaves the rest as text.
+
+- `backticked` code gets a shade
+- bullets hang their wrapped lines under the text, like this one does \
+once it runs past the box's width
+  - a nested bullet steps in
+- a long word has to be cut: antidisestablishmentarianismantidisestablishmentarianism
+
+1. numbered lists keep their numbers
+2. and line them up
+10. even past nine
+
+```rust
+fn render(text: &str, width: usize) -> Vec<Line<'static>> {
+    // comments go dim, strings green, numbers magenta
+    layout(&parse(text), width.max(1))
+}
+```
+
+| flag | meaning |
+|------|---------|
+| `-p` | priority |
+| `--parent` | the milestone |
+
+| id | status | title | assignee | lease | branch |
+|----|--------|-------|----------|-------|--------|
+| s-000001 | open | a title that is long enough to force the columns to wrap | ann | 14 min | dev |
+";
+    let m = stdout(foam(&r).args([
+        "create",
+        "Make the screen cool",
+        "--type",
+        "milestone",
+        "-p",
+        "1",
+    ]));
+    let a = stdout(foam(&r).args([
+        "create",
+        "Render markdown on the screen",
+        "--type",
+        "feature",
+        "-p",
+        "2",
+        "--parent",
+        &m,
+        "--body",
+        body,
+    ]));
+    stdout(foam(&r).args([
+        "create",
+        "Highlight fenced code",
+        "--parent",
+        &m,
+        "--blocked-by",
+        &a,
+    ]));
+    let last_note = |r: &Path| -> String {
+        let v: serde_json::Value =
+            serde_json::from_str(&stdout(foam(r).args(["--json", "show", &a]))).unwrap();
+        v["notes"].as_array().unwrap().last().unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    s.session(&r, "ann");
+    stdout(actor(&r, "ann").args(["claim", &a]));
+    stdout(actor(&r, "ann").args([
+        "note",
+        &a,
+        "Parsing is line-oriented, in order of precedence:\n\n\
+- a fence opens a code block\n\
+- a line with `|` over a delimiter row opens a table\n\
+- `-`, `*`, `+` or `1.` opens a list item\n\
+- a blank line ends a paragraph\n\
+- anything else joins the paragraph\n\n\
+So this note is long enough to be cut on the issue's page, and enter shows the rest.",
+    ]));
+    let first = last_note(&r);
+    stdout(actor(&r, "bob/1a2b3c4d").args([
+        "note",
+        &a,
+        "--reply-to",
+        &first,
+        "What about a table wider than the box? It should stack:\n\n\
+| column one | column two | column three | column four |\n\
+|---|---|---|---|\n\
+| a value that is quite long | another long value | and a third | the fourth |",
+    ]));
+    let question = last_note(&r);
+    stdout(actor(&r, "ann").args([
+        "note",
+        &a,
+        "--reply-to",
+        &question,
+        "Yes: each column shrinks to eight first, and only then does a row become a record.",
+    ]));
+    stdout(actor(&r, "bob/1a2b3c4d").args([
+        "note",
+        &a,
+        "--reply-to",
+        &first,
+        "And an unclosed fence runs to the end:\n\n```sh\nfoam show s-000001 | head\n",
+    ]));
+    stdout(actor(&r, "ann").args([
+        "note",
+        &a,
+        "Steps left:\n\n1. the memories view\n2. the highlighter\n3. this scenario",
+    ]));
+    let steps = last_note(&r);
+    stdout(actor(&r, "ann").args([
+        "note",
+        &a,
+        "--edit",
+        &steps,
+        "Steps left:\n\n1. the memories view\n2. the highlighter\n3. ~~this scenario~~ done",
+    ]));
+    commit(&r, "render markdown");
+    commit(&r, "highlight code");
+    commit(&r, "add the scenario");
+    stdout(foam(&r).args([
+        "remember",
+        "palette",
+        "Eight colours, one per concept, in `src/palette.rs`:\n\n- cyan is a reference\n- magenta is an agent",
+    ]));
+    s.session(&r, "ann");
+    s.note(format!("look at it: cd {} && foam", r.display()));
+    s.note(stdout(foam(&r).args(["show", &a])));
 }
