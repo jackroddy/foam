@@ -3,20 +3,20 @@
   "title": "Render a markdown subset in the screen: inline code, lists, fenced code, tables",
   "body": "",
   "type": "task",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 2,
   "labels": [],
   "parent": "foam-72e952",
   "blocked_by": [],
   "related": [],
   "assignee": "Jack Roddy/42dfd115",
-  "lease_expires": "2026-10-10T01:38:08.112874759Z",
+  "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-10T01:09:23.134212552Z",
-  "updated_at": "2026-10-10T01:23:08.112874759Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-10-10T01:32:52.673764762Z",
+  "closed_at": "2026-10-10T01:32:52.673764762Z",
+  "close_reason": "md.rs, hooked into the boxes and the preview, in c1b6b3e",
+  "resolution": "done",
   "notes": [
     {
       "id": "0d4cc223",
@@ -32,6 +32,9 @@
       "commit": "bb39c08",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "c1b6b3e",
+      "branch": "dev"
+    }
   }
 }
