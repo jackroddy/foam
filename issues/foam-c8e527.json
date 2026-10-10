@@ -1,0 +1,28 @@
+{
+  "id": "foam-c8e527",
+  "title": "Move through notes on the page: a note cursor, thread jumps and folding",
+  "body": "",
+  "type": "task",
+  "status": "open",
+  "priority": 2,
+  "labels": [],
+  "parent": "foam-72e952",
+  "blocked_by": [],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-10-10T01:09:23.167742144Z",
+  "updated_at": "2026-10-10T01:09:23.167742144Z",
+  "closed_at": null,
+  "close_reason": null,
+  "resolution": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "bb39c08",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
