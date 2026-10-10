@@ -1224,12 +1224,23 @@ fn draw_rows(
     let items: Vec<ListItem> = screen
         .rows
         .iter()
-        .map(|row| ListItem::new(line(row, &screen.widths, width, columns, boxed)))
+        .enumerate()
+        .map(|(n, row)| {
+            let mut line = line(row, &screen.widths, width, columns, boxed);
+            // a boxed row shades only what is inside its edges
+            if boxed && state.selected() == Some(n) {
+                let last = line.spans.len().saturating_sub(1);
+                for span in &mut line.spans[1..last] {
+                    span.style = span.style.patch(CHOSEN);
+                }
+            }
+            ListItem::new(line)
+        })
         .collect();
     // a row of padding keeps a section's top and bottom borders
     // in view when the cursor is on its first or last issue
     let list = List::new(items)
-        .highlight_style(CHOSEN)
+        .highlight_style(if boxed { Style::new() } else { CHOSEN })
         .highlight_symbol("› ")
         .highlight_spacing(HighlightSpacing::Always)
         .scroll_padding(1);
@@ -2033,10 +2044,10 @@ fn line<'a>(
         let used: usize = spans.iter().map(|s| s.content.chars().count()).sum();
         let mut out = vec![edge("│ ".into())];
         out.extend(spans);
-        out.push(edge(format!(
-            "{} │",
-            " ".repeat(width.saturating_sub(4 + used))
-        )));
+        // the padding is its own span, so a shade over the inside
+        // of the box reaches its right edge
+        out.push(Span::raw(" ".repeat(width.saturating_sub(4 + used))));
+        out.push(edge(" │".into()));
         Line::from(out)
     };
     match row {
@@ -3340,20 +3351,21 @@ mod tests {
         st.list.select(step(&screen.rows, None, 1));
         let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
         let limits = Limits::default();
-        let mut shown = |st: &mut State| -> String {
+        let mut shown = |st: &mut State| -> (String, ratatui::buffer::Buffer) {
             let (list, preview) = (&mut st.list, st.preview);
             terminal
                 .draw(|f| draw_rows(f, &screen, list, &db, preview, &[]))
                 .unwrap();
             let buffer = terminal.backend().buffer().clone();
-            (0..buffer.area.height)
+            let text = (0..buffer.area.height)
                 .map(|y| {
                     (0..buffer.area.width)
                         .map(|x| buffer[(x, y)].symbol().to_string())
                         .collect::<String>()
                         + "\n"
                 })
-                .collect()
+                .collect();
+            (text, buffer)
         };
         // press until the cursor stops, checking it stays in view
         let mut walk = |st: &mut State, code: KeyCode| -> String {
@@ -3364,11 +3376,26 @@ mod tests {
                     Row::Issue { issue, .. } => issue.id.clone(),
                     _ => panic!("an issue row"),
                 };
-                let text = shown(st);
+                let (text, buffer) = shown(st);
                 assert!(
                     text.contains(&format!("› │ {chosen}")),
                     "{chosen} off screen:\n{text}"
                 );
+                // the shade stays inside the box: not under the
+                // gutter or the edges, under the row's inside and
+                // its padding
+                let y = text.lines().position(|l| l.starts_with("› │")).unwrap();
+                let y = u16::try_from(y).unwrap();
+                // the box's own right edge: the second │ on the row
+                let row = text.lines().nth(usize::from(y)).unwrap();
+                let right = row.chars().position(|c| c == '│').unwrap() + 1;
+                let right = right + row.chars().skip(right).position(|c| c == '│').unwrap();
+                let right = u16::try_from(right).unwrap();
+                assert_ne!(buffer[(0, y)].bg, palette::SHADE);
+                assert_ne!(buffer[(2, y)].bg, palette::SHADE);
+                assert_eq!(buffer[(4, y)].bg, palette::SHADE);
+                assert_eq!(buffer[(right - 2, y)].bg, palette::SHADE);
+                assert_ne!(buffer[(right, y)].bg, palette::SHADE);
                 if st.list.selected() == before {
                     return text;
                 }

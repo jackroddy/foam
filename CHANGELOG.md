@@ -34,6 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- On the screen's board the shade under the chosen row stays inside the
+  section's box; it ran over the gutter and both edges.
 - The screen's board scrolls so a section's top and bottom borders come
   into view with its first and last issue. The cursor never lands on a
   border row, so the rows scrolled only as far as the issue under it.
