@@ -3,26 +3,29 @@
   "title": "Replies: reply_to on a note, the thread drawn in show and on the screen",
   "body": "foam note <id> <text> --reply-to <note>; show indents a thread; the screen nests boxes.",
   "type": "task",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 2,
   "labels": [],
   "parent": "foam-12ec90",
   "blocked_by": [],
   "related": [],
   "assignee": "Jack Roddy/6de6737a",
-  "lease_expires": "2026-10-10T00:47:38.540378282Z",
+  "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-10T00:03:11.220926177Z",
-  "updated_at": "2026-10-10T00:32:38.540378282Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-10-10T00:34:51.225716883Z",
+  "closed_at": "2026-10-10T00:34:51.225716883Z",
+  "close_reason": "reply_to on notes, threaded() orders them, show indents and the screen offsets the boxes; schema 3 with fixture 3; integration test",
+  "resolution": "done",
   "notes": [],
   "stamps": {
     "created": {
       "commit": "34d8e13",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "bbf3cee",
+      "branch": "dev"
+    }
   }
 }
