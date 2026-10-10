@@ -3,7 +3,7 @@
   "title": "Cut the release: version, changelog date, tag, merge to main",
   "body": "",
   "type": "chore",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 1,
   "labels": [],
   "parent": "foam-2df6cf",
@@ -12,19 +12,22 @@
   ],
   "related": [],
   "assignee": "Jack Roddy/42dfd115",
-  "lease_expires": "2026-10-10T05:09:48.64364958Z",
+  "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-10T04:53:56.754846047Z",
-  "updated_at": "2026-10-10T04:54:48.64364958Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-10-10T04:54:55.596678406Z",
+  "closed_at": "2026-10-10T04:54:55.596678406Z",
+  "close_reason": "tagged v0.6.0 at 3ca5a0b",
+  "resolution": "done",
   "notes": [],
   "stamps": {
     "created": {
       "commit": "357ddd8",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "c8446ad",
+      "branch": "dev"
+    }
   }
 }
