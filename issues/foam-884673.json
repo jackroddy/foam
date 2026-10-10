@@ -3,7 +3,7 @@
   "title": "Note ids: schema 2",
   "body": "Every note gets an id: random hex like issue ids for new notes, a hash of the note's contents for notes migrated from schema 1 so two clones agree. merge::notes merges by id with newer-wins per note instead of by whole-value equality. --json gains id on notes; check the stability policy. The first entry in the migration chain.",
   "type": "milestone",
-  "status": "open",
+  "status": "closed",
   "priority": 2,
   "labels": [],
   "parent": "foam-b3f162",
@@ -15,16 +15,19 @@
   "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-10T00:03:11.184101249Z",
-  "updated_at": "2026-10-10T00:03:11.184101249Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-10-10T00:19:18.122301063Z",
+  "closed_at": "2026-10-10T00:19:18.122301063Z",
+  "close_reason": "both children closed; the prefix resolver moved to v0.5.0 where its callers are",
+  "resolution": "done",
   "notes": [],
   "stamps": {
     "created": {
       "commit": "34d8e13",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "76b248f",
+      "branch": "dev"
+    }
   }
 }
