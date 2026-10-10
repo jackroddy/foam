@@ -13,11 +13,19 @@
   "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-10T00:03:11.212111277Z",
-  "updated_at": "2026-10-10T00:15:58.555722384Z",
+  "updated_at": "2026-10-10T00:15:58.565247268Z",
   "closed_at": null,
   "close_reason": null,
   "resolution": null,
-  "notes": [],
+  "notes": [
+    {
+      "at": "2026-10-10T00:15:58.565246808Z",
+      "author": "Jack Roddy/6de6737a",
+      "text": "Moved to v0.5.0: resolving a note by prefix has no caller until reply, edit and rm exist, and dead code is worse than a later issue.",
+      "commit": "e57529a",
+      "branch": "dev"
+    }
+  ],
   "stamps": {
     "created": {
       "commit": "34d8e13",
