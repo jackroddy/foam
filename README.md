@@ -90,8 +90,17 @@ existing pre-push hook isn't a shell script, it prints the lines to add by
 hand.
 
 `foam stats` says how big the ref has grown: how many commits it holds, its
-objects and the bytes they take on disk, the files at its tip, and the
-largest records.
+schema beside this foam's, its objects and the bytes they take on disk, the
+files at its tip, and the largest records.
+
+The ref carries a schema number in `meta.json`, and the shape of the records
+changes with it. A foam that reads a ref written at an older schema migrates
+it in memory, and its first write takes the ref to its own schema and says
+so, in colour. From then on an older foam refuses the ref, and a sync refuses
+an origin that a newer foam wrote. A foam migrates from three schemas back;
+for anything older, the error names the foam version to go through first.
+`foam doctor` says when an upgrade is pending. Walking an upgrade back is a
+revert commit on the ref, since the history keeps every version.
 
 `git clone` only fetches branches, so a fresh clone has no data ref. Run
 `foam init` there: it fetches the ref from origin when origin has it, and
@@ -193,7 +202,7 @@ created: 3h ago
 
 The grammar is in docs/grammar.md. Winnow, not nom: see the parser-lib memory.
 
-[5m ago ann] PEG was a dead end: left recursion in the grammar
+[91af0652 5m ago ann] PEG was a dead end: left recursion in the grammar
 ```
 
 #### foam ready and foam blocked
