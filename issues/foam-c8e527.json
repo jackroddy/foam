@@ -15,11 +15,20 @@
   "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-10T01:09:23.167742144Z",
-  "updated_at": "2026-10-10T01:09:23.200090663Z",
+  "updated_at": "2026-10-10T01:09:23.238593932Z",
   "closed_at": null,
   "close_reason": null,
   "resolution": null,
-  "notes": [],
+  "notes": [
+    {
+      "id": "c8b9f991",
+      "at": "2026-10-10T01:09:23.238593312Z",
+      "author": "Jack Roddy/42dfd115",
+      "text": "Design, proposed 2026-10-09: Page gets a cursor into the threaded notes, with the body as item 0. j/k move the cursor and the pane scrolls to keep the chosen box in view; the chosen box has a bright border and the rest are dim, like panes. Space folds the replies under the chosen note, the bottom border then says how many. u jumps to the note this one answers, [ and ] to the previous and next sibling, g/G to the ends, Ctrl-d/Ctrl-u scroll half a page without moving the cursor. posts() returns each note's line range so the draw can place the cursor.",
+      "commit": "bb39c08",
+      "branch": "dev"
+    }
+  ],
   "stamps": {
     "created": {
       "commit": "bb39c08",
