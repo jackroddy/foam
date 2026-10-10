@@ -1935,28 +1935,50 @@ fn post_box(p: &Post, style: &render::Style, width: usize, chosen: bool) -> Vec<
     out
 }
 
-/// A commit message as spans: the verb bold, each issue id cyan,
-/// and whoever it names after `by` in their colour.
+/// A commit message as spans: the verb bold in its colour, each
+/// issue id cyan, and whoever it names after `by` in their colour.
 fn log_spans(msg: &str) -> Vec<Span<'_>> {
+    let (head, who) = match msg.split_once(" by ") {
+        Some((head, who)) => (head, Some(who)),
+        None => (msg, None),
+    };
     let mut spans = Vec::new();
-    let mut by = false;
-    for (n, word) in msg.split(' ').enumerate() {
+    for (n, word) in head.split(' ').enumerate() {
         if n > 0 {
             spans.push(Span::raw(" "));
         }
-        let span = if n == 0 {
-            Span::raw(word).bold()
-        } else if by {
-            Span::styled(word, actor(word))
+        spans.push(if n == 0 {
+            Span::styled(word, verb_style(word))
         } else if is_id(word) {
             Span::raw(word).cyan()
         } else {
             Span::raw(word)
-        };
-        by = word == "by";
-        spans.push(span);
+        });
+    }
+    if let Some(who) = who {
+        spans.push(Span::raw(" by ").dim());
+        spans.push(Span::styled(who, actor(who)));
     }
     spans
+}
+
+/// The colour of a commit's verb, bold; a verb without one of its
+/// own is bold alone.
+fn verb_style(verb: &str) -> Style {
+    let colour = match verb {
+        "create" => Some(Color::Green),
+        "reopen" => Some(Color::LightGreen),
+        "close" => Some(Color::Magenta),
+        "claim" => Some(Color::Yellow),
+        "unclaim" => Some(Color::LightYellow),
+        "note" => Some(Color::Blue),
+        "update" => Some(Color::LightBlue),
+        "remember" => Some(Color::LightMagenta),
+        "forget" => Some(Color::LightRed),
+        _ => None,
+    };
+    let style = Style::new().add_modifier(Modifier::BOLD);
+    colour.map_or(style, |c| style.fg(c))
 }
 
 /// Whether a word is shaped like an issue id: a prefix, a dash,
@@ -3368,6 +3390,30 @@ mod tests {
         assert!(
             text.contains("╭─ Milestones "),
             "the first box's top:\n{text}"
+        );
+    }
+
+    #[test]
+    fn a_log_line_colours_the_verb_the_ids_and_whoever_acted() {
+        let spans = log_spans("claim t-abc123 by Jack Roddy/2aff5e6c");
+        let texts: Vec<&str> = spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(
+            texts,
+            ["claim", " ", "t-abc123", " by ", "Jack Roddy/2aff5e6c"]
+        );
+        assert_eq!(spans[0].style.fg, Some(Color::Yellow));
+        assert!(spans[0].style.add_modifier.contains(Modifier::BOLD));
+        assert_eq!(spans[2].style.fg, Some(Color::Cyan));
+        // the whole name, session and all, in the agent's colour
+        assert_eq!(spans[4].style.fg, Some(Color::Magenta));
+        let spans = log_spans("dep t-abc123 <- t-def456");
+        assert_eq!(spans[0].style.fg, None);
+        assert!(spans[0].style.add_modifier.contains(Modifier::BOLD));
+        assert_eq!(spans[4].style.fg, None);
+        assert_eq!(spans[6].style.fg, Some(Color::Cyan));
+        assert_eq!(
+            log_spans("forget prefix")[0].style.fg,
+            Some(Color::LightRed)
         );
     }
 }
