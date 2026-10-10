@@ -3,7 +3,7 @@
   "title": "README: name the commands and flags it leaves out",
   "body": "The README never mentions foam reclaim, foam log, foam dep rm and dep tree, init --prefix, sync --remote, setup claude --remove, claim and unclaim --force, create --label and --body, or prime --limit, and foam search only appears inside the prime sample. None of this contradicts the binary; the README is a narrative and the --help is the reference. Decide whether a short command table belongs at the end, or whether the gaps stay deliberate.",
   "type": "task",
-  "status": "open",
+  "status": "closed",
   "priority": 3,
   "labels": [],
   "parent": "foam-716694",
@@ -13,16 +13,19 @@
   "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-09T20:55:09.135585704Z",
-  "updated_at": "2026-10-10T00:03:35.993187196Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-10-10T00:06:18.462397566Z",
+  "closed_at": "2026-10-10T00:06:18.462397566Z",
+  "close_reason": "every command and flag is in the README's reference section",
+  "resolution": "done",
   "notes": [],
   "stamps": {
     "created": {
       "commit": "8cd8812",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "936b6ff",
+      "branch": "dev"
+    }
   }
 }
