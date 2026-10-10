@@ -19,6 +19,7 @@
   "resolution": "done",
   "notes": [
     {
+      "id": "d9557d1f",
       "at": "2026-10-09T22:51:03.047676942Z",
       "author": "Jack Roddy/6de6737a",
       "text": "Done: ids cyan on rows, in ties, in the card title and inside 'waits on' (suffix_spans); rollup kept as numbers so it turns green when complete; kind magenta for a milestone; actor() colours a person cyan and an agent magenta on rows, in the about pane and in post borders; pane(title, focused) draws the pane with the cursor plain and bold, the rest dim; headers and the title line bold cyan. fit() became split() over lengths plus cut_spans(), so a cut tail keeps each span's style.",

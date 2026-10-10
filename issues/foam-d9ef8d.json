@@ -19,6 +19,7 @@
   "resolution": "done",
   "notes": [
     {
+      "id": "75254429",
       "at": "2026-09-28T22:24:00.649243252Z",
       "author": "Jack Roddy/6de6737a",
       "text": "What the gap looks like in practice, from a repo that ran foam init before it had a remote:\n\nThe first machine never pushed the ref. foam init installs the fetch refspec and the pre-push hook only if origin exists when it runs, so a remote added afterwards gets neither, git push reports everything up to date, and only foam doctor says anything is missing. The clone's foam init then found no data ref on origin, started a fresh empty root, and added the refspec anyway. A configured refspec whose source ref does not exist on the remote is fatal to every fetch, so git pull in the clone died with: couldn't find remote ref refs/foam/data.\n\nTwo more gaps to close alongside the error message:\n\n1. Do not install the refspec before the remote has the ref, or use a glob form, which git skips when nothing matches. Either way git pull must keep working in a clone whose origin has no data yet.\n\n2. Say so when init runs without a remote: sync is not set up, and foam sync --setup does it once origin exists. foam sync could also install the refspec and hook on its own first run instead of needing --setup.\n\nRecovery, for the record: foam sync --setup on the first machine, then foam sync in the clone; the two roots merge (tests/cli.rs two_clones_that_both_ran_init_still_merge).",
@@ -26,6 +27,7 @@
       "branch": "dev"
     },
     {
+      "id": "8bf329e8",
       "at": "2026-10-09T20:24:02.788951899Z",
       "author": "Jack Roddy/6de6737a",
       "text": "Fixed in the working tree on dev. The refspec is now added only when the remote has the ref: init adds it after fetching, sync adds it after a successful push or when ls-remote finds it. sync also installs the hook on every run, so --setup only adds the advice for a hook it cannot install. init prints a line when origin has no ref yet and when there is no remote. The error names foam init. Adopt-on-first-use was not done: the message is enough and it would cost a round trip on every uninitialized command.",

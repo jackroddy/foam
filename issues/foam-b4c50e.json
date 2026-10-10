@@ -19,6 +19,7 @@
   "resolution": "done",
   "notes": [
     {
+      "id": "19aa8378",
       "at": "2026-10-09T22:42:49.660873891Z",
       "author": "Jack Roddy/6de6737a",
       "text": "Done as drawn. draw_detail lays out a card (title, id in the border), an about pane (filled badges, dates, ties as rows) and a posts pane; beside each other from 90 columns, stacked below. Page is a stack of ids: Enter on a tie follows, Esc pops, prune() drops ids a reload removed. A TestBackend test renders both layouts and checks where each pane lands; that is the way to see a screen in a test, far better than scraping a pty.",

@@ -19,6 +19,7 @@
   "resolution": "done",
   "notes": [
     {
+      "id": "7d41db9b",
       "at": "2026-10-09T21:34:34.845928749Z",
       "author": "Jack Roddy/6de6737a",
       "text": "Done: View::List is the default, View::Board on Tab, both from the same snapshot. list_rows goes through render::forest, now pub(crate) with separate lifetimes for the issues and the row slice, so the tree leads, rollups and 'waits on' match foam list exactly. Every list row is selectable; headers only exist on the board.",

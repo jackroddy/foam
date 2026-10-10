@@ -19,6 +19,7 @@
   "resolution": "done",
   "notes": [
     {
+      "id": "57fa4b76",
       "at": "2026-10-09T22:33:22.70832179Z",
       "author": "Jack Roddy/6de6737a",
       "text": "Done as proposed: id dim and title bold, one badge line, a dim dates line with deferral and close resolution/reason, a ten-column labelled ties table (parent with title, children with the rollup or count, blockers with status, labels), the body as the first box with the creation stamp in its borders and no author since the record has none, notes below. post_box() replaced note_box() and serves both.",

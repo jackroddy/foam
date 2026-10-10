@@ -19,6 +19,7 @@
   "resolution": "done",
   "notes": [
     {
+      "id": "565fd971",
       "at": "2026-09-27T01:08:54.45021144Z",
       "author": "Jack Roddy/2ae76934",
       "text": "pick() feeds the plain listing to fzf; show without an id and foam pick use it; setup bash prints an _fzf_complete block. Tests use a stand-in fzf on PATH. Awaiting commit approval.",

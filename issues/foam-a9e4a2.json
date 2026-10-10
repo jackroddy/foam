@@ -22,6 +22,7 @@
   "resolution": "done",
   "notes": [
     {
+      "id": "7ef8186e",
       "at": "2026-10-09T23:44:36.029076559Z",
       "author": "Jack Roddy/6de6737a",
       "text": "Reverted after use: m/u/n/x/X on single unmodified keys did more harm than good, since a slip while moving writes to the shared ref. Jack's call. ops.rs stays. Any future writes from the screen need a deliberate entry, a command line or a confirmation, not a bare key.",

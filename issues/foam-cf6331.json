@@ -19,6 +19,7 @@
   "resolution": "done",
   "notes": [
     {
+      "id": "0afaf93b",
       "at": "2026-09-27T00:53:38.750299206Z",
       "author": "Jack Roddy/2ae76934",
       "text": "render::forest orders listed rows under a listed parent with ├─ and └─; applies to list, ready, blocked, search in both forms. Awaiting commit approval.",

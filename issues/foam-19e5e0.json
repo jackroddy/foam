@@ -19,6 +19,7 @@
   "resolution": "done",
   "notes": [
     {
+      "id": "f3446a83",
       "at": "2026-10-09T20:32:57.824567717Z",
       "author": "Jack Roddy/6de6737a",
       "text": "Done in the working tree. sync prints 'foam: syncing' before the fetch and 'foam: pushing' before the push on stderr; result lines go to stdout by hand and to stderr with a foam: prefix under the hook, since git sends a hook's stdout to stderr anyway. ls-remote is gone from sync: fetch_if_present treats git's 'couldn't find remote ref' as no ref, the same string-matching push() already does. The push is skipped when refs/foam/origin equals refs/foam/data after the merge. git pull was not touched: it has no hook.",

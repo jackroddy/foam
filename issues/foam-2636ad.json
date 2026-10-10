@@ -19,6 +19,7 @@
   "resolution": "done",
   "notes": [
     {
+      "id": "b0765572",
       "at": "2026-09-27T01:00:33.584536729Z",
       "author": "Jack Roddy/2ae76934",
       "text": "resolve() in cmd.rs: exact id, then unique hex prefix with or without the foam- part, then unique title substring preferring open issues; ambiguity lists the candidates on stderr and exits 1. Applied to every id argument. Awaiting commit approval.",

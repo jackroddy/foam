@@ -19,6 +19,7 @@
   "resolution": "done",
   "notes": [
     {
+      "id": "1337f76b",
       "at": "2026-10-09T20:43:05.036793557Z",
       "author": "Jack Roddy/6de6737a",
       "text": "Done: the terminal form wraps the title with wrap_at at width minus the column prefix (floor 20), hangs later lines under the title column, and keeps the dim tags and suffix on the title's last line when they fit, else on a line of their own. Plain output untouched.",

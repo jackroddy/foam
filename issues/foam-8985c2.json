@@ -19,6 +19,7 @@
   "resolution": "done",
   "notes": [
     {
+      "id": "1de25f29",
       "at": "2026-10-10T00:15:19.210667154Z",
       "author": "Jack Roddy/6de6737a",
       "text": "Finding: it did not fail cleanly. A fast-forward in absorb_origin never decodes, so an older foam moved its local ref onto the newer commit and only the next command hit the gate. Fixed with a gate on origin's meta.json before any fast-forward or merge; sync now says origin's data is schema N and leaves the local ref. After that every command in the clone stops at the same gate until a newer foam is installed, which is the designed behaviour.",

@@ -19,6 +19,7 @@
   "resolution": "done",
   "notes": [
     {
+      "id": "6b1f988b",
       "at": "2026-09-27T00:49:35.237535442Z",
       "author": "Jack Roddy/2ae76934",
       "text": "Kind::Milestone with serde alias epic and a hidden clap alias; existing epic records load unchanged. Awaiting commit approval.",

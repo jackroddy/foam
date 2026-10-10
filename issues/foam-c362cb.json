@@ -19,6 +19,7 @@
   "resolution": "done",
   "notes": [
     {
+      "id": "45e692ed",
       "at": "2026-10-09T21:14:55.139461668Z",
       "author": "Jack Roddy/6de6737a",
       "text": "Done: src/tui.rs behind the tui feature (default on) with ratatui 0.30, crossterm through ratatui's re-export. graph::board() now assembles the sections for both foam board and the screen. Rows are a flat list: headers, issue rows (selectable), a note when nothing is ready, and the recent log. Titles are cut with an ellipsis rather than wrapped; the tail (assignee, lease, waits on) gives way first down to a third of the room. Bare foam opens the screen only when stdin and stdout are terminals; piped it prints the usage and exits 2, same with --no-default-features.",

@@ -19,6 +19,7 @@
   "resolution": "done",
   "notes": [
     {
+      "id": "8b0307cb",
       "at": "2026-10-09T22:27:54.272592192Z",
       "author": "Jack Roddy/6de6737a",
       "text": "Done: note_box() draws one rounded box per note at the body width: author (cyan for a person, magenta for an actor with a session suffix) and relative time in the top border, branch @ short commit in the bottom border, text wrapped inside with a column of padding. Boxes are separated by a blank line; no rule above the first.",
