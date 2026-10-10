@@ -3,7 +3,7 @@
   "title": "Highlight fenced code blocks by language",
   "body": "",
   "type": "task",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 3,
   "labels": [],
   "parent": "foam-72e952",
@@ -12,13 +12,13 @@
   ],
   "related": [],
   "assignee": "Jack Roddy/42dfd115",
-  "lease_expires": "2026-10-10T01:48:07.129022962Z",
+  "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-10T01:09:23.14560621Z",
-  "updated_at": "2026-10-10T01:33:07.129022962Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-10-10T01:37:07.09330433Z",
+  "closed_at": "2026-10-10T01:37:07.09330433Z",
+  "close_reason": "hl.rs, hooked into the code panel, in 128e07c",
+  "resolution": "done",
   "notes": [
     {
       "id": "b5318681",
@@ -42,6 +42,9 @@
       "commit": "bb39c08",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "128e07c",
+      "branch": "dev"
+    }
   }
 }
