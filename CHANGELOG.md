@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-10
+
 ### Added
 
 - Schema migrations. A foam that reads a ref written at an older schema
@@ -231,7 +233,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `foam log` shows the data ref's history, optionally only the entries that
   touched one id. Every command accepts `--json`.
 
-[Unreleased]: https://github.com/jackroddy/foam/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/jackroddy/foam/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/jackroddy/foam/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/jackroddy/foam/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/jackroddy/foam/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/jackroddy/foam/compare/v0.1.0...v0.2.0
