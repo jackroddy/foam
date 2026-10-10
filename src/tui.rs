@@ -227,8 +227,6 @@ struct Page {
     cursor: usize,
     /// Whether the next draw scrolls the chosen box into view.
     reveal: bool,
-    /// Notes whose replies are hidden.
-    folded: HashSet<String>,
     /// The tie under the cursor, when the cursor is on the ties.
     tie: Option<usize>,
 }
@@ -242,7 +240,6 @@ impl Page {
             scroll: 0,
             cursor: 0,
             reveal: true,
-            folded: HashSet::new(),
             tie: None,
         }
     }
@@ -278,51 +275,6 @@ impl Page {
         }
     }
 
-    /// The cursor onto the note this one answers; a top-level note
-    /// answers the issue, so the body.
-    fn up(&mut self, boxes: &[NoteBox]) {
-        let Some(b) = boxes.get(self.cursor) else {
-            return;
-        };
-        let to = b
-            .reply_to
-            .as_deref()
-            .and_then(|p| boxes.iter().position(|x| x.id.as_deref() == Some(p)));
-        self.go(to.unwrap_or(0));
-    }
-
-    /// The cursor onto the next, or the previous, box answering
-    /// the same note; stays put when there is none.
-    fn sibling(&mut self, boxes: &[NoteBox], by: isize) {
-        let Some(b) = boxes.get(self.cursor) else {
-            return;
-        };
-        let same = |i: &usize| boxes[*i].reply_to == b.reply_to;
-        let to = match by.is_positive() {
-            true => (self.cursor + 1..boxes.len()).find(same),
-            false => (0..self.cursor).rev().find(same),
-        };
-        if let Some(to) = to {
-            self.go(to);
-        }
-    }
-
-    /// Hide the replies under the chosen note, or show them again.
-    fn fold(&mut self, boxes: &[NoteBox]) {
-        let Some(NoteBox {
-            id: Some(id),
-            replies: 1..,
-            ..
-        }) = boxes.get(self.cursor)
-        else {
-            return;
-        };
-        if !self.folded.remove(id) {
-            self.folded.insert(id.clone());
-        }
-        self.reveal = true;
-    }
-
     fn id(&self) -> &str {
         &self.issue
     }
@@ -334,17 +286,18 @@ impl Page {
         self.root = Root::Issue;
     }
 
-    /// Open the page of the box under the cursor: the body's, or a
-    /// note's with its replies. The root of a note's page is the
-    /// first box, and has no page of its own.
+    /// From the issue's page, open the page of the box under the
+    /// cursor: the body's, or a note's with its thread.
     fn enter_box(&mut self, boxes: &[NoteBox]) {
+        if self.root != Root::Issue {
+            return;
+        }
         let Some(b) = boxes.get(self.cursor) else {
             return;
         };
         let root = match &b.id {
-            None if self.root == Root::Issue => Root::Body,
-            Some(id) if self.root != Root::Note(id.clone()) => Root::Note(id.clone()),
-            _ => return,
+            None => Root::Body,
+            Some(id) => Root::Note(id.clone()),
         };
         self.leave();
         self.root = root;
@@ -436,9 +389,6 @@ struct Limits {
 struct NoteBox {
     /// `None` for the body.
     id: Option<String>,
-    reply_to: Option<String>,
-    /// How many replies are under it, shown or hidden.
-    replies: usize,
     lines: Range<usize>,
 }
 
@@ -649,6 +599,8 @@ fn handle(st: &mut State, key: KeyEvent, rows: &[Row], db: &Db, limits: &Limits)
         Mode::Rows => handle_rows(st, key.code, ctrl, rows, db, limits),
         Mode::Detail(page) => {
             let last_tie = limits.ties.len().saturating_sub(1);
+            // a thread's page has no cursor: it scrolls by the line
+            let thread = matches!(page.root, Root::Note(_));
             match key.code {
                 KeyCode::Esc | KeyCode::Char('h') | KeyCode::Left | KeyCode::Backspace => {
                     if !page.back() {
@@ -677,24 +629,24 @@ fn handle(st: &mut State, key: KeyEvent, rows: &[Row], db: &Db, limits: &Limits)
                 }
                 KeyCode::Char('j') | KeyCode::Down => match page.tie {
                     Some(k) => page.tie = Some((k + 1).min(last_tie)),
+                    None if thread => page.scroll = (page.scroll + 1).min(limits.scroll),
                     None => page.step_box(&limits.boxes, limits.rows, 1),
                 },
                 KeyCode::Char('k') | KeyCode::Up => match page.tie {
                     Some(k) => page.tie = Some(k.saturating_sub(1)),
+                    None if thread => page.scroll = page.scroll.saturating_sub(1),
                     None => page.step_box(&limits.boxes, limits.rows, -1),
                 },
                 KeyCode::Char('g') | KeyCode::Home => match page.tie {
                     Some(_) => page.tie = Some(0),
+                    None if thread => page.scroll = 0,
                     None => page.go(0),
                 },
                 KeyCode::Char('G') | KeyCode::End => match page.tie {
                     Some(_) => page.tie = Some(last_tie),
+                    None if thread => page.scroll = limits.scroll,
                     None => page.go(limits.boxes.len().saturating_sub(1)),
                 },
-                KeyCode::Char(' ') if page.tie.is_none() => page.fold(&limits.boxes),
-                KeyCode::Char('u') if page.tie.is_none() => page.up(&limits.boxes),
-                KeyCode::Char('[') if page.tie.is_none() => page.sibling(&limits.boxes, -1),
-                KeyCode::Char(']') if page.tie.is_none() => page.sibling(&limits.boxes, 1),
                 _ => {}
             }
             Action::Draw
@@ -1508,7 +1460,7 @@ fn draw_memories(
                 text: &m.text,
                 branch: &m.stamp.branch,
                 commit: &m.stamp.commit,
-                hidden: 0,
+                thread: None,
                 flag: marked.then(|| format!("{}, may no longer hold", short_age(&m.stamp, *d))),
                 limit: None,
             },
@@ -1518,8 +1470,6 @@ fn draw_memories(
         ));
         boxes.push(NoteBox {
             id: Some(m.slug.clone()),
-            reply_to: None,
-            replies: 0,
             lines: start..lines.len(),
         });
     }
@@ -1677,7 +1627,7 @@ fn draw_detail(
     let pane_title = match page.root {
         Root::Issue => " notes ",
         Root::Body => " body ",
-        Root::Note(_) => " note ",
+        Root::Note(_) => " thread ",
     };
     frame.render_widget(
         Paragraph::new(lines)
@@ -1686,13 +1636,19 @@ fn draw_detail(
         posts_area,
     );
 
-    let keys = if page.tie.is_some() {
-        "j/k pick   enter follow   tab notes   esc back   q quit"
-    } else if about.ties.is_empty() {
-        "j/k move   enter open   space fold   u/[/] thread   ^d/^u scroll   esc back   q quit"
+    let ties = if about.ties.is_empty() {
+        ""
     } else {
-        "j/k move   enter open   space fold   u/[/] thread   ^d/^u scroll   tab ties   esc back   q quit"
+        "tab ties   "
     };
+    let keys = if page.tie.is_some() {
+        "j/k pick   enter follow   tab back   esc back   q quit".to_string()
+    } else if matches!(page.root, Root::Note(_)) {
+        format!("j/k scroll   g/G ends   ^d/^u page   {ties}esc back   q quit")
+    } else {
+        format!("j/k move   enter open   ^d/^u scroll   {ties}esc back   q quit")
+    };
+    let keys = keys.as_str();
     frame.render_widget(Paragraph::new(keys).dim(), foot);
     Limits {
         scroll: max,
@@ -1975,9 +1931,10 @@ fn about(db: &Db, i: &Issue, width: usize, tie: Option<usize>) -> About {
 
 /// The boxes of a page, each `width` wide, with the box under the
 /// page's cursor drawn in the focus colour when `focused`: on the
-/// issue's page the body then every note not folded away, each cut
-/// to a few lines; on the body's page the body whole; on a note's
-/// page the note whole, then the replies under it.
+/// issue's page the body and the top-level notes, each cut to a few
+/// lines, a note's border saying what its thread holds; on the
+/// body's page the body whole; on a note's page the note whole, then
+/// every reply under it whole.
 fn posts(
     i: &Issue,
     width: usize,
@@ -1987,80 +1944,58 @@ fn posts(
     let style = human();
     let wide = width.max(20);
     let threaded = crate::model::threaded(&i.notes);
-    // the first box, whole or cut, and the notes under it with
-    // their depth counted from the root
-    let (first, under): (Option<Post>, Vec<(usize, &Note)>) = match &page.root {
-        Root::Issue => (
-            (!i.body.is_empty()).then(|| body_post(i, Some(BOX_LINES))),
-            threaded.clone(),
-        ),
-        Root::Body => (Some(body_post(i, None)), Vec::new()),
-        Root::Note(id) => match threaded.iter().position(|(_, n)| n.id == *id) {
-            Some(k) => {
-                let (depth, root) = threaded[k];
-                let under = threaded[k + 1..]
-                    .iter()
-                    .take_while(|(d, _)| *d > depth)
-                    .map(|(d, n)| (d - depth - 1, *n))
-                    .collect();
-                (Some(note_post(root, 0, None)), under)
-            }
-            None => (None, Vec::new()),
-        },
-    };
-    // each shown note with its depth and how many replies it has,
-    // the ones under a folded note skipped
-    let mut shown = Vec::new();
-    let mut k = 0;
-    while let Some(&(depth, n)) = under.get(k) {
-        let replies = under[k + 1..]
+    // what a note's thread holds: how many replies, and when the
+    // last was written
+    let thread = |k: usize| -> Option<(usize, Timestamp)> {
+        let depth = threaded[k].0;
+        let replies: Vec<&Note> = threaded[k + 1..]
             .iter()
             .take_while(|(d, _)| *d > depth)
-            .count();
-        shown.push((depth, n, replies));
-        k += 1 + if page.folded.contains(&n.id) {
-            replies
-        } else {
-            0
-        };
+            .map(|(_, n)| *n)
+            .collect();
+        let last = replies.iter().map(|n| n.at).max()?;
+        Some((replies.len(), last))
+    };
+    // each box as a post, its depth, and its id
+    let mut shown: Vec<(Post, usize, Option<String>)> = Vec::new();
+    match &page.root {
+        Root::Issue => {
+            if !i.body.is_empty() {
+                shown.push((body_post(i, Some(BOX_LINES)), 0, None));
+            }
+            for (k, (depth, n)) in threaded.iter().enumerate() {
+                if *depth == 0 {
+                    shown.push((
+                        note_post(n, thread(k), Some(BOX_LINES)),
+                        0,
+                        Some(n.id.clone()),
+                    ));
+                }
+            }
+        }
+        Root::Body => shown.push((body_post(i, None), 0, None)),
+        Root::Note(id) => {
+            if let Some(k) = threaded.iter().position(|(_, n)| n.id == *id) {
+                let (depth, root) = threaded[k];
+                shown.push((note_post(root, None, None), 0, Some(root.id.clone())));
+                for (d, n) in threaded[k + 1..].iter().take_while(|(d, _)| *d > depth) {
+                    shown.push((note_post(n, None, None), d - depth, Some(n.id.clone())));
+                }
+            }
+        }
     }
-    let count = shown.len() + usize::from(first.is_some());
-    let cursor = page.cursor.min(count.saturating_sub(1));
+    let cursor = page.cursor.min(shown.len().saturating_sub(1));
     let mut out = Vec::new();
     let mut boxes = Vec::new();
-    if let Some(post) = first {
-        let (id, reply_to) = match &page.root {
-            Root::Note(id) => {
-                let n = i.notes.iter().find(|n| n.id == *id);
-                (Some(id.clone()), n.and_then(|n| n.reply_to.clone()))
-            }
-            _ => (None, None),
-        };
-        out.extend(post_box(&post, &style, wide, focused && cursor == 0));
-        // the body does not fold; a note's page says how many
-        // replies its root has
-        let replies = if id.is_some() { under.len() } else { 0 };
-        boxes.push(NoteBox {
-            id,
-            reply_to,
-            replies,
-            lines: 0..out.len(),
-        });
-    }
-    for (depth, n, replies) in shown {
+    for (post, depth, id) in shown {
         if !out.is_empty() {
             out.push(Line::default());
         }
         let start = out.len();
         // a reply sits two columns in from what it answers
         let indent = (depth * 2).min(wide.saturating_sub(20));
-        let hidden = if page.folded.contains(&n.id) {
-            replies
-        } else {
-            0
-        };
         let mut lines = post_box(
-            &note_post(n, hidden, Some(BOX_LINES)),
+            &post,
             &style,
             wide - indent,
             focused && cursor == boxes.len(),
@@ -2070,9 +2005,7 @@ fn posts(
         }
         out.extend(lines);
         boxes.push(NoteBox {
-            id: Some(n.id.clone()),
-            reply_to: n.reply_to.clone(),
-            replies,
+            id,
             lines: start..out.len(),
         });
     }
@@ -2089,13 +2022,17 @@ fn body_post(i: &Issue, limit: Option<usize>) -> Post<'_> {
         text: &i.body,
         branch: &i.stamps.created.branch,
         commit: &i.stamps.created.commit,
-        hidden: 0,
+        thread: None,
         flag: None,
         limit,
     }
 }
 
-fn note_post(n: &Note, hidden: usize, limit: Option<usize>) -> Post<'_> {
+fn note_post<'a>(
+    n: &'a Note,
+    thread: Option<(usize, Timestamp)>,
+    limit: Option<usize>,
+) -> Post<'a> {
     Post {
         id: Some(&n.id),
         author: Some((&n.author, actor(&n.author))),
@@ -2104,7 +2041,7 @@ fn note_post(n: &Note, hidden: usize, limit: Option<usize>) -> Post<'_> {
         text: &n.text,
         branch: &n.branch,
         commit: &n.commit,
-        hidden,
+        thread,
         flag: None,
         limit,
     }
@@ -2121,8 +2058,9 @@ struct Post<'a> {
     text: &'a str,
     branch: &'a str,
     commit: &'a str,
-    /// How many replies are folded away under it.
-    hidden: usize,
+    /// How many replies its thread holds and when the last was
+    /// written, on the issue's page.
+    thread: Option<(usize, Timestamp)>,
     /// A warning for the top border.
     flag: Option<String>,
     /// How many lines of the text to show; the rest is counted in
@@ -2188,9 +2126,9 @@ fn post_box(p: &Post, style: &render::Style, width: usize, chosen: bool) -> Vec<
         ]));
     }
     let mut from = String::new();
-    if p.hidden > 0 {
-        let s = if p.hidden == 1 { "reply" } else { "replies" };
-        from.push_str(&format!("▸ {} {s} · ", p.hidden));
+    if let Some((replies, last)) = p.thread {
+        let s = if replies == 1 { "reply" } else { "replies" };
+        from.push_str(&format!("▸ {replies} {s} · {} · ", style.when(last)));
     }
     if let Some(id) = p.id {
         from.push_str(id);
@@ -3185,8 +3123,6 @@ mod tests {
         st.mode = Mode::Detail(Page::open("t-000002".into()));
         let note_box = |id: &str| NoteBox {
             id: Some(id.into()),
-            reply_to: None,
-            replies: 0,
             lines: 0..1,
         };
         let limits = Limits {
@@ -3215,11 +3151,7 @@ mod tests {
         assert_eq!(page(&st).2, 2);
         handle(&mut st, ctrl('u'), &rows, &db, &limits);
         assert_eq!(page(&st).2, 0);
-        key(&mut st, KeyCode::Char(']'));
-        assert_eq!(page(&st).1, 2);
-        key(&mut st, KeyCode::Char('['));
-        key(&mut st, KeyCode::Char('u'));
-        assert_eq!(page(&st).1, 0);
+        key(&mut st, KeyCode::Char('g'));
         key(&mut st, KeyCode::Tab);
         key(&mut st, KeyCode::Char('j'));
         key(&mut st, KeyCode::Char('j'));
@@ -3262,85 +3194,24 @@ mod tests {
     }
 
     #[test]
-    fn folding_a_note_hides_the_replies_under_it() {
+    fn the_issue_page_shows_the_top_level_notes_with_their_threads_in_the_border() {
         let i = thread();
-        let mut page = Page::open(i.id.clone());
-        let (lines, boxes) = posts(&i, 40, &page, true);
-        assert_eq!(
-            box_ids(&boxes),
-            [
-                None,
-                Some("aaaa0000"),
-                Some("bbbb0000"),
-                Some("cccc0000"),
-                Some("dddd0000")
-            ]
-        );
-        assert_eq!(
-            boxes.iter().map(|b| b.replies).collect::<Vec<_>>(),
-            [0, 2, 1, 0, 0]
-        );
-        // each box's lines are its own, in order, with a blank
-        // line between
+        let page = Page::open(i.id.clone());
+        let (lines, boxes) = posts(&i, 44, &page, true);
+        assert_eq!(box_ids(&boxes), [None, Some("aaaa0000"), Some("dddd0000")]);
+        // each box's lines are its own, in order, with a blank line
+        // between
         for pair in boxes.windows(2) {
             assert_eq!(pair[0].lines.end + 1, pair[1].lines.start);
         }
-        assert_eq!(boxes[4].lines.end, lines.len());
-
-        page.cursor = 1;
-        page.fold(&boxes);
-        assert!(page.folded.contains("aaaa0000"));
-        let (lines, boxes) = posts(&i, 40, &page, true);
-        assert_eq!(box_ids(&boxes), [None, Some("aaaa0000"), Some("dddd0000")]);
-        let bottom = lines[boxes[1].lines.end - 1].to_string();
-        assert!(bottom.contains("▸ 2 replies · aaaa0000"), "{bottom}");
-
-        // the body and a note without replies do not fold
-        page.cursor = 0;
-        page.fold(&boxes);
-        page.cursor = 2;
-        page.fold(&boxes);
-        assert_eq!(page.folded.len(), 1);
-        page.cursor = 1;
-        page.fold(&boxes);
-        assert!(page.folded.is_empty());
-    }
-
-    #[test]
-    fn the_cursor_walks_boxes_threads_and_siblings() {
-        let i = thread();
-        let mut page = Page::open(i.id.clone());
-        let (_, boxes) = posts(&i, 40, &page, true);
-        page.step_box(&boxes, 100, -1);
-        assert_eq!(page.cursor, 0);
-        page.step_box(&boxes, 100, 1);
-        page.step_box(&boxes, 100, 1);
-        page.step_box(&boxes, 100, 1);
-        assert_eq!(page.cursor, 3);
-        // c answers b answers a answers the issue
-        page.up(&boxes);
-        assert_eq!(page.cursor, 2);
-        page.up(&boxes);
-        assert_eq!(page.cursor, 1);
-        page.up(&boxes);
-        assert_eq!(page.cursor, 0);
-        // the body's siblings are the top-level notes
-        page.sibling(&boxes, 1);
-        assert_eq!(page.cursor, 1);
-        page.sibling(&boxes, 1);
-        assert_eq!(page.cursor, 4);
-        page.sibling(&boxes, 1);
-        assert_eq!(page.cursor, 4);
-        page.sibling(&boxes, -1);
-        assert_eq!(page.cursor, 1);
-        // b has no sibling
-        page.go(2);
-        page.sibling(&boxes, 1);
-        page.sibling(&boxes, -1);
-        assert_eq!(page.cursor, 2);
-        page.reveal = false;
-        page.step_box(&boxes, 100, 1);
-        assert!(page.reveal);
+        assert_eq!(boxes[2].lines.end, lines.len());
+        let bottom = |k: usize| lines[boxes[k].lines.end - 1].to_string();
+        assert!(
+            bottom(1).contains("▸ 2 replies · just now · aaaa0000"),
+            "{}",
+            bottom(1)
+        );
+        assert!(!bottom(2).contains("repl"), "{}", bottom(2));
     }
 
     #[test]
@@ -3469,8 +3340,6 @@ mod tests {
         let mut st = State::new();
         let note_box = |id: &str| NoteBox {
             id: Some(id.into()),
-            reply_to: None,
-            replies: 0,
             lines: 0..1,
         };
         let limits = Limits {
@@ -3758,12 +3627,16 @@ mod tests {
     }
 
     #[test]
-    fn a_note_page_is_the_note_and_the_replies_under_it() {
-        let i = thread();
+    fn a_thread_page_is_the_note_and_every_reply_whole() {
+        let mut i = thread();
+        i.notes[1].text = (1..=9)
+            .map(|n| format!("b {n}"))
+            .collect::<Vec<_>>()
+            .join("\n\n");
         let mut page = Page::open(i.id.clone());
         let (_, boxes) = posts(&i, 40, &page, true);
-        // enter on a: its page holds a whole, then b and c, with c
-        // one step in from b
+        // enter on a: its thread holds a, b and c, whole, with c one
+        // step in from b
         page.go(1);
         page.enter_box(&boxes);
         assert_eq!(page.root, Root::Note("aaaa0000".into()));
@@ -3773,41 +3646,37 @@ mod tests {
             box_ids(&boxes),
             [Some("aaaa0000"), Some("bbbb0000"), Some("cccc0000")]
         );
-        assert_eq!(boxes[0].replies, 2);
-        assert!(lines[boxes[1].lines.start].to_string().starts_with("╭ ann"));
+        assert_eq!(
+            boxes[1].lines.len(),
+            19,
+            "nine paragraphs of b and its borders"
+        );
         assert!(
-            lines[boxes[2].lines.start]
+            lines[boxes[1].lines.start]
                 .to_string()
                 .starts_with("  ╭ ann")
         );
-        // enter on the root does nothing; on b it opens b's page
-        page.enter_box(&boxes);
-        assert_eq!(page.root, Root::Note("aaaa0000".into()));
+        assert!(
+            lines[boxes[2].lines.start]
+                .to_string()
+                .starts_with("    ╭ ann")
+        );
+        assert!(!lines.iter().any(|l| l.to_string().contains("more")));
+        // enter does nothing on a thread's page
         page.go(1);
         page.enter_box(&boxes);
-        assert_eq!(page.root, Root::Note("bbbb0000".into()));
-        assert_eq!(page.trail(), ["t-000009", "aaaa0000", "bbbb0000"]);
-        // back lands on b in a's page, then on a in the issue's
-        assert!(page.back());
-        assert_eq!(
-            (page.root.clone(), page.cursor),
-            (Root::Note("aaaa0000".into()), 1)
-        );
+        assert_eq!(page.root, Root::Note("aaaa0000".into()));
+        // back lands on a in the issue's page
         assert!(page.back());
         assert_eq!((page.root.clone(), page.cursor), (Root::Issue, 1));
         assert!(!page.back());
-        // a's note is removed: a's page drops out from behind b's,
-        // so back from b lands on the issue
+        // a's note removed: its thread page drops out, and a page on
+        // it goes back to the issue
         let mut gone = i.clone();
         gone.notes[0].deleted_at = Some(Timestamp::now());
         let db = db(vec![gone]);
         page.enter_box(&posts(&i, 40, &page, true).1);
-        page.go(1);
-        page.enter_box(&posts(&i, 40, &page, true).1);
-        assert_eq!(page.trail(), ["t-000009", "aaaa0000", "bbbb0000"]);
-        assert!(page.prune(&db));
-        assert_eq!(page.trail(), ["t-000009", "bbbb0000"]);
-        page.root = Root::Note("aaaa0000".into());
+        assert_eq!(page.trail(), ["t-000009", "aaaa0000"]);
         assert!(page.prune(&db));
         assert_eq!(page.root, Root::Issue);
     }
@@ -3820,7 +3689,7 @@ mod tests {
         let db = db(vec![i.clone()]);
         let header = test_header();
         let mut page = Page::open(i.id.clone());
-        page.go(2);
+        page.go(1);
         page.enter_box(&posts(&i, 40, &page, true).1);
         let mut terminal = Terminal::new(TestBackend::new(100, 16)).unwrap();
         let mut limits = Limits::default();
@@ -3836,19 +3705,19 @@ mod tests {
             })
             .collect();
         assert!(
-            rows[1].starts_with("list › t-000009 › bbbb0000"),
+            rows[1].starts_with("list › t-000009 › aaaa0000"),
             "{}",
             rows[1]
         );
-        assert!(rows[3].starts_with("╭ bbbb0000 "), "{}", rows[3]);
+        assert!(rows[3].starts_with("╭ aaaa0000 "), "{}", rows[3]);
         assert!(rows[4].starts_with("│ ann · just now"), "{}", rows[4]);
         let at = |needle: &str| rows.iter().position(|r| r.contains(needle));
-        assert!(at("╭ note ").is_some(), "{rows:#?}");
+        assert!(at("╭ thread ").is_some(), "{rows:#?}");
         assert!(at("│ › t-000009 ").is_some(), "{rows:#?}");
-        assert!(at("answers   aaaa0000").is_some(), "{rows:#?}");
-        assert!(at("replies   1").is_some(), "{rows:#?}");
+        assert!(at("answers").is_none(), "{rows:#?}");
+        assert!(at("replies   2").is_some(), "{rows:#?}");
         assert_eq!(limits.ties, ["t-000009"]);
-        assert_eq!(limits.boxes.len(), 2);
+        assert_eq!(limits.boxes.len(), 3);
     }
 
     #[test]

@@ -26,16 +26,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   show` prints the text as written. A fenced block tagged rust, python,
   sh, json, toml, yaml or diff has its comments dim, strings green,
   numbers magenta and keywords blue; any other tag stays plain.
-- On the screen's page each box shows five lines of its text and counts
-  the rest under them; Enter opens the box's page, with the whole
-  text and, for a note, the replies under it as boxes again. Esc goes
+- The screen's page shows the body and the top-level notes, each cut
+  to five lines with the rest counted under them, and a note's border
+  says how many replies its thread holds and when the last was written.
+  Enter opens the box's page: the body whole, or the note and every
+  reply under it whole, in one pane that scrolls by the line. Esc goes
   back with the cursor where it was, and the header's trail names the
   note.
 - The screen's page has a cursor over the body and the notes. `j` and
-  `k` move it and the chosen box has the bright border; `u` goes to the
-  note it answers, `[` and `]` to its neighbours in the thread, Space
-  folds the replies under it, and Ctrl-d and Ctrl-u scroll without
-  moving it.
+  `k` move it and the chosen box has the bright border, and Ctrl-d and
+  Ctrl-u scroll without moving it.
 
 ### Fixed
 
