@@ -1,0 +1,28 @@
+{
+  "id": "foam-8ec026",
+  "title": "Notes addressable by id prefix on the command line",
+  "body": "The same prefix shortening issues have, scoped to an issue.",
+  "type": "task",
+  "status": "open",
+  "priority": 2,
+  "labels": [],
+  "parent": "foam-884673",
+  "blocked_by": [],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-10-10T00:03:11.212111277Z",
+  "updated_at": "2026-10-10T00:03:11.212111277Z",
+  "closed_at": null,
+  "close_reason": null,
+  "resolution": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "34d8e13",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
