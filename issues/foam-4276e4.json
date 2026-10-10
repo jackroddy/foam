@@ -1,0 +1,28 @@
+{
+  "id": "foam-4276e4",
+  "title": "Cut the 0.4.0 release",
+  "body": "Version in Cargo.toml, the changelog's Unreleased section becomes 0.4.0 with a date, annotated tag v0.4.0, merge dev to main. Jack pushes and publishes.",
+  "type": "chore",
+  "status": "open",
+  "priority": 1,
+  "labels": [],
+  "parent": "foam-b3f162",
+  "blocked_by": [],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-10-10T00:19:32.557273035Z",
+  "updated_at": "2026-10-10T00:19:32.557273035Z",
+  "closed_at": null,
+  "close_reason": null,
+  "resolution": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "76b248f",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
