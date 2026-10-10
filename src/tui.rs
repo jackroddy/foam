@@ -6,25 +6,47 @@ use std::ops::Range;
 
 use anyhow::Result;
 use jiff::Timestamp;
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use ratatui::crossterm::event::{
+    self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, KeyboardEnhancementFlags,
+    PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+};
+use ratatui::crossterm::terminal::supports_keyboard_enhancement;
+use ratatui::layout::Position;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
-    Block, BorderType, HighlightSpacing, List, ListItem, ListState, Padding, Paragraph,
+    Block, BorderType, Clear, HighlightSpacing, List, ListItem, ListState, Padding, Paragraph,
 };
 use ratatui::{DefaultTerminal, Frame};
 
+use crate::compose::{Editor, Target};
 use crate::git::{Distance, Stamp};
 use crate::graph::{self, BOARD_LOG};
 use crate::md;
 use crate::model::{Issue, Kind, Memory, Note, Status};
+use crate::ops;
 use crate::palette;
 use crate::render;
 use crate::store::{DATA_REF, Db, Store};
 
 pub fn run(store: &Store, actor: &str) -> Result<()> {
-    ratatui::run(|terminal| screen(terminal, store, actor))
+    ratatui::run(|terminal| {
+        // a terminal that speaks the kitty keyboard protocol tells
+        // shift+enter from enter; the rest send the same byte
+        let enhanced = supports_keyboard_enhancement().unwrap_or(false);
+        if enhanced {
+            ratatui::crossterm::execute!(
+                std::io::stdout(),
+                PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+            )?;
+        }
+        let out = screen(terminal, store, actor, enhanced);
+        if enhanced {
+            let _ = ratatui::crossterm::execute!(std::io::stdout(), PopKeyboardEnhancementFlags);
+        }
+        out
+    })
 }
 
 /// What narrows the listed rows.
@@ -175,6 +197,7 @@ impl View {
 }
 
 /// Where the person is: on the rows, or on an issue's page.
+#[allow(clippy::large_enum_variant)]
 enum Mode {
     Rows,
     Detail(Page),
@@ -229,6 +252,13 @@ struct Page {
     reveal: bool,
     /// The tie under the cursor, when the cursor is on the ties.
     tie: Option<usize>,
+    /// The choice box over the selected note, and what it offers.
+    ask: Option<Target>,
+    /// A note being written, and whether its box is open.
+    draft: Option<Editor>,
+    open: bool,
+    /// The note to put the cursor on once the next draw finds it.
+    select: Option<String>,
 }
 
 impl Page {
@@ -241,7 +271,20 @@ impl Page {
             cursor: 0,
             reveal: true,
             tie: None,
+            ask: None,
+            draft: None,
+            open: false,
+            select: None,
         }
+    }
+
+    /// Start writing, or go on with a draft for the same target.
+    fn compose(&mut self, target: Target, text: &str) {
+        if self.draft.as_ref().is_none_or(|d| d.target != target) {
+            self.draft = Some(Editor::new(target, text));
+        }
+        self.open = true;
+        self.ask = None;
     }
 
     fn go(&mut self, to: usize) {
@@ -316,6 +359,9 @@ impl Page {
         self.scroll = 0;
         self.go(0);
         self.tie = None;
+        self.ask = None;
+        self.draft = None;
+        self.open = false;
     }
 
     /// Back to the page this one was opened from, with its cursor
@@ -329,6 +375,9 @@ impl Page {
         self.scroll = b.scroll;
         self.go(b.cursor);
         self.tie = b.tie;
+        self.ask = None;
+        self.draft = None;
+        self.open = false;
         true
     }
 
@@ -467,6 +516,10 @@ struct State {
     typing: bool,
     folded: HashSet<String>,
     shelf: Shelf,
+    /// Whether the terminal tells shift+enter from enter.
+    enhanced: bool,
+    /// What the last write did, or why it did not, for one draw.
+    notice: Option<String>,
 }
 
 impl State {
@@ -480,6 +533,8 @@ impl State {
             typing: false,
             folded: HashSet::new(),
             shelf: Shelf::default(),
+            enhanced: true,
+            notice: None,
         }
     }
 }
@@ -494,6 +549,8 @@ enum Action {
     /// Build the rows again from the same data, and put the
     /// cursor where the variant says.
     Rebuild(After),
+    /// Write the page's draft to the ref, then reload.
+    Send,
 }
 
 /// Where the cursor lands after the rows are rebuilt.
@@ -505,8 +562,14 @@ enum After {
     On(String),
 }
 
-fn screen(terminal: &mut DefaultTerminal, store: &Store, actor: &str) -> Result<()> {
+fn screen(
+    terminal: &mut DefaultTerminal,
+    store: &Store,
+    actor: &str,
+    enhanced: bool,
+) -> Result<()> {
     let mut st = State::new();
+    st.enhanced = enhanced;
     loop {
         let snap = store
             .load()?
@@ -542,21 +605,38 @@ fn screen(terminal: &mut DefaultTerminal, store: &Store, actor: &str) -> Result<
                 }
                 Mode::Detail(page) => {
                     let issue = &snap.db.issues[page.id()];
+                    let (enhanced, notice) = (st.enhanced, st.notice.as_deref());
                     terminal.draw(|frame| {
-                        limits = draw_detail(frame, &screen.header, st.view, &snap.db, issue, page);
+                        limits = draw_detail(
+                            frame,
+                            &screen.header,
+                            st.view,
+                            &snap.db,
+                            issue,
+                            page,
+                            actor,
+                            enhanced,
+                            notice,
+                        );
                     })?;
                 }
             }
             let Event::Key(key) = event::read()? else {
                 continue;
             };
-            if key.kind != KeyEventKind::Press {
+            if key.kind == KeyEventKind::Release {
                 continue;
             }
+            st.notice = None;
             match handle(&mut st, key, &screen.rows, &snap.db, &limits) {
                 Action::Quit => return Ok(()),
                 Action::Reload => break,
                 Action::Draw => {}
+                Action::Send => {
+                    if send(&mut st, store, actor) {
+                        break;
+                    }
+                }
                 Action::Rebuild(after) => {
                     screen = build(store, &snap.db, st.view, &st.filter, actor, &st.folded)?;
                     match after {
@@ -574,9 +654,55 @@ fn screen(terminal: &mut DefaultTerminal, store: &Store, actor: &str) -> Result<
     }
 }
 
+/// Write the page's draft through the ops the commands use. The
+/// footer says what happened; on success the page reloads with the
+/// cursor on the note.
+fn send(st: &mut State, store: &Store, actor: &str) -> bool {
+    let Mode::Detail(page) = &mut st.mode else {
+        return false;
+    };
+    let Some(draft) = &page.draft else {
+        return false;
+    };
+    let text = draft.text();
+    let result = match &draft.target {
+        Target::Note => ops::note(store, &page.issue, actor, &text, None),
+        Target::Reply(to) => ops::note(store, &page.issue, actor, &text, Some(to)),
+        Target::Edit(id) => ops::edit_note(store, &page.issue, id, &text),
+    };
+    match result {
+        Ok(issue) => {
+            let (said, id) = match &draft.target {
+                Target::Edit(id) => ("edited", id.clone()),
+                _ => (
+                    "noted",
+                    issue.notes.last().map(|n| n.id.clone()).unwrap_or_default(),
+                ),
+            };
+            st.notice = Some(format!("{said} {id}"));
+            page.select = Some(id);
+            page.draft = None;
+            page.open = false;
+            true
+        }
+        Err(e) => {
+            st.notice = Some(e.to_string());
+            false
+        }
+    }
+}
+
 /// Apply one key to the state and say what the loop does next.
 fn handle(st: &mut State, key: KeyEvent, rows: &[Row], db: &Db, limits: &Limits) -> Action {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    if let Mode::Detail(page) = &mut st.mode {
+        if page.open {
+            return handle_compose(page, key);
+        }
+        if page.ask.is_some() {
+            return handle_ask(page, key.code, limits, db);
+        }
+    }
     if st.typing {
         match key.code {
             KeyCode::Esc | KeyCode::Enter => st.typing = false,
@@ -619,8 +745,23 @@ fn handle(st: &mut State, key: KeyEvent, rows: &[Row], db: &Db, limits: &Limits)
                             page.follow(id.clone());
                         }
                     }
+                    None if thread => {
+                        if limits.boxes.get(page.cursor).is_some() {
+                            page.ask = Some(Target::Reply(String::new()));
+                        }
+                    }
                     None => page.enter_box(&limits.boxes),
                 },
+                KeyCode::Char('l') | KeyCode::Right if thread && page.tie.is_none() => {
+                    let last = limits.boxes.len().saturating_sub(1);
+                    page.go((page.cursor + 1).min(last));
+                }
+                KeyCode::Char('h') | KeyCode::Left if thread && page.tie.is_none() => {
+                    page.go(page.cursor.saturating_sub(1));
+                }
+                KeyCode::Char('n') if page.root == Root::Issue && page.tie.is_none() => {
+                    page.compose(Target::Note, "");
+                }
                 KeyCode::Char('d') if ctrl => {
                     page.scroll = (page.scroll + limits.rows / 2).min(limits.scroll);
                 }
@@ -652,6 +793,81 @@ fn handle(st: &mut State, key: KeyEvent, rows: &[Row], db: &Db, limits: &Limits)
             Action::Draw
         }
     }
+}
+
+/// A key on the choice box over a selected note: h, l, j and k
+/// move between reply and edit, enter takes the one shown, esc
+/// closes the box.
+fn handle_ask(page: &mut Page, code: KeyCode, limits: &Limits, db: &Db) -> Action {
+    let Some(id) = limits.boxes.get(page.cursor).and_then(|b| b.id.clone()) else {
+        page.ask = None;
+        return Action::Draw;
+    };
+    let editing = matches!(page.ask, Some(Target::Edit(_)));
+    match code {
+        KeyCode::Esc => page.ask = None,
+        KeyCode::Char('h' | 'l' | 'j' | 'k') | KeyCode::Left | KeyCode::Right | KeyCode::Tab => {
+            page.ask = Some(if editing {
+                Target::Reply(String::new())
+            } else {
+                Target::Edit(String::new())
+            });
+        }
+        KeyCode::Enter => {
+            let note = db
+                .issues
+                .get(&page.issue)
+                .and_then(|i| i.notes.iter().find(|n| n.id == id));
+            if editing {
+                let text = note.map(|n| n.text.clone()).unwrap_or_default();
+                page.compose(Target::Edit(id), &text);
+            } else {
+                page.compose(Target::Reply(id), "");
+            }
+        }
+        _ => {}
+    }
+    Action::Draw
+}
+
+/// A key in an open compose box: enter sends, shift+enter,
+/// alt+enter and ctrl+j break the line, esc closes the box and
+/// keeps the draft, ctrl+c quits.
+fn handle_compose(page: &mut Page, key: KeyEvent) -> Action {
+    let Some(ed) = &mut page.draft else {
+        page.open = false;
+        return Action::Draw;
+    };
+    let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+    let alt = key.modifiers.contains(KeyModifiers::ALT);
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    match key.code {
+        KeyCode::Esc => page.open = false,
+        KeyCode::Enter if shift || alt => ed.newline(),
+        KeyCode::Char('j') if ctrl => ed.newline(),
+        KeyCode::Char('c') if ctrl => return Action::Quit,
+        KeyCode::Enter => {
+            if !ed.is_blank() {
+                return Action::Send;
+            }
+        }
+        KeyCode::Backspace => ed.backspace(),
+        KeyCode::Delete => ed.delete(),
+        KeyCode::Left => ed.left(),
+        KeyCode::Right => ed.right(),
+        KeyCode::Up => ed.up(),
+        KeyCode::Down => ed.down(),
+        KeyCode::Home => ed.home(),
+        KeyCode::End => ed.end(),
+        KeyCode::Tab => {
+            for _ in 0..4 {
+                ed.insert(' ');
+            }
+        }
+        KeyCode::Char(c) if !ctrl => ed.insert(c),
+        _ => {}
+    }
+    Action::Draw
 }
 
 /// A key on the rows.
@@ -1507,12 +1723,48 @@ fn draw_memories(
 /// the pane shows its top.
 fn reveal(scroll: &mut usize, cursor: usize, boxes: &[NoteBox], rows: usize) {
     if let Some(b) = boxes.get(cursor) {
-        if b.lines.start < *scroll {
-            *scroll = b.lines.start;
-        } else if b.lines.end > *scroll + rows {
-            *scroll = b.lines.end.saturating_sub(rows).min(b.lines.start);
-        }
+        reveal_lines(scroll, &b.lines, rows);
     }
+}
+
+fn reveal_lines(scroll: &mut usize, lines: &Range<usize>, rows: usize) {
+    if lines.start < *scroll {
+        *scroll = lines.start;
+    } else if lines.end > *scroll + rows {
+        *scroll = lines.end.saturating_sub(rows).min(lines.start);
+    }
+}
+
+/// The choice box over the notes: reply or edit, the one shown
+/// bright.
+fn draw_ask(frame: &mut Frame, area: Rect, choice: &Target) {
+    let editing = matches!(choice, Target::Edit(_));
+    let pick = |text: &str, on: bool| {
+        if on {
+            Span::raw(text.to_string()).bold().fg(palette::FOCUS)
+        } else {
+            Span::raw(text.to_string()).dim()
+        }
+    };
+    let line = Line::from(vec![
+        pick("reply", !editing),
+        Span::raw("   "),
+        pick("edit", editing),
+    ]);
+    let width = 18;
+    let x = area.x + area.width.saturating_sub(width) / 2;
+    let y = area.y + area.height.saturating_sub(3) / 2;
+    let popup = Rect {
+        x,
+        y,
+        width: width.min(area.width),
+        height: 3.min(area.height),
+    };
+    frame.render_widget(Clear, popup);
+    frame.render_widget(
+        Paragraph::new(line).block(pane(Span::raw(" note "), true)),
+        popup,
+    );
 }
 
 /// The row under the cursor: a background under its colours,
@@ -1529,6 +1781,7 @@ const WIDE: u16 = 90;
 
 /// Draw an issue's page: the header card, the about pane and the
 /// posts, side by side or stacked.
+#[allow(clippy::too_many_arguments)]
 fn draw_detail(
     frame: &mut Frame,
     header: &Header,
@@ -1536,6 +1789,9 @@ fn draw_detail(
     db: &Db,
     issue: &Issue,
     page: &mut Page,
+    actor: &str,
+    enhanced: bool,
+    notice: Option<&str>,
 ) -> Limits {
     let [top, body, foot] = frame_areas(frame);
     draw_header(frame, top, header, view, &trail_spans(view, &page.trail()));
@@ -1594,13 +1850,29 @@ fn draw_detail(
         about_area,
     );
 
-    let (lines, boxes) = posts(issue, inner(posts_area.width), page, page.tie.is_none());
+    let (lines, boxes, editor) = posts(
+        issue,
+        inner(posts_area.width),
+        page,
+        page.tie.is_none(),
+        actor,
+    );
     let rows = rows_in(posts_area.height);
     let max = lines.len().saturating_sub(rows);
+    // a note just written is where the cursor goes
+    if let Some(id) = page.select.take()
+        && let Some(k) = boxes.iter().position(|b| b.id.as_deref() == Some(&id))
+    {
+        page.go(k);
+    }
     page.cursor = page.cursor.min(boxes.len().saturating_sub(1));
     if page.reveal {
         reveal(&mut page.scroll, page.cursor, &boxes, rows);
         page.reveal = false;
+    }
+    // an open compose box is always in view
+    if let Some((range, _)) = &editor {
+        reveal_lines(&mut page.scroll, range, rows);
     }
     page.scroll = page.scroll.min(max);
     let pane_title = match page.root {
@@ -1613,18 +1885,44 @@ fn draw_detail(
             .scroll((u16::try_from(page.scroll).unwrap_or(u16::MAX), 0)),
         posts_area,
     );
+    // the terminal's cursor sits in the compose box
+    if let Some((_, (line, col))) = editor
+        && line >= page.scroll
+        && line < page.scroll + rows
+    {
+        frame.set_cursor_position(Position {
+            x: posts_area.x + 2 + u16::try_from(col).unwrap_or(u16::MAX),
+            y: posts_area.y + 1 + u16::try_from(line - page.scroll).unwrap_or(u16::MAX),
+        });
+    }
+    if let Some(choice) = &page.ask {
+        draw_ask(frame, posts_area, choice);
+    }
 
     let ties = if about.ties.is_empty() {
         ""
     } else {
         "tab ties   "
     };
-    let keys = if page.tie.is_some() {
+    let keys = if let Some(notice) = notice {
+        notice.to_string()
+    } else if page.open {
+        let newline = if enhanced {
+            "shift+enter newline"
+        } else {
+            "alt+enter newline"
+        };
+        format!("enter send   {newline}   esc keep the draft")
+    } else if page.ask.is_some() {
+        "h/l choose   enter go   esc close".to_string()
+    } else if page.tie.is_some() {
         "j/k pick   enter follow   tab back   esc back   q quit".to_string()
     } else if matches!(page.root, Root::Note(_)) {
-        format!("j/k scroll   g/G ends   ^d/^u page   {ties}esc back   q quit")
+        format!(
+            "h/l select   enter reply or edit   j/k scroll   ^d/^u page   {ties}esc back   q quit"
+        )
     } else {
-        format!("j/k move   enter open   ^d/^u scroll   {ties}esc back   q quit")
+        format!("j/k move   enter open   n note   ^d/^u scroll   {ties}esc back   q quit")
     };
     let keys = keys.as_str();
     frame.render_widget(Paragraph::new(keys).dim(), foot);
@@ -1847,12 +2145,18 @@ fn about(db: &Db, i: &Issue, width: usize, tie: Option<usize>) -> About {
 /// lines, a note's border saying what its thread holds; on the
 /// body's page the body whole; on a note's page the note whole, then
 /// every reply under it whole.
+#[allow(clippy::type_complexity)]
 fn posts(
     i: &Issue,
     width: usize,
     page: &Page,
     focused: bool,
-) -> (Vec<Line<'static>>, Vec<NoteBox>) {
+    actor: &str,
+) -> (
+    Vec<Line<'static>>,
+    Vec<NoteBox>,
+    Option<(Range<usize>, (usize, usize))>,
+) {
     let style = human();
     let wide = width.max(20);
     let threaded = crate::model::threaded(&i.notes);
@@ -1899,10 +2203,54 @@ fn posts(
     let cursor = page.cursor.min(shown.len().saturating_sub(1));
     let mut out = Vec::new();
     let mut boxes = Vec::new();
+    // the compose box goes where the note will: an edit in place of
+    // the note, a reply after the last reply under it, a new note at
+    // the end
+    let draft = page.open.then_some(page.draft.as_ref()).flatten();
+    let mut editor_at = None;
+    let mut shown: Vec<(Post, usize, Option<String>)> = shown;
+    if let Some(ed) = draft {
+        let at = match &ed.target {
+            Target::Note => Some((shown.len(), 0)),
+            Target::Reply(to) => shown
+                .iter()
+                .position(|(_, _, id)| id.as_deref() == Some(to))
+                .map(|k| {
+                    let depth = shown[k].1;
+                    let end = k
+                        + 1
+                        + shown[k + 1..]
+                            .iter()
+                            .take_while(|(_, d, _)| *d > depth)
+                            .count();
+                    (end, depth + 1)
+                }),
+            Target::Edit(id) => shown
+                .iter()
+                .position(|(_, _, x)| x.as_deref() == Some(id))
+                .map(|k| (k, shown[k].1)),
+        };
+        if let Some((k, depth)) = at {
+            editor_at = Some((k, depth));
+            if matches!(ed.target, Target::Edit(_)) {
+                shown.remove(k);
+            }
+        }
+    }
+    let mut editor = None;
     // a reply hangs from a rail in its own column, down from what
     // it answers; the rail runs on past earlier replies while a
     // later one at that depth is still to come under the same note
-    let depths: Vec<usize> = shown.iter().map(|(_, d, _)| *d).collect();
+    // the compose box counts as a box for the rails, so one runs
+    // down to it past what is between
+    let mut depths: Vec<usize> = shown.iter().map(|(_, d, _)| *d).collect();
+    if let Some((at, d)) = editor_at {
+        depths.insert(at, d);
+    }
+    let pos = |k: usize| match editor_at {
+        Some((at, _)) if at <= k => k + 1,
+        _ => k,
+    };
     let rail_at = |from: usize, level: usize| {
         level > 0
             && depths[from..]
@@ -1916,11 +2264,35 @@ fn posts(
             .collect()
     };
     let deepest = wide.saturating_sub(20) / 2;
+    let count = shown.len();
     for (k, (post, depth, id)) in shown.into_iter().enumerate() {
+        // the compose box, before the box it stands in for or at
+        // the end
+        if let (Some(ed), Some((at, d))) = (draft, editor_at)
+            && at == k
+        {
+            {
+                let d = d.min(deepest);
+                if !boxes.is_empty() || !out.is_empty() {
+                    let mut above = prefix(k, d);
+                    if d > 0 {
+                        above.push('│');
+                    }
+                    out.push(Line::from(Span::raw(above).dim()));
+                }
+                let start = out.len();
+                let (mut lines, (row, col)) = editor_box(ed, actor, wide - 2 * d);
+                for line in &mut lines {
+                    line.spans.insert(0, Span::raw(prefix(k + 1, d)).dim());
+                }
+                out.extend(lines);
+                editor = Some((start..out.len(), (start + 1 + row, 2 * d + 2 + col)));
+            }
+        }
         let depth = depth.min(deepest);
-        if !boxes.is_empty() {
+        if !out.is_empty() {
             // the line above a reply ends in its own rail
-            let mut above = prefix(k, depth);
+            let mut above = prefix(pos(k), depth);
             if depth > 0 {
                 above.push('│');
             }
@@ -1931,10 +2303,11 @@ fn posts(
             &post,
             &style,
             wide - 2 * depth,
-            focused && cursor == boxes.len(),
+            focused && cursor == boxes.len() && draft.is_none(),
         );
         for line in &mut lines {
-            line.spans.insert(0, Span::raw(prefix(k + 1, depth)).dim());
+            line.spans
+                .insert(0, Span::raw(prefix(pos(k) + 1, depth)).dim());
         }
         out.extend(lines);
         boxes.push(NoteBox {
@@ -1942,7 +2315,69 @@ fn posts(
             lines: start..out.len(),
         });
     }
-    (out, boxes)
+    // a new note, or a reply to the last note, goes after everything
+    if let (Some(ed), Some((at, d))) = (draft, editor_at)
+        && at == count
+    {
+        {
+            let d = d.min(deepest);
+            if !out.is_empty() {
+                let mut above = prefix(count, d);
+                if d > 0 {
+                    above.push('│');
+                }
+                out.push(Line::from(Span::raw(above).dim()));
+            }
+            let start = out.len();
+            let (mut lines, (row, col)) = editor_box(ed, actor, wide - 2 * d);
+            for line in &mut lines {
+                line.spans.insert(0, Span::raw(prefix(count + 1, d)).dim());
+            }
+            out.extend(lines);
+            editor = Some((start..out.len(), (start + 1 + row, 2 * d + 2 + col)));
+        }
+    }
+    (out, boxes, editor)
+}
+
+/// The compose box: who is writing and what it will be in the top
+/// border, the text as typed inside, and where the cursor is among
+/// its rows.
+fn editor_box(ed: &Editor, actor: &str, width: usize) -> (Vec<Line<'static>>, (usize, usize)) {
+    let border = Style::new().fg(palette::FOCUS);
+    let edge = |s: String| Span::styled(s, border);
+    let what = match &ed.target {
+        Target::Note => "a note".to_string(),
+        Target::Reply(to) => format!("reply to {to}"),
+        Target::Edit(id) => format!("editing {id}"),
+    };
+    let who = Span::styled(
+        actor.to_string(),
+        self::actor(actor).add_modifier(Modifier::BOLD),
+    );
+    let used = 2 + actor.chars().count() + 3 + what.chars().count() + 1 + 1;
+    let mut out = vec![Line::from(vec![
+        edge("╭ ".into()),
+        who,
+        edge(format!(" · {what} ")),
+        edge("─".repeat(width.saturating_sub(used))),
+        edge("╮".into()),
+    ])];
+    let inner = width.saturating_sub(4).max(16);
+    let (rows, at) = ed.wrapped(inner);
+    for r in rows {
+        out.push(Line::from(vec![
+            edge("│ ".into()),
+            Span::raw(pad(&r, inner)),
+            edge(" │".into()),
+        ]));
+    }
+    out.push(Line::from(vec![
+        edge("╰".into()),
+        edge("─".repeat(width.saturating_sub(2))),
+        edge("╯".into()),
+    ]));
+    (out, at)
 }
 
 /// The body as the issue's own first post.
@@ -2789,7 +3224,7 @@ mod tests {
     #[test]
     fn the_posts_are_the_body_then_the_notes_as_boxes() {
         let (_, i) = fixture();
-        let lines = strings(&posts(&i, 40, &Page::open(i.id.clone()), true).0);
+        let lines = strings(&posts(&i, 40, &Page::open(i.id.clone()), true, "ann").0);
         let wide = |l: &String| l.chars().count() == 40;
         assert!(
             lines.iter().filter(|l| !l.is_empty()).all(wide),
@@ -2854,7 +3289,7 @@ mod tests {
             page.tie = tie;
             terminal
                 .draw(|f| {
-                    draw_detail(f, &title, View::List, &db, &i, &mut page);
+                    draw_detail(f, &title, View::List, &db, &i, &mut page, "ann", true, None);
                 })
                 .unwrap();
             terminal.backend().buffer().clone()
@@ -3130,7 +3565,7 @@ mod tests {
     fn the_issue_page_shows_the_top_level_notes_with_their_threads_in_the_border() {
         let i = thread();
         let page = Page::open(i.id.clone());
-        let (lines, boxes) = posts(&i, 44, &page, true);
+        let (lines, boxes, _) = posts(&i, 44, &page, true, "ann");
         assert_eq!(box_ids(&boxes), [None, Some("aaaa0000"), Some("dddd0000")]);
         // each box's lines are its own, in order, with a blank line
         // between
@@ -3153,7 +3588,7 @@ mod tests {
         use ratatui::backend::TestBackend;
         let i = thread();
         let mut page = Page::open(i.id.clone());
-        let (lines, boxes) = posts(&i, 40, &page, true);
+        let (lines, boxes, _) = posts(&i, 40, &page, true, "ann");
         let plain = |l: &Line| {
             let corner = l.spans.iter().find(|s| s.content.contains('╭')).unwrap();
             corner.style.fg == Some(palette::FOCUS)
@@ -3161,11 +3596,11 @@ mod tests {
         assert!(plain(&lines[boxes[0].lines.start]));
         assert!(!plain(&lines[boxes[1].lines.start]));
         page.go(1);
-        let (lines, _) = posts(&i, 40, &page, true);
+        let (lines, _, _) = posts(&i, 40, &page, true, "ann");
         assert!(!plain(&lines[boxes[0].lines.start]));
         assert!(plain(&lines[boxes[1].lines.start]));
         // on the ties, no box is chosen
-        let (lines, _) = posts(&i, 40, &page, false);
+        let (lines, _, _) = posts(&i, 40, &page, false, "ann");
         assert!(!plain(&lines[boxes[1].lines.start]));
 
         let (db, _) = fixture();
@@ -3174,7 +3609,9 @@ mod tests {
         let mut draw = |page: &mut Page| {
             let mut limits = Limits::default();
             terminal
-                .draw(|f| limits = draw_detail(f, &title, View::List, &db, &i, page))
+                .draw(|f| {
+                    limits = draw_detail(f, &title, View::List, &db, &i, page, "ann", true, None)
+                })
                 .unwrap();
             limits
         };
@@ -3541,7 +3978,7 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n\n");
         let page = Page::open(i.id.clone());
-        let (lines, boxes) = posts(&i, 40, &page, true);
+        let (lines, boxes, _) = posts(&i, 40, &page, true, "ann");
         let body = strings(&lines[boxes[0].lines.clone()]);
         // top, five lines, the count, bottom
         assert_eq!(body.len(), 8, "{body:#?}");
@@ -3553,7 +3990,7 @@ mod tests {
         let mut page = Page::open(i.id.clone());
         page.enter_box(&boxes);
         assert_eq!(page.root, Root::Body);
-        let (lines, boxes) = posts(&i, 40, &page, true);
+        let (lines, boxes, _) = posts(&i, 40, &page, true, "ann");
         assert_eq!(boxes.len(), 1);
         assert_eq!(lines.len(), 19);
         assert!(!lines[18].to_string().contains("more"));
@@ -3567,14 +4004,14 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n\n");
         let mut page = Page::open(i.id.clone());
-        let (_, boxes) = posts(&i, 40, &page, true);
+        let (_, boxes, _) = posts(&i, 40, &page, true, "ann");
         // enter on a: its thread holds a, b and c, whole, with c one
         // step in from b
         page.go(1);
         page.enter_box(&boxes);
         assert_eq!(page.root, Root::Note("aaaa0000".into()));
         assert_eq!(page.trail(), ["t-000009", "aaaa0000"]);
-        let (lines, boxes) = posts(&i, 40, &page, true);
+        let (lines, boxes, _) = posts(&i, 40, &page, true, "ann");
         assert_eq!(
             box_ids(&boxes),
             [Some("aaaa0000"), Some("bbbb0000"), Some("cccc0000")]
@@ -3618,7 +4055,7 @@ mod tests {
         let mut gone = i.clone();
         gone.notes[0].deleted_at = Some(Timestamp::now());
         let db = db(vec![gone]);
-        page.enter_box(&posts(&i, 40, &page, true).1);
+        page.enter_box(&posts(&i, 40, &page, true, "ann").1);
         assert_eq!(page.trail(), ["t-000009", "aaaa0000"]);
         assert!(page.prune(&db));
         assert_eq!(page.root, Root::Issue);
@@ -3636,7 +4073,9 @@ mod tests {
             let mut terminal = Terminal::new(TestBackend::new(100, 20)).unwrap();
             let mut limits = Limits::default();
             terminal
-                .draw(|f| limits = draw_detail(f, &header, View::List, &db, &i, page))
+                .draw(|f| {
+                    limits = draw_detail(f, &header, View::List, &db, &i, page, "ann", true, None)
+                })
                 .unwrap();
             let buffer = terminal.backend().buffer().clone();
             let rows: Vec<String> = (0..buffer.area.height)
@@ -3689,8 +4128,8 @@ mod tests {
             .join("\n\n");
         let mut page = Page::open(i.id.clone());
         page.go(1);
-        page.enter_box(&posts(&i, 40, &page, true).1);
-        let (lines, boxes) = posts(&i, 40, &page, true);
+        page.enter_box(&posts(&i, 40, &page, true, "ann").1);
+        let (lines, boxes, _) = posts(&i, 40, &page, true, "ann");
         // the root is 25 lines in a pane of 10
         assert_eq!(boxes[0].lines, 0..25, "{boxes:#?}");
         let rows = 10;
@@ -3707,8 +4146,8 @@ mod tests {
         // bottom stays put
         let mut body = Page::open(i.id.clone());
         i.body = i.notes[0].text.clone();
-        body.enter_box(&posts(&i, 40, &body, true).1);
-        let (_, one) = posts(&i, 40, &body, true);
+        body.enter_box(&posts(&i, 40, &body, true, "ann").1);
+        let (_, one, _) = posts(&i, 40, &body, true, "ann");
         assert_eq!(one.len(), 1);
         for _ in 0..40 {
             body.step_box(&one, rows, 1);
@@ -3743,8 +4182,8 @@ mod tests {
         });
         let mut page = Page::open(i.id.clone());
         page.go(1);
-        page.enter_box(&posts(&i, 40, &page, true).1);
-        let (lines, boxes) = posts(&i, 40, &page, true);
+        page.enter_box(&posts(&i, 40, &page, true, "ann").1);
+        let (lines, boxes, _) = posts(&i, 40, &page, true, "ann");
         assert_eq!(
             box_ids(&boxes),
             [
@@ -3766,5 +4205,223 @@ mod tests {
         assert!(text[boxes[2].lines.end - 1].starts_with("  │ ╰"));
         assert_eq!(above(3), "  │");
         assert!(top(3).starts_with("  ╭ ann"), "{}", top(3));
+    }
+
+    fn shifted(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::SHIFT)
+    }
+
+    #[test]
+    fn on_a_thread_h_and_l_select_and_enter_offers_reply_or_edit() {
+        let i = thread();
+        let db = db(vec![i.clone()]);
+        let rows = Vec::new();
+        let mut st = State::new();
+        let mut page = Page::open(i.id.clone());
+        page.go(1);
+        page.enter_box(&posts(&i, 40, &page, true, "ann").1);
+        let (_, boxes, _) = posts(&i, 40, &page, true, "ann");
+        st.mode = Mode::Detail(page);
+        let limits = Limits {
+            scroll: 0,
+            rows: 20,
+            boxes,
+            ties: Vec::new(),
+        };
+        let key = |st: &mut State, key: KeyEvent| handle(st, key, &rows, &db, &limits);
+        fn shown(st: &State) -> &Page {
+            match &st.mode {
+                Mode::Detail(p) => p,
+                Mode::Rows => panic!("a page"),
+            }
+        }
+        key(&mut st, press(KeyCode::Char('l')));
+        key(&mut st, press(KeyCode::Char('l')));
+        assert_eq!((shown(&st).cursor, shown(&st).reveal), (2, true));
+        key(&mut st, press(KeyCode::Char('h')));
+        assert_eq!(shown(&st).cursor, 1);
+        // enter offers reply; l turns it to edit; enter opens the
+        // editor on b's text; esc keeps the draft, enter again
+        // brings it back
+        key(&mut st, press(KeyCode::Enter));
+        assert_eq!(shown(&st).ask, Some(Target::Reply(String::new())));
+        key(&mut st, press(KeyCode::Char('l')));
+        assert_eq!(shown(&st).ask, Some(Target::Edit(String::new())));
+        key(&mut st, press(KeyCode::Enter));
+        let draft = shown(&st).draft.as_ref().unwrap();
+        assert_eq!(draft.target, Target::Edit("bbbb0000".into()));
+        assert_eq!(draft.text(), "note bbbb0000");
+        assert!(shown(&st).open && shown(&st).ask.is_none());
+        // typing goes in; shift+enter breaks the line; q is a
+        // letter here, not quit; enter sends
+        key(&mut st, press(KeyCode::Char(' ')));
+        key(&mut st, press(KeyCode::Char('q')));
+        key(&mut st, shifted(KeyCode::Enter));
+        key(&mut st, press(KeyCode::Char('x')));
+        assert_eq!(
+            shown(&st).draft.as_ref().unwrap().text(),
+            "note bbbb0000 q\nx"
+        );
+        key(&mut st, press(KeyCode::Esc));
+        assert!(!shown(&st).open && shown(&st).draft.is_some());
+        key(&mut st, press(KeyCode::Enter));
+        key(&mut st, press(KeyCode::Char('l')));
+        key(&mut st, press(KeyCode::Enter));
+        assert!(shown(&st).open);
+        assert_eq!(
+            shown(&st).draft.as_ref().unwrap().text(),
+            "note bbbb0000 q\nx"
+        );
+        assert_eq!(key(&mut st, press(KeyCode::Enter)), Action::Send);
+        // a reply to b starts empty, and an empty one does not send
+        key(&mut st, press(KeyCode::Esc));
+        key(&mut st, press(KeyCode::Enter));
+        key(&mut st, press(KeyCode::Enter));
+        assert_eq!(
+            shown(&st).draft.as_ref().unwrap().target,
+            Target::Reply("bbbb0000".into())
+        );
+        assert_eq!(key(&mut st, press(KeyCode::Enter)), Action::Draw);
+        // leaving the page drops the draft
+        key(&mut st, press(KeyCode::Esc));
+        key(&mut st, press(KeyCode::Esc));
+        assert!(shown(&st).draft.is_none() && shown(&st).root == Root::Issue);
+        // n on the issue's page opens a new note
+        key(&mut st, press(KeyCode::Char('n')));
+        assert_eq!(shown(&st).draft.as_ref().unwrap().target, Target::Note);
+    }
+
+    #[test]
+    fn the_compose_box_sits_where_the_note_will_and_holds_the_cursor() {
+        let i = thread();
+        let mut page = Page::open(i.id.clone());
+        page.go(1);
+        page.enter_box(&posts(&i, 40, &page, true, "ann").1);
+        // a reply to b goes after c, one deeper than b, hanging from
+        // its rail
+        page.compose(Target::Reply("bbbb0000".into()), "");
+        let (lines, boxes, editor) = posts(&i, 40, &page, true, "ann");
+        let text = strings(&lines);
+        let (range, (line, col)) = editor.unwrap();
+        assert_eq!(range.start, boxes[2].lines.end + 1, "{text:#?}");
+        assert!(
+            text[range.start].starts_with("    ╭ ann · reply to bbbb0000 "),
+            "{}",
+            text[range.start]
+        );
+        assert_eq!((line, col), (range.start + 1, 6));
+        assert_eq!(text[range.start - 1], "    │");
+        // a reply to a goes after c, and the rail to it runs past
+        // b and c
+        page.compose(Target::Reply("aaaa0000".into()), "");
+        let (lines, boxes, editor) = posts(&i, 40, &page, true, "ann");
+        let text = strings(&lines);
+        let (range, _) = editor.unwrap();
+        assert!(
+            text[range.start].starts_with("  ╭ ann · reply to aaaa0000 "),
+            "{}",
+            text[range.start]
+        );
+        assert!(
+            text[boxes[2].lines.start].starts_with("  │ ╭ ann"),
+            "{}",
+            text[boxes[2].lines.start]
+        );
+        assert_eq!(text[range.start - 1], "  │");
+        // an edit stands in for the note's own box
+        page.compose(Target::Edit("bbbb0000".into()), "note bbbb0000");
+        let (lines, boxes, editor) = posts(&i, 40, &page, true, "ann");
+        let text = strings(&lines);
+        let (range, (line, col)) = editor.unwrap();
+        assert_eq!(box_ids(&boxes), [Some("aaaa0000"), Some("cccc0000")]);
+        assert_eq!(range.start, boxes[0].lines.end + 1);
+        assert!(
+            text[range.start].starts_with("  ╭ ann · editing bbbb0000 "),
+            "{}",
+            text[range.start]
+        );
+        assert!(
+            text[range.start + 1].starts_with("  │ note bbbb0000"),
+            "{}",
+            text[range.start + 1]
+        );
+        assert_eq!((line, col), (range.start + 1, 2 + 2 + 13));
+        // a new note goes at the end of the issue's page
+        let mut page = Page::open(i.id.clone());
+        page.compose(Target::Note, "");
+        let (lines, boxes, editor) = posts(&i, 40, &page, true, "ann");
+        let (range, _) = editor.unwrap();
+        assert_eq!(range.start, boxes.last().unwrap().lines.end + 1);
+        assert_eq!(range.end, lines.len());
+    }
+
+    #[test]
+    fn the_choice_box_and_the_cursor_are_drawn() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+        let i = thread();
+        let db = db(vec![i.clone()]);
+        let header = test_header();
+        let mut page = Page::open(i.id.clone());
+        page.go(1);
+        page.enter_box(&posts(&i, 40, &page, true, "ann").1);
+        page.ask = Some(Target::Edit(String::new()));
+        let mut terminal = Terminal::new(TestBackend::new(100, 20)).unwrap();
+        terminal
+            .draw(|f| {
+                draw_detail(
+                    f,
+                    &header,
+                    View::List,
+                    &db,
+                    &i,
+                    &mut page,
+                    "ann",
+                    true,
+                    None,
+                );
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let rows: Vec<String> = (0..buffer.area.height)
+            .map(|y| {
+                (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol().to_string())
+                    .collect()
+            })
+            .collect();
+        assert!(rows.iter().any(|r| r.contains("╭ note ")), "{rows:#?}");
+        assert!(rows.iter().any(|r| r.contains("reply   edit")), "{rows:#?}");
+        assert!(rows[19].starts_with("h/l choose"), "{}", rows[19]);
+        // typing: the cursor is in the box and the footer says how
+        // to send
+        page.compose(Target::Reply("aaaa0000".into()), "hi");
+        terminal
+            .draw(|f| {
+                draw_detail(
+                    f,
+                    &header,
+                    View::List,
+                    &db,
+                    &i,
+                    &mut page,
+                    "ann",
+                    false,
+                    None,
+                );
+            })
+            .unwrap();
+        let shown = terminal.get_cursor_position().unwrap();
+        let (x, y) = (shown.x, shown.y);
+        let buffer = terminal.backend().buffer().clone();
+        let row: String = (0..buffer.area.width)
+            .map(|c| buffer[(c, y)].symbol().to_string())
+            .collect();
+        assert!(row.contains("│ hi "), "{row}");
+        assert_eq!(buffer[(x - 1, y)].symbol(), "i");
+        let foot: String = (0..buffer.area.width)
+            .map(|c| buffer[(c, 19)].symbol().to_string())
+            .collect();
+        assert!(foot.starts_with("enter send   alt+enter newline"), "{foot}");
     }
 }

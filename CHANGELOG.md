@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Notes are written from the screen. On an opened thread `h` and `l`
+  select a note and Enter offers to reply to it or edit it; `n` on the
+  issue's page starts a new note. The compose box is drawn where the
+  note will land, with the terminal's cursor in it; Enter sends,
+  Shift+Enter breaks the line where the terminal reports the shift,
+  which the screen asks for through the kitty keyboard protocol, and
+  Alt+Enter or Ctrl-j does everywhere; Esc keeps the draft until the
+  page is left. The write goes through the same path as `foam note`.
 - The screen shows the memories: Tab goes from the board to them, and
   BackTab goes the other way round. They are laid out as an issue's page,
   each memory a box with its slug and when it was remembered in the top

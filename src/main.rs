@@ -1,4 +1,6 @@
 mod cmd;
+#[cfg(feature = "tui")]
+mod compose;
 mod git;
 mod graph;
 #[cfg(feature = "tui")]

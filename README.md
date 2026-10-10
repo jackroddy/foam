@@ -160,7 +160,14 @@ moves onto the parent, children, and blockers, Enter follows the one
 you're on, and Esc goes back to the page before, with the cursor where it
 was.
 
-You can't change anything from the screen; claim, note, and close with the
+Notes are written from the screen. On an opened thread `h` and `l` select
+a note, and Enter offers to reply to it or edit it; `n` on the issue's
+page starts a new note. The compose box is drawn where the note will land
+and the terminal's cursor sits in it. Enter sends, Shift+Enter breaks the
+line in a terminal that reports the shift, and Alt+Enter or Ctrl-j does
+everywhere; Esc closes the box and keeps the draft until you leave the
+page. The write goes through the same path as `foam note`, and the footer
+says what happened. Claiming, closing and remembering stay with the
 commands. The screen needs both stdin and stdout on a terminal, so a pipe,
 a hook, or an agent running bare `foam` gets the usage and exit code 2. A
 build with `--no-default-features` has no screen.
