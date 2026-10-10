@@ -3,26 +3,29 @@
   "title": "meta.json takes the higher schema on merge",
   "body": "merge keeps ours for meta; the schema number must take the max of both sides.",
   "type": "task",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 2,
   "labels": [],
   "parent": "foam-a947aa",
   "blocked_by": [],
   "related": [],
   "assignee": "Jack Roddy/6de6737a",
-  "lease_expires": "2026-10-10T00:27:12.393525523Z",
+  "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-10T00:03:11.157625158Z",
-  "updated_at": "2026-10-10T00:12:12.393525523Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-10-10T00:15:19.24666413Z",
+  "closed_at": "2026-10-10T00:15:19.24666413Z",
+  "close_reason": "a meta.json conflict keeps ours but takes the higher schema_version",
+  "resolution": "done",
   "notes": [],
   "stamps": {
     "created": {
       "commit": "34d8e13",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "e57529a",
+      "branch": "dev"
+    }
   }
 }
