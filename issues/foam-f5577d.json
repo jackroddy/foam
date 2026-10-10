@@ -15,11 +15,20 @@
   "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-10T01:09:23.156530576Z",
-  "updated_at": "2026-10-10T01:09:23.156530576Z",
+  "updated_at": "2026-10-10T01:09:23.228739617Z",
   "closed_at": null,
   "close_reason": null,
   "resolution": null,
-  "notes": [],
+  "notes": [
+    {
+      "id": "e57d2c37",
+      "at": "2026-10-10T01:09:23.228739017Z",
+      "author": "Jack Roddy/42dfd115",
+      "text": "Design, proposed 2026-10-09: View gets a Memories variant and Tab cycles list, board, memories. Rows are slug, age, first line of text; the preview pane shows the whole text through the markdown renderer plus branch @ commit and how far behind. Memories marked old or from another branch, by the same rule prime.rs uses, get a dim badge. / filters on slug and text. Enter opens a page: a card with the slug and stamp, the text at full width.",
+      "commit": "bb39c08",
+      "branch": "dev"
+    }
+  ],
   "stamps": {
     "created": {
       "commit": "bb39c08",
