@@ -67,6 +67,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The screen's footers fit 80 columns; the keys they leave out are in
+  the README. The new-issue form shows six rows of the body around the
+  cursor, so the row it sits under stays in view on a short terminal.
 - `foam prime` says to write a body, a note or a memory as markdown and
   names the four things the screen renders, and the help for `create
   --body`, `note` and `remember` says the same.

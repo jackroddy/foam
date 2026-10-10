@@ -190,9 +190,9 @@ impl View {
 
     fn keys(self) -> &'static str {
         match self {
-            View::List => "j/k move   enter open   tab board   r reload   q quit",
-            View::Board => "j/k move   enter open   tab memories   r reload   q quit",
-            View::Memories => "j/k move   tab list   r reload   q quit",
+            View::List => "j/k move   enter open   tab board",
+            View::Board => "j/k move   enter open   tab memories",
+            View::Memories => "j/k move   tab list",
         }
     }
 }
@@ -1809,10 +1809,11 @@ fn draw_rows(
             (false, _) => "j/k field   h/l turn   esc keep the draft".to_string(),
         }
     } else {
+        // the rest of the keys are in the README; this fits 80 columns
+        let _ = preview;
         format!(
-            "{}   n new   e edit   space fold   p {}   s/t/a/c / filter",
-            screen.view.keys(),
-            if preview { "no preview" } else { "preview" }
+            "{}   n new   e edit   / filter   q quit",
+            screen.view.keys()
         )
     };
     frame.render_widget(Paragraph::new(keys).dim(), foot);
@@ -1867,6 +1868,13 @@ fn form_box(
     // a text field: its rows, with the cursor when it is typed into
     let mut text = |name: &str, field: Field, ed: &Editor, out: &mut Vec<Line<'static>>| {
         let (rows, (r, c)) = ed.wrapped(value_w);
+        // the body shows a few rows around the cursor, so the form
+        // stays short enough for the row above it to stay in view
+        let cap = if field == Field::Body { 6 } else { usize::MAX };
+        let start = r
+            .saturating_sub(cap - 1)
+            .min(rows.len().saturating_sub(cap));
+        let (rows, r) = (&rows[start..rows.len().min(start + cap)], r - start);
         for (n, piece) in rows.iter().enumerate() {
             let first = if n == 0 {
                 label(name, field)
@@ -2104,7 +2112,7 @@ fn draw_memories(
             .scroll((u16::try_from(shelf.scroll).unwrap_or(u16::MAX), 0)),
         boxes_area,
     );
-    let keys = "j/k move   g/G ends   ^d/^u scroll   tab list   / filter   r reload   q quit";
+    let keys = "j/k move   g/G ends   ^d/^u scroll   tab list   / filter   q quit";
     frame.render_widget(Paragraph::new(keys).dim(), foot);
     Limits {
         scroll: max,
@@ -2313,9 +2321,7 @@ fn draw_detail(
     } else if page.tie.is_some() {
         "j/k pick   enter follow   tab back   esc back   q quit".to_string()
     } else if matches!(page.root, Root::Note(_)) {
-        format!(
-            "h/l select   enter reply or edit   j/k scroll   ^d/^u page   {ties}esc back   q quit"
-        )
+        format!("h/l select   enter reply/edit   j/k scroll   {ties}esc back   q quit")
     } else {
         format!("j/k move   enter open   n note   ^d/^u scroll   {ties}esc back   q quit")
     };
