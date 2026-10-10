@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Schema migrations. A foam that reads a ref written at an older schema
+  migrates it in memory, and its first write takes the ref to its own
+  schema and says so; from then on an older foam refuses the ref. A ref
+  newer than the foam, or older than the three schemas it migrates from,
+  is refused with the foam version to use, and a sync refuses origin's
+  ref when a newer foam wrote it, leaving the local ref where it was.
+  `foam stats` shows the ref's schema beside the foam's, and `foam
+  doctor` says when an upgrade is pending on the next write.
+
+### Changed
+
+- When two clones changed meta.json, a sync takes the higher schema of
+  the two instead of keeping its own.
+
 ## [0.3.0] - 2026-10-09
 
 ### Added

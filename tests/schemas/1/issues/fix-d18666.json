@@ -1,0 +1,38 @@
+{
+  "id": "fix-d18666",
+  "title": "A task under it",
+  "body": "",
+  "type": "task",
+  "status": "in_progress",
+  "priority": 2,
+  "labels": [
+    "sync"
+  ],
+  "parent": "fix-edc939",
+  "blocked_by": [],
+  "related": [],
+  "assignee": "ann",
+  "lease_expires": "2026-10-10T00:27:58.990237829Z",
+  "defer_until": null,
+  "created_at": "2026-10-10T00:12:58.975851444Z",
+  "updated_at": "2026-10-10T00:12:58.990237829Z",
+  "closed_at": null,
+  "close_reason": null,
+  "resolution": null,
+  "notes": [
+    {
+      "at": "2026-10-10T00:12:58.983532595Z",
+      "author": "ann",
+      "text": "a note on the task",
+      "commit": "ee2580e",
+      "branch": "main"
+    }
+  ],
+  "stamps": {
+    "created": {
+      "commit": "ee2580e",
+      "branch": "main"
+    },
+    "closed": null
+  }
+}

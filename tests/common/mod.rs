@@ -98,6 +98,109 @@ pub fn git(dir: &Path, args: &[&str]) -> String {
         .to_string()
 }
 
+/// Run git in `dir` with `input` on its stdin and return its stdout.
+pub fn git_in(dir: &Path, args: &[&str], input: &str) -> String {
+    use std::io::Write;
+    use std::process::Stdio;
+    let mut child = Command::new("git")
+        .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+        .args(args)
+        .env("PATH", path_with_foam())
+        .current_dir(dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(input.as_bytes())
+        .unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8(out.stdout)
+        .unwrap()
+        .trim_end()
+        .to_string()
+}
+
+/// The files of a frozen schema fixture under tests/schemas, as
+/// (path, contents) with the paths the ref uses.
+pub fn fixture_files(schema: &str) -> Vec<(String, String)> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/schemas")
+        .join(schema);
+    let mut files = Vec::new();
+    for dir in ["issues", "memories"] {
+        let mut entries: Vec<_> = std::fs::read_dir(root.join(dir))
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .collect();
+        entries.sort();
+        for path in entries {
+            let name = path.file_name().unwrap().to_str().unwrap();
+            files.push((
+                format!("{dir}/{name}"),
+                std::fs::read_to_string(&path).unwrap(),
+            ));
+        }
+    }
+    files.push((
+        "meta.json".to_string(),
+        std::fs::read_to_string(root.join("meta.json")).unwrap(),
+    ));
+    files
+}
+
+/// Commit `files` as the tree of refs/foam/data in `dir`, on top
+/// of `parent` when there is one, with git plumbing and no foam.
+pub fn seed_ref(dir: &Path, files: &[(String, String)], parent: Option<&str>) -> String {
+    let blob = |contents: &str| git_in(dir, &["hash-object", "-w", "--stdin"], contents);
+    let tree = |entries: &[(String, String, bool)]| {
+        let listing: String = entries
+            .iter()
+            .map(|(name, oid, is_tree)| {
+                if *is_tree {
+                    format!("040000 tree {oid}\t{name}\n")
+                } else {
+                    format!("100644 blob {oid}\t{name}\n")
+                }
+            })
+            .collect();
+        git_in(dir, &["mktree"], &listing)
+    };
+    let mut root = Vec::new();
+    for sub in ["issues", "memories"] {
+        let entries: Vec<(String, String, bool)> = files
+            .iter()
+            .filter_map(|(path, contents)| {
+                let name = path.strip_prefix(&format!("{sub}/"))?;
+                Some((name.to_string(), blob(contents), false))
+            })
+            .collect();
+        root.push((sub.to_string(), tree(&entries), true));
+    }
+    let meta = files
+        .iter()
+        .find(|(p, _)| p == "meta.json")
+        .expect("meta.json");
+    root.push(("meta.json".to_string(), blob(&meta.1), false));
+    let tree = tree(&root);
+    let mut args = vec!["commit-tree", tree.as_str(), "-m", "seed"];
+    if let Some(p) = parent {
+        args.extend(["-p", p]);
+    }
+    let commit = git(dir, &args);
+    git(dir, &["update-ref", "refs/foam/data", &commit]);
+    commit
+}
+
 /// Make `dir` a repository on `main` with nothing in it.
 pub fn init_repo(dir: &Path) {
     git(dir, &["init", "-q", "-b", "main"]);

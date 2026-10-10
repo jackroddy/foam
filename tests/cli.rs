@@ -1,5 +1,6 @@
 mod common;
 
+use std::path::Path;
 use std::process::Command;
 
 use assert_cmd::prelude::*;
@@ -773,6 +774,111 @@ fn stats_size_the_data_ref() {
             .unwrap()
             .starts_with("issues/")
     );
+}
+
+#[test]
+fn every_frozen_schema_still_reads_and_is_brought_to_the_current_one() {
+    let schemas = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/schemas");
+    let mut found = 0;
+    for entry in std::fs::read_dir(schemas).unwrap() {
+        let schema = entry.unwrap().file_name().into_string().unwrap();
+        found += 1;
+        let dir = repo();
+        seed_ref(dir.path(), &fixture_files(&schema), None);
+        // the fixture is the same small set of records at every schema
+        let listed = stdout(foam(dir.path()).args(["list", "--plain", "--all"]));
+        assert!(listed.contains("A milestone"), "schema {schema}: {listed}");
+        assert!(
+            listed.contains("A task under it"),
+            "schema {schema}: {listed}"
+        );
+        assert!(listed.contains("A closed one"), "schema {schema}: {listed}");
+        assert!(stdout(foam(dir.path()).arg("memories")).contains("water is wet"));
+        let v: serde_json::Value =
+            serde_json::from_str(&stdout(foam(dir.path()).args(["--json", "stats"]))).unwrap();
+        assert_eq!(v["schema"]["ref"], schema.parse::<u64>().unwrap());
+        let current = v["schema"]["foam"].as_u64().unwrap();
+        // a write takes the ref to this foam's schema, and says so
+        // when that is a change
+        let id = stdout(foam(dir.path()).args(["create", "after the seed"]));
+        let out = foam(dir.path())
+            .args(["note", &id, "written"])
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        let said = String::from_utf8_lossy(&out.stderr).contains("took the data ref from schema");
+        assert_eq!(
+            said,
+            schema.parse::<u64>().unwrap() < current,
+            "schema {schema}"
+        );
+        let meta: serde_json::Value =
+            serde_json::from_str(&git(dir.path(), &["show", "refs/foam/data:meta.json"])).unwrap();
+        assert_eq!(meta["schema_version"], current, "schema {schema}");
+    }
+    assert!(found >= 1);
+}
+
+#[test]
+fn a_ref_newer_than_the_foam_is_refused() {
+    let dir = repo();
+    let mut files = fixture_files("1");
+    let meta = files.iter_mut().find(|(p, _)| p == "meta.json").unwrap();
+    meta.1 = meta
+        .1
+        .replace("\"schema_version\": 1", "\"schema_version\": 99");
+    assert!(meta.1.contains("99"), "{}", meta.1);
+    seed_ref(dir.path(), &files, None);
+    let out = foam(dir.path()).arg("list").output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("data is schema 99 but this foam reads up to"),
+        "{err}"
+    );
+}
+
+#[test]
+fn sync_stops_at_the_gate_when_origin_is_newer_than_this_foam() {
+    let (_root, a, b) = two_clones();
+    stdout(foam(&a).args(["init", "--prefix", "t"]));
+    stdout(foam(&a).args(["create", "from a"]));
+    stdout(foam(&a).arg("sync"));
+    stdout(foam(&b).arg("init"));
+    // b moves the ref to a schema this foam cannot read, with git
+    // alone and the hook out of the way, as a newer foam would
+    let tip = git(&b, &["rev-parse", "refs/foam/data"]);
+    let mut files = fixture_files("1");
+    let meta = files.iter_mut().find(|(p, _)| p == "meta.json").unwrap();
+    meta.1 = meta
+        .1
+        .replace("\"schema_version\": 1", "\"schema_version\": 99");
+    seed_ref(&b, &files, Some(&tip));
+    git(
+        &b,
+        &[
+            "-c",
+            "core.hooksPath=/nonexistent",
+            "push",
+            "-q",
+            "origin",
+            "refs/foam/data:refs/foam/data",
+        ],
+    );
+    let before = git(&a, &["rev-parse", "refs/foam/data"]);
+    let out = foam(&a).arg("sync").output().unwrap();
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("origin's data is schema 99 but this foam reads up to"),
+        "{err}"
+    );
+    // the local ref is untouched, and every command now stops at
+    // the gate until a newer foam is installed
+    assert_eq!(git(&a, &["rev-parse", "refs/foam/data"]), before);
+    let out = foam(&a).arg("list").output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("origin's data is schema 99"));
 }
 
 #[test]

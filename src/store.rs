@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Duration;
@@ -53,13 +54,22 @@ pub struct Snapshot {
 #[derive(Debug, Clone)]
 pub struct Store {
     pub git: Git,
+    /// The schema a write of this store took the ref up from.
+    upgraded: Cell<Option<u32>>,
 }
 
 impl Store {
     pub fn open(dir: &Path) -> Result<Store> {
         Ok(Store {
             git: Git::open(dir)?,
+            upgraded: Cell::new(None),
         })
+    }
+
+    /// The schema the ref was at before a write of this store took
+    /// it to this foam's, if one did.
+    pub fn upgraded_from(&self) -> Option<u32> {
+        self.upgraded.get()
     }
 
     pub fn exists(&self) -> Result<bool> {
@@ -97,6 +107,22 @@ impl Store {
         Ok(files)
     }
 
+    /// Refuse `treeish` when a newer foam wrote it.
+    fn gate(&self, treeish: &str) -> Result<()> {
+        let files = self.load_files(treeish)?;
+        let Some((_, meta)) = files.get("meta.json") else {
+            return Ok(());
+        };
+        let meta: serde_json::Value = serde_json::from_slice(meta).context("meta.json")?;
+        let schema = meta["schema_version"].as_u64().unwrap_or(0);
+        if schema > u64::from(SCHEMA_VERSION) {
+            bail!(
+                "origin's data is schema {schema} but this foam reads up to {SCHEMA_VERSION}; install a newer foam"
+            );
+        }
+        Ok(())
+    }
+
     /// Bring the data ref up to date with whatever the last
     /// fetch put on the origin ref. Returns what happened.
     pub fn absorb_origin(&self) -> Result<Absorbed> {
@@ -114,6 +140,10 @@ impl Store {
             if origin == data || self.git.is_ancestor(&origin, &data)? {
                 return Ok(Absorbed::Nothing);
             }
+            // a fast-forward never decodes, so without this an older
+            // foam would take the ref onto a schema it cannot read
+            // and only the next command would say so
+            self.gate(&origin)?;
             if self.git.is_ancestor(&data, &origin)? {
                 return match self.git.update_ref(DATA_REF, &origin, Some(&data))? {
                     Swap::Done => Ok(Absorbed::FastForward),
@@ -126,16 +156,31 @@ impl Store {
                 files.remove(&c.path);
                 // decode needs a meta.json; ours stands, since
                 // the two only differ when the clones ran init
-                // separately and the prefix is a local choice
+                // separately and the prefix is a local choice,
+                // except the schema, where the higher side has
+                // already upgraded its records
                 if c.path == "meta.json" {
-                    let ours = c
-                        .ours
-                        .as_deref()
-                        .or(c.base.as_deref())
-                        .or(c.theirs.as_deref());
-                    if let Some(oid) = ours {
-                        let bytes = self.git.cat_file_batch(&[oid])?.remove(0);
-                        files.insert(c.path.clone(), (oid.to_string(), bytes));
+                    let read =
+                        |side: &Option<String>| -> Result<Option<(String, serde_json::Value)>> {
+                            let Some(oid) = side else { return Ok(None) };
+                            let bytes = self.git.cat_file_batch(&[oid])?.remove(0);
+                            Ok(Some((oid.clone(), serde_json::from_slice(&bytes)?)))
+                        };
+                    let ours = match read(&c.ours)? {
+                        Some(o) => Some(o),
+                        None => match read(&c.base)? {
+                            Some(b) => Some(b),
+                            None => read(&c.theirs)?,
+                        },
+                    };
+                    let theirs = read(&c.theirs)?.and_then(|(_, v)| v["schema_version"].as_u64());
+                    if let Some((oid, mut value)) = ours {
+                        if let Some(t) = theirs
+                            && value["schema_version"].as_u64().is_some_and(|o| o < t)
+                        {
+                            value["schema_version"] = t.into();
+                        }
+                        files.insert(c.path.clone(), (oid, serde_json::to_vec(&value)?));
                     }
                 }
             }
@@ -249,10 +294,20 @@ impl Store {
             let snap = self.load()?.context(NOT_INITIALIZED)?;
             let mut db = snap.db;
             let (out, message) = change(&mut db)?;
+            // the records were migrated on read; the first write by
+            // a newer foam records that, and older foams refuse the
+            // ref from then on
+            let from = db.meta.schema_version;
+            db.meta.schema_version = SCHEMA_VERSION;
             let tree = self.write_tree(&db, &snap.files)?;
             let commit = self.git.commit_tree(&tree, &[&snap.commit], &message)?;
             match self.git.update_ref(DATA_REF, &commit, Some(&snap.commit))? {
-                Swap::Done => return Ok(out),
+                Swap::Done => {
+                    if from < SCHEMA_VERSION {
+                        self.upgraded.set(Some(from));
+                    }
+                    return Ok(out);
+                }
                 Swap::Lost => {
                     // a random wait so writers that lost together
                     // do not reload and collide together

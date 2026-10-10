@@ -6,7 +6,8 @@ use jiff::Timestamp;
 
 use crate::git::Push;
 use crate::graph;
-use crate::model::{Issue, Memory, Status, parse_when};
+use crate::migrate;
+use crate::model::{Issue, Memory, SCHEMA_VERSION, Status, parse_when};
 use crate::ops::{self, resolve};
 use crate::prime;
 use crate::render::{self, Style};
@@ -47,7 +48,7 @@ pub fn run(cli: Cli, command: Cmd) -> Result<()> {
         actor: cli.actor,
         style: Style::detect(cli.plain || cli.json),
     };
-    match command {
+    let result = match command {
         Cmd::Init { prefix } => init(&store, prefix),
         Cmd::Create {
             title,
@@ -458,7 +459,19 @@ pub fn run(cli: Cli, command: Cmd) -> Result<()> {
                 Ok(())
             }
         },
+    };
+    if let Some(from) = store.upgraded_from() {
+        let text = format!(
+            "foam: this write took the data ref from schema {from} to {SCHEMA_VERSION}; foam older than {} refuses it from now on",
+            migrate::introduced(SCHEMA_VERSION)
+        );
+        if cli.style.color {
+            eprintln!("\x1b[1;33m{text}\x1b[0m");
+        } else {
+            eprintln!("{text}");
+        }
     }
+    result
 }
 
 fn init(store: &Store, prefix: Option<String>) -> Result<()> {
@@ -791,7 +804,7 @@ fn sync(store: &Store, remote: &str) -> Result<()> {
 const LARGEST: usize = 5;
 
 fn stats(store: &Store, json: bool) -> Result<()> {
-    load(store)?;
+    let schema = load(store)?.db.meta.schema_version;
     let size = store.git.ref_size(DATA_REF)?;
     let mut files = store.git.tree_sizes(DATA_REF)?;
     let tip_bytes: u64 = files.iter().map(|(_, b)| b).sum();
@@ -814,6 +827,7 @@ fn stats(store: &Store, json: bool) -> Result<()> {
             "{}",
             serde_json::to_string_pretty(&serde_json::json!({
                 "ref": DATA_REF,
+                "schema": { "ref": schema, "foam": SCHEMA_VERSION },
                 "commits": size.commits,
                 "since": size.since,
                 "days": days,
@@ -839,6 +853,10 @@ fn stats(store: &Store, json: bool) -> Result<()> {
         _ => String::new(),
     };
     println!("{DATA_REF:<16} {} commits{since}", size.commits);
+    println!(
+        "{:<16} {schema}, this foam reads {SCHEMA_VERSION}",
+        "schema"
+    );
     println!(
         "{:<16} {} held only by the ref, {} on disk",
         "objects",
@@ -875,6 +893,13 @@ fn doctor(store: &Store, json: bool) -> Result<()> {
     let snap = load(store)?;
     let db = &snap.db;
     let now = Timestamp::now();
+    if !json && db.meta.schema_version < SCHEMA_VERSION {
+        println!(
+            "the ref is schema {}; this foam writes {SCHEMA_VERSION}, so the next write upgrades it and foam older than {} refuses it after that",
+            db.meta.schema_version,
+            migrate::introduced(SCHEMA_VERSION)
+        );
+    }
     let mut problems: Vec<String> = Vec::new();
     let mut report = |line: String| problems.push(line);
     for i in db.issues.values() {
