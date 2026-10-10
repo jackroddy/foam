@@ -496,8 +496,12 @@ pub fn issue(style: &Style, i: &Issue, db: &Db) -> String {
     }
     if !i.notes.is_empty() {
         out.push('\n');
-        for n in &i.notes {
-            let head = format!("[{} {} {}] ", n.id, style.when(n.at), n.author);
+        for n in i.notes.iter().filter(|n| n.deleted_at.is_none()) {
+            let mut head = format!("[{} {} {}", n.id, style.when(n.at), n.author);
+            if let Some(e) = n.edited_at {
+                head.push_str(&format!(" · edited {}", style.when(e)));
+            }
+            head.push_str("] ");
             let _ = writeln!(
                 out,
                 "{}{}",

@@ -175,11 +175,21 @@ enum Cmd {
     Heartbeat { id: String },
     /// Reopen every in-progress issue whose lease has expired
     Reclaim,
-    /// Append a note to an issue
+    /// Append a note to an issue, or edit, remove or trace one of its notes
     Note {
         id: String,
+        /// The note's text; not needed with --rm or --history
         #[arg(allow_hyphen_values = true)]
-        text: String,
+        text: Option<String>,
+        /// Replace the text of this note, given as its id or a prefix of it
+        #[arg(long, value_name = "NOTE", conflicts_with_all = ["rm", "history"])]
+        edit: Option<String>,
+        /// Remove this note; --json still carries it, with deleted_at
+        #[arg(long, value_name = "NOTE", conflicts_with = "history")]
+        rm: Option<String>,
+        /// Every text this note has had, oldest first, from the ref's history
+        #[arg(long, value_name = "NOTE")]
+        history: Option<String>,
     },
     /// Search issue titles, bodies and notes, and memories, case-insensitively; closed issues included
     Search { query: String },

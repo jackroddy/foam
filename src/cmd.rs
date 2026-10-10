@@ -258,11 +258,13 @@ pub fn run(cli: Cli, command: Cmd) -> Result<()> {
             }
             Ok(())
         }
-        Cmd::Note { id, text } => {
-            let actor = actor(&store, &cli);
-            let issue = ops::note(&store, &id, &actor, &text)?;
-            print_written(&issue, &cli)
-        }
+        Cmd::Note {
+            id,
+            text,
+            edit,
+            rm,
+            history,
+        } => note_command(&store, &cli, &id, text, edit, rm, history),
         Cmd::Search { query } => {
             let snap = load(&store)?;
             let q = query.to_lowercase();
@@ -1220,6 +1222,55 @@ fn actor_in_session(store: &Store, cli: &Options, session: Option<&str>) -> Stri
 }
 
 /// Print an issue a write just committed.
+fn note_command(
+    store: &Store,
+    cli: &Options,
+    id: &str,
+    text: Option<String>,
+    edit: Option<String>,
+    rm: Option<String>,
+    history: Option<String>,
+) -> Result<()> {
+    if let Some(note) = history {
+        let snap = load(store)?;
+        let versions = ops::note_history(store, &snap.db, id, &note)?;
+        if cli.json {
+            let versions: Vec<serde_json::Value> = versions
+                .iter()
+                .map(|(commit, at, text)| {
+                    serde_json::json!({ "commit": commit, "at": at, "text": text })
+                })
+                .collect();
+            println!("{}", serde_json::to_string_pretty(&versions)?);
+        } else {
+            for (commit, at, text) in &versions {
+                let when = at
+                    .parse::<Timestamp>()
+                    .map(|t| cli.style.when(t))
+                    .unwrap_or_else(|_| at.clone());
+                println!(
+                    "{}  {text}",
+                    cli.style.dim(&format!("[{when} {}]", &commit[..7]))
+                );
+            }
+        }
+        return Ok(());
+    }
+    let actor = actor(store, cli);
+    let issue = if let Some(note) = rm {
+        ops::rm_note(store, id, &note)?
+    } else {
+        let Some(text) = text else {
+            bail!("say what the note should say");
+        };
+        match edit {
+            Some(note) => ops::edit_note(store, id, &note, &text)?,
+            None => ops::note(store, id, &actor, &text)?,
+        }
+    };
+    print_written(&issue, cli)
+}
+
 fn print_written(issue: &Issue, cli: &Options) -> Result<()> {
     if cli.json {
         println!("{}", serde_json::to_string_pretty(issue)?);

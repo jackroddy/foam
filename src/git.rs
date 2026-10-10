@@ -533,6 +533,28 @@ impl Git {
         Ok(files)
     }
 
+    /// The commits of `name` that touched `path`, newest first,
+    /// each with its date.
+    pub fn history(&self, name: &str, path: &str) -> Result<Vec<(String, String)>> {
+        let out = self.run(&["log", "--format=%H%x00%cI", name, "--", path])?;
+        Ok(String::from_utf8(out)?
+            .lines()
+            .filter_map(|l| {
+                let (oid, at) = l.split_once('\0')?;
+                Some((oid.to_string(), at.to_string()))
+            })
+            .collect())
+    }
+
+    /// `path` as it was at `commit`, or none when it was not there.
+    pub fn file_at(&self, commit: &str, path: &str) -> Result<Option<Vec<u8>>> {
+        let out = self
+            .command(&["show", &format!("{commit}:{path}")])
+            .stderr(Stdio::piped())
+            .output()?;
+        Ok(out.status.success().then_some(out.stdout))
+    }
+
     /// Where this repository's hooks live.
     pub fn hooks_dir(&self) -> Result<PathBuf> {
         let out = self.run(&["rev-parse", "--git-path", "hooks"])?;

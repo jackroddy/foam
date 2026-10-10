@@ -403,6 +403,72 @@ fn actor_falls_back_to_the_environment() {
 }
 
 #[test]
+fn a_note_can_be_edited_removed_and_traced_by_a_prefix_of_its_id() {
+    let dir = repo();
+    stdout(foam(dir.path()).args(["init", "--prefix", "t"]));
+    let id = stdout(foam(dir.path()).args(["create", "one"]));
+    stdout(foam(dir.path()).args(["note", &id, "first"]));
+    let v: serde_json::Value =
+        serde_json::from_str(&stdout(foam(dir.path()).args(["--json", "show", &id]))).unwrap();
+    let nid = v["notes"][0]["id"].as_str().unwrap().to_string();
+    assert_eq!(nid.len(), 8);
+    let prefix = &nid[..4];
+
+    // text is needed unless the note is being removed or traced
+    foam(dir.path()).args(["note", &id]).assert().code(1);
+    let out = foam(dir.path())
+        .args(["note", &id, "--edit", "zzzz", "x"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("no note on"));
+
+    stdout(foam(dir.path()).args(["note", &id, "--edit", prefix, "second"]));
+    let shown = stdout(foam(dir.path()).args(["show", &id]));
+    assert!(
+        shown.contains("second") && !shown.contains("first"),
+        "{shown}"
+    );
+    assert!(shown.contains("edited"), "{shown}");
+
+    // the history comes from the ref: oldest first, one line per text
+    let history = stdout(foam(dir.path()).args(["note", &id, "--history", prefix]));
+    let texts: Vec<&str> = history
+        .lines()
+        .map(|l| l.rsplit("]  ").next().unwrap())
+        .collect();
+    assert_eq!(texts, ["first", "second"], "{history}");
+    let v: serde_json::Value = serde_json::from_str(&stdout(foam(dir.path()).args([
+        "--json",
+        "note",
+        &id,
+        "--history",
+        prefix,
+    ])))
+    .unwrap();
+    assert_eq!(v.as_array().unwrap().len(), 2);
+    assert_eq!(v[1]["text"], "second");
+    assert_eq!(v[0]["commit"].as_str().unwrap().len(), 40);
+
+    // removed: gone from show, kept in json as a tombstone, and no
+    // longer editable
+    stdout(foam(dir.path()).args(["note", &id, "--rm", prefix]));
+    assert!(!stdout(foam(dir.path()).args(["show", &id])).contains("second"));
+    let v: serde_json::Value =
+        serde_json::from_str(&stdout(foam(dir.path()).args(["--json", "show", &id]))).unwrap();
+    assert!(v["notes"][0]["deleted_at"].is_string());
+    let out = foam(dir.path())
+        .args(["note", &id, "--edit", prefix, "third"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("was removed"));
+    // the log names the note
+    let log = stdout(foam(dir.path()).args(["log", &id]));
+    assert!(log.contains(&format!("rm note {nid} on {id}")), "{log}");
+}
+
+#[test]
 fn notes_search_and_memories() {
     let dir = repo();
     commit(dir.path(), "one");

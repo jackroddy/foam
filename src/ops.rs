@@ -5,10 +5,10 @@ use crate::ConfigKey;
 use crate::graph;
 use crate::model::{
     Issue, Kind, MEMORY_MAX_BYTES, Memory, Meta, Note, Resolution, Stamps, Status, check_slug,
-    new_id, new_note_id,
+    new_id, new_note_id, note_id_of,
 };
 use crate::render::{self, Style};
-use crate::store::{Db, Store};
+use crate::store::{DATA_REF, Db, Store};
 
 /// The fields of an issue `create` writes.
 pub struct NewIssue {
@@ -169,6 +169,116 @@ pub fn update(store: &Store, ids: &[String], actor: &str, changes: &Changes) -> 
         }
         Ok((issues, format!("update {}", ids.join(" "))))
     })
+}
+
+/// The id of the note on `issue` that `query` names: itself, or
+/// the one note whose id starts with it.
+pub fn resolve_note(issue: &Issue, query: &str) -> Result<String> {
+    if issue.notes.iter().any(|n| n.id == query) {
+        return Ok(query.to_string());
+    }
+    let hits: Vec<&Note> = issue
+        .notes
+        .iter()
+        .filter(|n| n.id.starts_with(query))
+        .collect();
+    match hits.len() {
+        1 => Ok(hits[0].id.clone()),
+        0 => bail!("no note on {} starts with {query}", issue.id),
+        n => bail!(
+            "{n} notes on {} start with {query}; give more of the id",
+            issue.id
+        ),
+    }
+}
+
+/// A note of `id` named by `note` that may still change.
+fn live_note<'a>(issue: &'a mut Issue, note: &str) -> Result<&'a mut Note> {
+    let nid = resolve_note(issue, note)?;
+    let issue_id = issue.id.clone();
+    let n = issue
+        .notes
+        .iter_mut()
+        .find(|n| n.id == nid)
+        .expect("resolved on this issue");
+    if n.deleted_at.is_some() {
+        bail!("note {nid} on {issue_id} was removed");
+    }
+    Ok(n)
+}
+
+pub fn edit_note(store: &Store, id: &str, note: &str, text: &str) -> Result<Issue> {
+    store.write_named(|db| {
+        let id = resolve(db, id)?;
+        let issue = get_mut(db, &id)?;
+        let n = live_note(issue, note)?;
+        n.text = text.to_string();
+        n.edited_at = Some(Timestamp::now());
+        let nid = n.id.clone();
+        issue.touch();
+        Ok((issue.clone(), format!("edit note {nid} on {id}")))
+    })
+}
+
+pub fn rm_note(store: &Store, id: &str, note: &str) -> Result<Issue> {
+    store.write_named(|db| {
+        let id = resolve(db, id)?;
+        let issue = get_mut(db, &id)?;
+        let n = live_note(issue, note)?;
+        n.deleted_at = Some(Timestamp::now());
+        let nid = n.id.clone();
+        issue.touch();
+        Ok((issue.clone(), format!("rm note {nid} on {id}")))
+    })
+}
+
+/// Every text a note has had, oldest first, as (commit, when,
+/// text), read from the ref's history.
+pub fn note_history(
+    store: &Store,
+    db: &Db,
+    id: &str,
+    note: &str,
+) -> Result<Vec<(String, String, String)>> {
+    let id = resolve(db, id)?;
+    let issue = db.issues.get(&id).context("resolved")?;
+    let nid = resolve_note(issue, note)?;
+    let path = format!("issues/{id}.json");
+    let mut out: Vec<(String, String, String)> = Vec::new();
+    for (commit, at) in store.git.history(DATA_REF, &path)? {
+        let Some(bytes) = store.git.file_at(&commit, &path)? else {
+            continue;
+        };
+        let value: serde_json::Value =
+            serde_json::from_slice(&bytes).with_context(|| commit.clone())?;
+        let field = |n: &serde_json::Value, k: &str| n[k].as_str().unwrap_or("").to_string();
+        let text = value["notes"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find_map(|n| {
+                // before schema 2 a note had no id; its id now is the
+                // hash of what it was, so the same hash finds it
+                let this = match n["id"].as_str() {
+                    Some(i) => i.to_string(),
+                    None => note_id_of(
+                        &field(n, "at"),
+                        &field(n, "author"),
+                        &field(n, "text"),
+                        &field(n, "commit"),
+                        &field(n, "branch"),
+                    ),
+                };
+                (this == nid).then(|| field(n, "text"))
+            });
+        if let Some(text) = text
+            && out.last().is_none_or(|(_, _, t)| *t != text)
+        {
+            out.push((commit, at, text));
+        }
+    }
+    out.reverse();
+    Ok(out)
 }
 
 /// Close the issues, each returned with the ids of its children

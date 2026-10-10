@@ -1136,6 +1136,7 @@ fn posts(i: &Issue, width: usize) -> Vec<Line<'static>> {
             &Post {
                 id: None,
                 author: None,
+                edited: None,
                 at: i.created_at,
                 text: &i.body,
                 branch: &i.stamps.created.branch,
@@ -1145,7 +1146,7 @@ fn posts(i: &Issue, width: usize) -> Vec<Line<'static>> {
             wide,
         ));
     }
-    for n in &i.notes {
+    for n in i.notes.iter().filter(|n| n.deleted_at.is_none()) {
         if !out.is_empty() {
             out.push(Line::default());
         }
@@ -1153,6 +1154,7 @@ fn posts(i: &Issue, width: usize) -> Vec<Line<'static>> {
             &Post {
                 id: Some(&n.id),
                 author: Some(&n.author),
+                edited: n.edited_at,
                 at: n.at,
                 text: &n.text,
                 branch: &n.branch,
@@ -1170,6 +1172,7 @@ fn posts(i: &Issue, width: usize) -> Vec<Line<'static>> {
 struct Post<'a> {
     id: Option<&'a str>,
     author: Option<&'a str>,
+    edited: Option<Timestamp>,
     at: Timestamp,
     text: &'a str,
     branch: &'a str,
@@ -1216,6 +1219,9 @@ fn post_box(p: &Post, style: &render::Style, width: usize) -> Vec<Line<'static>>
     if let Some(id) = p.id {
         from.push_str(id);
         from.push_str(" · ");
+    }
+    if let Some(e) = p.edited {
+        from.push_str(&format!("edited {} · ", style.when(e)));
     }
     if !p.branch.is_empty() {
         from.push_str(p.branch);
