@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Issues are written from the screen: `n` on the list or the board
+  opens a form under the chosen row with a title, a body, the kind, the
+  priority and the parent; `j` and `k` walk the fields, Enter opens a
+  text field and leaves it, `h` and `l` turn a choice, and Enter on
+  `create` writes through the same path as `foam create` and lands the
+  cursor on the new row. Esc keeps the form until the view changes.
 - Notes are written from the screen. On an opened thread `h` and `l`
   select a note and Enter offers to reply to it or edit it; `n` on the
   issue's page starts a new note. The compose box is drawn where the

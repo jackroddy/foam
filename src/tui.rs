@@ -20,12 +20,13 @@ use ratatui::widgets::{
 };
 use ratatui::{DefaultTerminal, Frame};
 
-use crate::compose::{Editor, Target};
+use crate::compose::{Editor, Field, Form, Target};
 use crate::git::{Distance, Stamp};
 use crate::graph::{self, BOARD_LOG};
 use crate::md;
 use crate::model::{Issue, Kind, Memory, Note, Status};
 use crate::ops;
+use crate::ops::NewIssue;
 use crate::palette;
 use crate::render;
 use crate::store::{DATA_REF, Db, Store};
@@ -520,6 +521,12 @@ struct State {
     enhanced: bool,
     /// What the last write did, or why it did not, for one draw.
     notice: Option<String>,
+    /// A new issue being written on the rows, and whether its form
+    /// is shown.
+    form: Option<Form>,
+    form_shown: bool,
+    /// The issue to put the cursor on once the rows are rebuilt.
+    land: Option<String>,
 }
 
 impl State {
@@ -535,6 +542,9 @@ impl State {
             shelf: Shelf::default(),
             enhanced: true,
             notice: None,
+            form: None,
+            form_shown: false,
+            land: None,
         }
     }
 }
@@ -576,6 +586,15 @@ fn screen(
             .ok_or_else(|| anyhow::anyhow!("{}", crate::store::NOT_INITIALIZED))?;
         let mut screen = build(store, &snap.db, st.view, &st.filter, actor, &st.folded)?;
         keep(&mut st.list, &screen.rows);
+        if let Some(id) = st.land.take() {
+            let at = screen
+                .rows
+                .iter()
+                .position(|r| matches!(r, Row::Issue { issue, .. } if issue.id == id));
+            if at.is_some() {
+                st.list.select(at);
+            }
+        }
         // a page whose issues a reload took away falls back
         if let Mode::Detail(page) = &mut st.mode
             && !page.prune(&snap.db)
@@ -597,9 +616,24 @@ fn screen(
                             limits = draw_memories(frame, &screen, shelf, &context);
                         })?;
                     } else {
+                        let form = st.form_shown.then_some(st.form.as_ref()).flatten();
                         let (list, preview) = (&mut st.list, st.preview);
+                        let (enhanced, notice) = (st.enhanced, st.notice.as_deref());
                         terminal.draw(|frame| {
-                            draw_rows(frame, &screen, list, &snap.db, preview, &context)
+                            draw_rows(
+                                frame,
+                                &screen,
+                                list,
+                                &snap.db,
+                                preview,
+                                &context,
+                                Compose {
+                                    form,
+                                    actor,
+                                    enhanced,
+                                    notice,
+                                },
+                            )
                         })?;
                     }
                 }
@@ -658,6 +692,36 @@ fn screen(
 /// footer says what happened; on success the page reloads with the
 /// cursor on the note.
 fn send(st: &mut State, store: &Store, actor: &str) -> bool {
+    if st.form_shown
+        && let Some(form) = &st.form
+    {
+        if form.title.is_blank() {
+            st.notice = Some("a title is needed".into());
+            return false;
+        }
+        let new = NewIssue {
+            title: form.title.text(),
+            body: form.body.text(),
+            kind: form.kind,
+            priority: form.priority,
+            labels: Vec::new(),
+            parent: form.parent_id().map(str::to_string),
+            blocked_by: Vec::new(),
+        };
+        return match ops::create(store, &new) {
+            Ok(issue) => {
+                st.notice = Some(format!("created {}", issue.id));
+                st.land = Some(issue.id);
+                st.form = None;
+                st.form_shown = false;
+                true
+            }
+            Err(e) => {
+                st.notice = Some(e.to_string());
+                false
+            }
+        };
+    }
     let Mode::Detail(page) = &mut st.mode else {
         return false;
     };
@@ -695,6 +759,11 @@ fn send(st: &mut State, store: &Store, actor: &str) -> bool {
 /// Apply one key to the state and say what the loop does next.
 fn handle(st: &mut State, key: KeyEvent, rows: &[Row], db: &Db, limits: &Limits) -> Action {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    if st.form_shown
+        && let Some(form) = &mut st.form
+    {
+        return handle_form(form, key, &mut st.form_shown);
+    }
     if let Mode::Detail(page) = &mut st.mode {
         if page.open {
             return handle_compose(page, key);
@@ -795,6 +864,60 @@ fn handle(st: &mut State, key: KeyEvent, rows: &[Row], db: &Db, limits: &Limits)
     }
 }
 
+/// A key on the new-issue form. Typing into a text field: enter or
+/// esc leaves it, shift+enter, alt+enter and ctrl+j break a line in
+/// the body. Otherwise j, k and tab walk the fields, enter opens a
+/// text field or turns a choice, h and l turn a choice or pick a
+/// button, enter on create sends, and esc or cancel closes the
+/// form and keeps it.
+fn handle_form(form: &mut Form, key: KeyEvent, shown: &mut bool) -> Action {
+    let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+    let alt = key.modifiers.contains(KeyModifiers::ALT);
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    if ctrl && key.code == KeyCode::Char('c') {
+        return Action::Quit;
+    }
+    if form.editing {
+        let body = form.field == Field::Body;
+        let Some(ed) = form.editor() else {
+            form.editing = false;
+            return Action::Draw;
+        };
+        match key.code {
+            KeyCode::Esc => form.editing = false,
+            KeyCode::Enter if body && (shift || alt) => ed.newline(),
+            KeyCode::Char('j') if body && ctrl => ed.newline(),
+            KeyCode::Enter => form.editing = false,
+            KeyCode::Backspace => ed.backspace(),
+            KeyCode::Delete => ed.delete(),
+            KeyCode::Left => ed.left(),
+            KeyCode::Right => ed.right(),
+            KeyCode::Up => ed.up(),
+            KeyCode::Down => ed.down(),
+            KeyCode::Home => ed.home(),
+            KeyCode::End => ed.end(),
+            KeyCode::Char(c) if !ctrl => ed.insert(c),
+            _ => {}
+        }
+        return Action::Draw;
+    }
+    match key.code {
+        KeyCode::Esc => *shown = false,
+        KeyCode::Char('j') | KeyCode::Down | KeyCode::Tab => form.field = form.field.next(),
+        KeyCode::Char('k') | KeyCode::Up | KeyCode::BackTab => form.field = form.field.previous(),
+        KeyCode::Char('l') | KeyCode::Right => form.turn(1),
+        KeyCode::Char('h') | KeyCode::Left => form.turn(-1),
+        KeyCode::Enter => match form.field {
+            Field::Title | Field::Body => form.editing = true,
+            Field::Buttons if form.cancel => *shown = false,
+            Field::Buttons => return Action::Send,
+            _ => form.turn(1),
+        },
+        _ => {}
+    }
+    Action::Draw
+}
+
 /// A key on the choice box over a selected note: h, l, j and k
 /// move between reply and edit, enter takes the one shown, esc
 /// closes the box.
@@ -891,10 +1014,12 @@ fn handle_rows(
         }
         KeyCode::Tab => {
             st.view = st.view.next();
+            st.form = None;
             return Action::Rebuild(After::First);
         }
         KeyCode::BackTab => {
             st.view = st.view.previous();
+            st.form = None;
             return Action::Rebuild(After::First);
         }
         _ => {}
@@ -908,6 +1033,24 @@ fn handle_rows(
         _ => None,
     };
     match code {
+        KeyCode::Char('n') => {
+            // under the chosen issue when that is a milestone; a
+            // kept form comes back as it was
+            if st.form.is_none() {
+                let parents: Vec<(String, String)> = db
+                    .issues
+                    .values()
+                    .filter(|i| i.kind == Kind::Milestone && i.status != Status::Closed)
+                    .map(|i| (i.id.clone(), i.title.clone()))
+                    .collect();
+                let under = chosen
+                    .filter(|i| i.kind == Kind::Milestone)
+                    .map(|i| i.id.as_str());
+                st.form = Some(Form::new(parents, under));
+            }
+            st.form_shown = true;
+            Action::Draw
+        }
         KeyCode::Char('p') => {
             st.preview = !st.preview;
             Action::Draw
@@ -1442,6 +1585,15 @@ fn frame_areas(frame: &Frame) -> [Rect; 3] {
 /// beside the rows.
 const PREVIEW_WIDTH: u16 = 44;
 
+/// What the rows draw besides themselves: a new-issue form, who is
+/// writing it, what the terminal's keyboard can say, and a notice.
+struct Compose<'a> {
+    form: Option<&'a Form>,
+    actor: &'a str,
+    enhanced: bool,
+    notice: Option<&'a str>,
+}
+
 fn draw_rows(
     frame: &mut Frame,
     screen: &Screen,
@@ -1449,6 +1601,7 @@ fn draw_rows(
     db: &Db,
     preview: bool,
     context: &[Span<'static>],
+    compose: Compose,
 ) {
     let [top, body, foot] = frame_areas(frame);
     draw_header(frame, top, &screen.header, screen.view, context);
@@ -1501,7 +1654,7 @@ fn draw_rows(
             .rev()
             .find(|&k| matches!(screen.rows[k], Row::Header(_)))
     });
-    let items: Vec<ListItem> = screen
+    let mut items: Vec<ListItem> = screen
         .rows
         .iter()
         .enumerate()
@@ -1518,14 +1671,60 @@ fn draw_rows(
             ListItem::new(line)
         })
         .collect();
+    // the form is one item under the chosen row, and the List is
+    // told it is the chosen one so it scrolls into view; the real
+    // cursor stays where it was
+    let mut cursor = None;
+    let at = state.selected().map_or(0, |n| (n + 1).min(items.len()));
+    if let Some(form) = compose.form {
+        let edge = usize::from(boxed) * 4;
+        let (mut lines, caret) = form_box(form, compose.actor, width.saturating_sub(edge));
+        if boxed {
+            let dim = Style::new().add_modifier(Modifier::DIM);
+            for l in &mut lines {
+                l.spans.insert(0, Span::styled("│ ", dim));
+                l.spans.push(Span::styled(" │", dim));
+            }
+        }
+        cursor = caret.map(|(row, col)| (row, col + edge / 2));
+        items.insert(at, ListItem::new(lines));
+    }
     // a row of padding keeps a section's top and bottom borders
     // in view when the cursor is on its first or last issue
     let list = List::new(items)
-        .highlight_style(if boxed { Style::new() } else { CHOSEN })
-        .highlight_symbol(if boxed { "" } else { "› " })
+        .highlight_style(if boxed || compose.form.is_some() {
+            Style::new()
+        } else {
+            CHOSEN
+        })
+        // the gutter stays while the form is up, so the rows do not
+        // shift; the marker alone goes
+        .highlight_symbol(match (boxed, compose.form.is_some()) {
+            (true, _) => "",
+            (false, true) => "  ",
+            (false, false) => "› ",
+        })
         .highlight_spacing(HighlightSpacing::Always)
         .scroll_padding(1);
-    frame.render_stateful_widget(list, rows_area, state);
+    if compose.form.is_some() {
+        let mut shown = *state;
+        shown.select(Some(at));
+        frame.render_stateful_widget(list, rows_area, &mut shown);
+        *state.offset_mut() = shown.offset();
+        // the terminal's cursor sits in the field being typed into
+        if let Some((row, col)) = cursor
+            && at >= state.offset()
+        {
+            let y = rows_area.y + u16::try_from(at - state.offset() + row).unwrap_or(u16::MAX);
+            let gutter = if boxed { 0 } else { 2 };
+            let x = rows_area.x + gutter + u16::try_from(col).unwrap_or(u16::MAX);
+            if y < rows_area.y + rows_area.height {
+                frame.set_cursor_position(Position { x, y });
+            }
+        }
+    } else {
+        frame.render_stateful_widget(list, rows_area, state);
+    }
     draw_recent(frame, recent_area, screen);
     if let (Some(issue), Some(area)) = (chosen, preview_area) {
         let lines = preview_lines(db, issue, inner(area.width));
@@ -1537,12 +1736,142 @@ fn draw_rows(
             area,
         );
     }
-    let keys = format!(
-        "{}   space fold   p {}   s/t/a/c / filter",
-        screen.view.keys(),
-        if preview { "no preview" } else { "preview" }
-    );
+    let keys = if let Some(notice) = compose.notice {
+        notice.to_string()
+    } else if let Some(form) = compose.form {
+        let newline = if compose.enhanced {
+            "shift+enter newline"
+        } else {
+            "alt+enter newline"
+        };
+        match (form.editing, form.field) {
+            (true, Field::Body) => format!("enter done   {newline}   esc done"),
+            (true, _) => "enter done   esc done".to_string(),
+            (false, Field::Title | Field::Body) => {
+                "j/k field   enter type   esc keep the draft".to_string()
+            }
+            (false, Field::Buttons) => "h/l pick   enter go   esc keep the draft".to_string(),
+            (false, _) => "j/k field   h/l turn   esc keep the draft".to_string(),
+        }
+    } else {
+        format!(
+            "{}   n new   space fold   p {}   s/t/a/c / filter",
+            screen.view.keys(),
+            if preview { "no preview" } else { "preview" }
+        )
+    };
     frame.render_widget(Paragraph::new(keys).dim(), foot);
+}
+
+/// The new-issue form as a box `width` wide: a label and a value
+/// per field, the selected label bright, the body as tall as its
+/// text, then the two buttons; and where the terminal's cursor goes
+/// when a text field is being typed into.
+fn form_box(
+    form: &Form,
+    actor: &str,
+    width: usize,
+) -> (Vec<Line<'static>>, Option<(usize, usize)>) {
+    let border = Style::new().fg(palette::FOCUS);
+    let edge = |s: String| Span::styled(s, border);
+    let inner = width.saturating_sub(4).max(24);
+    let label_w = 10;
+    let value_w = inner - label_w;
+    let who = Span::styled(
+        actor.to_string(),
+        self::actor(actor).add_modifier(Modifier::BOLD),
+    );
+    let used = 2 + actor.chars().count() + 13 + 1;
+    let mut out = vec![Line::from(vec![
+        edge("╭ ".into()),
+        who,
+        edge(" · new issue ".into()),
+        edge("─".repeat(width.saturating_sub(used))),
+        edge("╮".into()),
+    ])];
+    let mut caret = None;
+    let label = |name: &str, field: Field| {
+        if form.field == field {
+            Span::raw(pad(name, label_w)).bold().fg(palette::FOCUS)
+        } else {
+            Span::raw(pad(name, label_w)).dim()
+        }
+    };
+    let row = |spans: Vec<Span<'static>>, out: &mut Vec<Line<'static>>| {
+        let mut line = vec![edge("│ ".into())];
+        let used: usize = spans.iter().map(|s| s.content.chars().count()).sum();
+        line.extend(spans);
+        line.push(Span::raw(" ".repeat(inner.saturating_sub(used))));
+        line.push(edge(" │".into()));
+        out.push(Line::from(line));
+    };
+    // a text field: its rows, with the cursor when it is typed into
+    let mut text = |name: &str, field: Field, ed: &Editor, out: &mut Vec<Line<'static>>| {
+        let (rows, (r, c)) = ed.wrapped(value_w);
+        for (n, piece) in rows.iter().enumerate() {
+            let first = if n == 0 {
+                label(name, field)
+            } else {
+                Span::raw(" ".repeat(label_w))
+            };
+            row(vec![first, Span::raw(pad(piece, value_w))], out);
+        }
+        if form.editing && form.field == field {
+            caret = Some((out.len() - rows.len() + r, 2 + label_w + c));
+        }
+    };
+    text("title", Field::Title, &form.title, &mut out);
+    text("body", Field::Body, &form.body, &mut out);
+    row(
+        vec![
+            label("kind", Field::Kind),
+            Span::styled(form.kind.to_string(), kind_style(form.kind)),
+        ],
+        &mut out,
+    );
+    row(
+        vec![label("priority", Field::Priority), priority(form.priority)],
+        &mut out,
+    );
+    let parent = match form.parent {
+        Some(k) => vec![
+            Span::raw(form.parents[k].0.clone()).fg(palette::REF),
+            Span::raw(cut(
+                &format!("  {}", form.parents[k].1),
+                value_w.saturating_sub(form.parents[k].0.chars().count()),
+            ))
+            .dim(),
+        ],
+        None => vec![Span::raw("none").dim()],
+    };
+    let mut spans = vec![label("parent", Field::Parent)];
+    spans.extend(parent);
+    row(spans, &mut out);
+    row(Vec::new(), &mut out);
+    let button = |name: &str, on: bool| {
+        if form.field == Field::Buttons && on {
+            Span::raw(name.to_string()).bold().fg(palette::FOCUS)
+        } else if form.field == Field::Buttons {
+            Span::raw(name.to_string()).dim()
+        } else {
+            Span::raw(name.to_string())
+        }
+    };
+    row(
+        vec![
+            Span::raw(" ".repeat(label_w)),
+            button("create", !form.cancel),
+            Span::raw("   "),
+            button("cancel", form.cancel),
+        ],
+        &mut out,
+    );
+    out.push(Line::from(vec![
+        edge("╰".into()),
+        edge("─".repeat(width.saturating_sub(2))),
+        edge("╯".into()),
+    ]));
+    (out, caret)
 }
 
 /// The recent pane: as many of the data ref's last commits as fit.
@@ -2981,6 +3310,15 @@ mod tests {
         lines.iter().map(Line::to_string).collect()
     }
 
+    fn no_compose() -> Compose<'static> {
+        Compose {
+            form: None,
+            actor: "ann",
+            enhanced: true,
+            notice: None,
+        }
+    }
+
     fn test_header() -> Header {
         Header {
             prefix: "t".into(),
@@ -3012,7 +3350,7 @@ mod tests {
             // the second row is the issue with the body
             state.select(Some(1));
             terminal
-                .draw(|f| draw_rows(f, &screen, &mut state, &db, preview, &[]))
+                .draw(|f| draw_rows(f, &screen, &mut state, &db, preview, &[], no_compose()))
                 .unwrap();
             let buffer = terminal.backend().buffer().clone();
             (0..height)
@@ -3876,7 +4214,7 @@ mod tests {
         let mut shown = |st: &mut State| -> (String, ratatui::buffer::Buffer) {
             let (list, preview) = (&mut st.list, st.preview);
             terminal
-                .draw(|f| draw_rows(f, &screen, list, &db, preview, &[]))
+                .draw(|f| draw_rows(f, &screen, list, &db, preview, &[], no_compose()))
                 .unwrap();
             let buffer = terminal.backend().buffer().clone();
             let text = (0..buffer.area.height)
@@ -4423,5 +4761,139 @@ mod tests {
             .map(|c| buffer[(c, 19)].symbol().to_string())
             .collect();
         assert!(foot.starts_with("enter send   alt+enter newline"), "{foot}");
+    }
+
+    #[test]
+    fn n_on_the_rows_opens_a_form_that_walks_types_and_creates() {
+        let (db, mut st) = on_rows();
+        let rows = list_rows(&db, &Filter::default(), "ann", &HashSet::new());
+        let limits = Limits::default();
+        let key = |st: &mut State, key: KeyEvent| handle(st, key, &rows, &db, &limits);
+        // the cursor is on the milestone, so the form starts under it
+        assert_eq!(chosen(&st, &rows), "t-000001");
+        key(&mut st, press(KeyCode::Char('n')));
+        assert!(st.form_shown);
+        let form = st.form.as_ref().unwrap();
+        assert_eq!(form.parent_id(), Some("t-000001"));
+        assert_eq!(
+            (form.kind, form.priority, form.field),
+            (Kind::Task, 2, Field::Title)
+        );
+        // enter types into the title; q and n are letters there;
+        // enter leaves it; j walks on; shift+enter breaks the body
+        key(&mut st, press(KeyCode::Enter));
+        for c in "Wire q n".chars() {
+            key(&mut st, press(KeyCode::Char(c)));
+        }
+        key(&mut st, press(KeyCode::Enter));
+        assert!(!st.form.as_ref().unwrap().editing);
+        key(&mut st, press(KeyCode::Char('j')));
+        key(&mut st, press(KeyCode::Enter));
+        key(&mut st, press(KeyCode::Char('a')));
+        key(&mut st, shifted(KeyCode::Enter));
+        key(&mut st, press(KeyCode::Char('b')));
+        key(&mut st, press(KeyCode::Esc));
+        let form = st.form.as_ref().unwrap();
+        assert_eq!(
+            (form.title.text(), form.body.text()),
+            ("Wire q n".into(), "a\nb".into())
+        );
+        // tab to the kind, l turns it; down to the parent, h takes
+        // it off; the buttons: l is cancel, h is create, enter sends
+        key(&mut st, press(KeyCode::Tab));
+        key(&mut st, press(KeyCode::Char('l')));
+        key(&mut st, press(KeyCode::Down));
+        key(&mut st, press(KeyCode::Down));
+        key(&mut st, press(KeyCode::Char('h')));
+        let form = st.form.as_ref().unwrap();
+        assert_eq!((form.kind, form.parent_id()), (Kind::Bug, None));
+        key(&mut st, press(KeyCode::Char('j')));
+        key(&mut st, press(KeyCode::Char('l')));
+        assert!(st.form.as_ref().unwrap().cancel);
+        key(&mut st, press(KeyCode::Char('h')));
+        assert_eq!(key(&mut st, press(KeyCode::Enter)), Action::Send);
+        // esc keeps the form; n brings it back as it was; tab drops it
+        key(&mut st, press(KeyCode::Esc));
+        assert!(!st.form_shown && st.form.is_some());
+        key(&mut st, press(KeyCode::Char('n')));
+        assert!(st.form_shown);
+        assert_eq!(st.form.as_ref().unwrap().title.text(), "Wire q n");
+        key(&mut st, press(KeyCode::Esc));
+        key(&mut st, press(KeyCode::Tab));
+        assert!(st.form.is_none());
+    }
+
+    #[test]
+    fn the_form_is_drawn_under_the_chosen_row_with_the_cursor_in_its_field() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+        let (db, _) = fixture();
+        let rows = list_rows(&db, &Filter::default(), "ann", &HashSet::new());
+        let screen = Screen {
+            view: View::List,
+            header: test_header(),
+            widths: widths(&rows),
+            rows,
+            recent: Vec::new(),
+        };
+        let mut state = ListState::default();
+        state.select(Some(0));
+        let mut form = Form::new(
+            vec![("t-000001".into(), "the parent".into())],
+            Some("t-000001"),
+        );
+        form.editing = true;
+        for c in "Wire".chars() {
+            form.title.insert(c);
+        }
+        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+        terminal
+            .draw(|f| {
+                draw_rows(
+                    f,
+                    &screen,
+                    &mut state,
+                    &db,
+                    false,
+                    &[],
+                    Compose {
+                        form: Some(&form),
+                        actor: "jack",
+                        enhanced: true,
+                        notice: None,
+                    },
+                )
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let rows: Vec<String> = (0..buffer.area.height)
+            .map(|y| {
+                (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol().to_string())
+                    .collect()
+            })
+            .collect();
+        let at = |needle: &str| rows.iter().position(|r| r.contains(needle));
+        let first = at("t-000001").unwrap();
+        assert_eq!(at("╭ jack · new issue "), Some(first + 1), "{rows:#?}");
+        assert_eq!(at("│ title     Wire"), Some(first + 2), "{rows:#?}");
+        assert!(
+            at("│ parent    t-000001  the parent").is_some(),
+            "{rows:#?}"
+        );
+        assert!(at("create   cancel").is_some(), "{rows:#?}");
+        assert_eq!(
+            at("t-000002"),
+            Some(first + 10),
+            "the rows go on under the form"
+        );
+        let caret = terminal.get_cursor_position().unwrap();
+        assert_eq!(usize::from(caret.y), first + 2);
+        assert_eq!(buffer[(caret.x - 1, caret.y)].symbol(), "e");
+        assert!(
+            rows[29].starts_with("enter done   esc done"),
+            "{}",
+            rows[29]
+        );
     }
 }
