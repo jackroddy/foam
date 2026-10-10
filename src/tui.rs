@@ -1221,10 +1221,13 @@ fn draw_rows(
         .iter()
         .map(|row| ListItem::new(line(row, &screen.widths, width, columns, boxed)))
         .collect();
+    // a row of padding keeps a section's top and bottom borders
+    // in view when the cursor is on its first or last issue
     let list = List::new(items)
         .highlight_style(CHOSEN)
         .highlight_symbol("› ")
-        .highlight_spacing(HighlightSpacing::Always);
+        .highlight_spacing(HighlightSpacing::Always)
+        .scroll_padding(1);
     frame.render_stateful_widget(list, rows_area, state);
     draw_recent(frame, recent_area, screen);
     if let (Some(issue), Some(area)) = (chosen, preview_area) {
@@ -3329,7 +3332,7 @@ mod tests {
                 .collect()
         };
         // press until the cursor stops, checking it stays in view
-        let mut walk = |st: &mut State, code: KeyCode| {
+        let mut walk = |st: &mut State, code: KeyCode| -> String {
             loop {
                 let before = st.list.selected();
                 handle(st, press(code), &screen.rows, &db, &limits);
@@ -3343,17 +3346,28 @@ mod tests {
                     "{chosen} off screen:\n{text}"
                 );
                 if st.list.selected() == before {
-                    return;
+                    return text;
                 }
             }
         };
-        walk(&mut st, KeyCode::Char('j'));
+        // at either end the section's border row shows too
+        let text = walk(&mut st, KeyCode::Char('j'));
         assert_eq!(st.list.selected(), Some(screen.rows.len() - 2));
-        walk(&mut st, KeyCode::Char('k'));
+        assert!(text.contains("  ╰─"), "the last box's bottom:\n{text}");
+        let text = walk(&mut st, KeyCode::Char('k'));
         assert_eq!(st.list.selected(), Some(1));
-        walk(&mut st, KeyCode::Char('G'));
+        assert!(
+            text.contains("╭─ Milestones "),
+            "the first box's top:\n{text}"
+        );
+        let text = walk(&mut st, KeyCode::Char('G'));
         assert_eq!(st.list.selected(), Some(screen.rows.len() - 2));
-        walk(&mut st, KeyCode::Char('g'));
+        assert!(text.contains("  ╰─"), "the last box's bottom:\n{text}");
+        let text = walk(&mut st, KeyCode::Char('g'));
         assert_eq!(st.list.selected(), Some(1));
+        assert!(
+            text.contains("╭─ Milestones "),
+            "the first box's top:\n{text}"
+        );
     }
 }

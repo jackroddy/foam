@@ -32,6 +32,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   folds the replies under it, and Ctrl-d and Ctrl-u scroll without
   moving it.
 
+### Fixed
+
+- The screen's board scrolls so a section's top and bottom borders come
+  into view with its first and last issue. The cursor never lands on a
+  border row, so the rows scrolled only as far as the issue under it.
+
 ### Changed
 
 - The screen's list and board each have the data ref's last commits in
