@@ -212,7 +212,6 @@ struct Behind {
     root: Root,
     scroll: usize,
     cursor: usize,
-    pad: usize,
     tie: Option<usize>,
 }
 
@@ -228,9 +227,6 @@ struct Page {
     cursor: usize,
     /// Whether the next draw scrolls the chosen box into view.
     reveal: bool,
-    /// Blank lines above the first box, so a thread opens on the
-    /// row its note had and nothing jumps.
-    pad: usize,
     /// The tie under the cursor, when the cursor is on the ties.
     tie: Option<usize>,
 }
@@ -244,7 +240,6 @@ impl Page {
             scroll: 0,
             cursor: 0,
             reveal: true,
-            pad: 0,
             tie: None,
         }
     }
@@ -304,10 +299,8 @@ impl Page {
             None => Root::Body,
             Some(id) => Root::Note(id.clone()),
         };
-        let pad = b.lines.start.saturating_sub(self.scroll);
         self.leave();
         self.root = root;
-        self.pad = pad;
     }
 
     /// Put the page on screen behind the next one and start the
@@ -318,12 +311,10 @@ impl Page {
             root: self.root.clone(),
             scroll: self.scroll,
             cursor: self.cursor,
-            pad: self.pad,
             tie: self.tie,
         });
         self.scroll = 0;
         self.go(0);
-        self.pad = 0;
         self.tie = None;
     }
 
@@ -337,7 +328,6 @@ impl Page {
         self.root = b.root;
         self.scroll = b.scroll;
         self.go(b.cursor);
-        self.pad = b.pad;
         self.tie = b.tie;
         true
     }
@@ -1907,19 +1897,34 @@ fn posts(
         }
     }
     let cursor = page.cursor.min(shown.len().saturating_sub(1));
-    let mut out: Vec<Line> = (0..page.pad).map(|_| Line::default()).collect();
+    let mut out = Vec::new();
     let mut boxes = Vec::new();
-    // a reply hangs under what it answers with a rail down its
-    // left for each depth, and the line between two boxes carries
-    // the rails of the one below
-    let rails = |depth: usize| {
-        let depth = depth.min(wide.saturating_sub(20) / 2);
-        Span::raw("│ ".repeat(depth)).dim()
+    // a reply hangs from a rail in its own column, down from what
+    // it answers; the rail runs on past earlier replies while a
+    // later one at that depth is still to come under the same note
+    let depths: Vec<usize> = shown.iter().map(|(_, d, _)| *d).collect();
+    let rail_at = |from: usize, level: usize| {
+        level > 0
+            && depths[from..]
+                .iter()
+                .take_while(|d| **d >= level)
+                .any(|d| *d == level)
     };
-    for (post, depth, id) in shown {
-        let depth = depth.min(wide.saturating_sub(20) / 2);
+    let prefix = |from: usize, depth: usize| -> String {
+        (0..depth)
+            .map(|l| if rail_at(from, l) { "│ " } else { "  " })
+            .collect()
+    };
+    let deepest = wide.saturating_sub(20) / 2;
+    for (k, (post, depth, id)) in shown.into_iter().enumerate() {
+        let depth = depth.min(deepest);
         if !boxes.is_empty() {
-            out.push(Line::from(rails(depth)));
+            // the line above a reply ends in its own rail
+            let mut above = prefix(k, depth);
+            if depth > 0 {
+                above.push('│');
+            }
+            out.push(Line::from(Span::raw(above).dim()));
         }
         let start = out.len();
         let mut lines = post_box(
@@ -1929,7 +1934,7 @@ fn posts(
             focused && cursor == boxes.len(),
         );
         for line in &mut lines {
-            line.spans.insert(0, rails(depth));
+            line.spans.insert(0, Span::raw(prefix(k + 1, depth)).dim());
         }
         out.extend(lines);
         boxes.push(NoteBox {
@@ -3582,15 +3587,17 @@ mod tests {
         assert!(
             lines[boxes[1].lines.start]
                 .to_string()
-                .starts_with("│ ╭ ann")
+                .starts_with("  ╭ ann")
         );
         assert!(
             lines[boxes[2].lines.start]
                 .to_string()
-                .starts_with("│ │ ╭ ann")
+                .starts_with("    ╭ ann")
         );
-        // the line between b and c carries c's rails
-        assert_eq!(lines[boxes[2].lines.start - 1].to_string(), "│ │ ");
+        // the line above a reply is its rail, in its own column
+        assert_eq!(lines[boxes[1].lines.start - 1].to_string(), "  │");
+        assert_eq!(lines[boxes[2].lines.start - 1].to_string(), "    │");
+        assert!(!lines.iter().any(|l| l.to_string().contains("more")));
         // every line of every box is exactly as wide as the pane
         for b in &boxes {
             for l in &lines[b.lines.clone()] {
@@ -3648,7 +3655,7 @@ mod tests {
         page.enter_box(&limits.boxes);
         let (after, limits) = draw(&mut page);
         // the card, the about pane and the pane's title stay; the
-        // note keeps its row; the body and d are gone
+        // note goes to the top of the pane; the body and d are gone
         assert!(
             after[1].starts_with("list › t-000009 › aaaa0000"),
             "{}",
@@ -3656,11 +3663,16 @@ mod tests {
         );
         assert!(after[3].starts_with("╭ t-000009 "), "{}", after[3]);
         assert!(after[3].contains("╭ about "), "{}", after[3]);
-        assert!(row_of(&after, "╭ notes ").is_some(), "{after:#?}");
-        assert_eq!(row_of(&after, "╭ ann · just now"), Some(was), "{after:#?}");
+        let pane = row_of(&after, "╭ notes ").unwrap();
+        assert!(was > pane + 1, "the note was not at the top before");
+        assert_eq!(
+            row_of(&after, "╭ ann · just now"),
+            Some(pane + 1),
+            "{after:#?}"
+        );
         assert!(row_of(&after, "the body").is_none(), "{after:#?}");
         assert!(row_of(&after, "note dddd0000").is_none(), "{after:#?}");
-        assert!(row_of(&after, "│ │ ╭ ann").is_some(), "{after:#?}");
+        assert!(row_of(&after, "│     ╭ ann").is_some(), "{after:#?}");
         assert_eq!(limits.boxes.len(), 3);
         // back puts everything where it was
         assert!(page.back());
@@ -3678,9 +3690,6 @@ mod tests {
         let mut page = Page::open(i.id.clone());
         page.go(1);
         page.enter_box(&posts(&i, 40, &page, true).1);
-        // the padding that keeps the note in place is not the point
-        // here
-        page.pad = 0;
         let (lines, boxes) = posts(&i, 40, &page, true);
         // the root is 25 lines in a pane of 10
         assert_eq!(boxes[0].lines, 0..25, "{boxes:#?}");
@@ -3715,5 +3724,47 @@ mod tests {
         reveal(&mut page.scroll, page.cursor, &boxes, rows);
         assert_eq!(page.scroll, 0);
         let _ = lines;
+    }
+
+    #[test]
+    fn a_rail_runs_past_earlier_replies_while_a_later_one_is_due() {
+        // a; b answers a; c answers b; e answers a
+        let mut i = thread();
+        i.notes.push(Note {
+            id: "eeee0000".into(),
+            reply_to: Some("aaaa0000".into()),
+            edited_at: None,
+            deleted_at: None,
+            at: Timestamp::now(),
+            author: "ann".into(),
+            text: "note eeee0000".into(),
+            commit: String::new(),
+            branch: String::new(),
+        });
+        let mut page = Page::open(i.id.clone());
+        page.go(1);
+        page.enter_box(&posts(&i, 40, &page, true).1);
+        let (lines, boxes) = posts(&i, 40, &page, true);
+        assert_eq!(
+            box_ids(&boxes),
+            [
+                Some("aaaa0000"),
+                Some("bbbb0000"),
+                Some("cccc0000"),
+                Some("eeee0000")
+            ]
+        );
+        let text = strings(&lines);
+        let top = |k: usize| text[boxes[k].lines.start].clone();
+        let above = |k: usize| text[boxes[k].lines.start - 1].clone();
+        // b's rail drops from a; c's lines and the line above c carry
+        // the rail on to e; e's rail ends the run
+        assert_eq!(above(1), "  │");
+        assert!(top(1).starts_with("  ╭ ann"), "{}", top(1));
+        assert_eq!(above(2), "  │ │");
+        assert!(top(2).starts_with("  │ ╭ ann"), "{}", top(2));
+        assert!(text[boxes[2].lines.end - 1].starts_with("  │ ╰"));
+        assert_eq!(above(3), "  │");
+        assert!(top(3).starts_with("  ╭ ann"), "{}", top(3));
     }
 }

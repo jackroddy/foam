@@ -30,8 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to five lines with the rest counted under them, and a note's border
   says how many replies its thread holds and when the last was written.
   Enter opens the box in place: the other boxes disappear, the box
-  stays on its row, whole, and a note's replies hang under it, each
-  from a rail per depth, in one pane that scrolls by the line. Esc
+  moves to the top of the pane, whole, and a note's replies hang under
+  it, each from a rail down from what it answers, in one pane that
+  scrolls by the line. Esc
   goes back with the cursor where it was, and the header's trail names
   the note.
 - The screen's page has a cursor over the body and the notes. `j` and
