@@ -758,14 +758,28 @@ fn build<'a>(
     let mut recent = Vec::new();
     if view != View::Memories {
         let style = human();
-        for (oid, when, msg) in store.git.log(DATA_REF, BOARD_LOG, None)? {
-            let when = when
-                .parse::<Timestamp>()
-                .map(|t| style.when(t))
-                .unwrap_or(when);
+        let log: Vec<(String, String, String)> = store
+            .git
+            .log(DATA_REF, BOARD_LOG, None)?
+            .into_iter()
+            .map(|(oid, when, msg)| {
+                let when = when
+                    .parse::<Timestamp>()
+                    .map(|t| style.when(t))
+                    .unwrap_or(when);
+                (oid, when, msg)
+            })
+            .collect();
+        // the times line up, right-aligned to the widest
+        let when_w = log
+            .iter()
+            .map(|(_, w, _)| w.chars().count())
+            .max()
+            .unwrap_or(0);
+        for (oid, when, msg) in log {
             recent.push(Row::Log {
                 oid: oid[..7].to_string(),
-                when,
+                when: format!("{when:>when_w$}"),
                 msg,
             });
         }
@@ -1918,6 +1932,40 @@ fn post_box(p: &Post, style: &render::Style, width: usize, chosen: bool) -> Vec<
     out
 }
 
+/// A commit message as spans: the verb bold, each issue id cyan,
+/// and whoever it names after `by` in their colour.
+fn log_spans(msg: &str) -> Vec<Span<'_>> {
+    let mut spans = Vec::new();
+    let mut by = false;
+    for (n, word) in msg.split(' ').enumerate() {
+        if n > 0 {
+            spans.push(Span::raw(" "));
+        }
+        let span = if n == 0 {
+            Span::raw(word).bold()
+        } else if by {
+            Span::styled(word, actor(word))
+        } else if is_id(word) {
+            Span::raw(word).cyan()
+        } else {
+            Span::raw(word)
+        };
+        by = word == "by";
+        spans.push(span);
+    }
+    spans
+}
+
+/// Whether a word is shaped like an issue id: a prefix, a dash,
+/// and six hex digits, with trailing punctuation allowed.
+fn is_id(word: &str) -> bool {
+    let word = word.trim_end_matches([',', ':', '.', ';']);
+    let Some((prefix, hex)) = word.rsplit_once('-') else {
+        return false;
+    };
+    !prefix.is_empty() && hex.len() == 6 && hex.chars().all(|c| c.is_ascii_hexdigit())
+}
+
 /// Which of the optional columns a row shows at a width: the
 /// kind goes first, then the status, and the id, priority and
 /// title stay.
@@ -1980,13 +2028,16 @@ fn line<'a>(
         Row::Note(n) => inside(vec![Span::raw(*n).dim()]),
         // the memories are drawn as boxes, never as rows
         Row::Memory { .. } => Line::default(),
-        Row::Log { oid, when, msg } => inside(vec![
-            Span::raw(oid.as_str()).dim(),
-            Span::raw("  "),
-            Span::raw(when.as_str()).dim(),
-            Span::raw("  "),
-            Span::raw(msg.as_str()),
-        ]),
+        Row::Log { oid, when, msg } => {
+            let mut spans = vec![
+                Span::raw(oid.as_str()).magenta(),
+                Span::raw("  "),
+                Span::raw(when.as_str()).dim(),
+                Span::raw("  "),
+            ];
+            spans.extend(log_spans(msg));
+            inside(spans)
+        }
         Row::Issue {
             lead,
             issue,
@@ -3211,5 +3262,98 @@ mod tests {
             .find(|r| r.contains("on dev: may no longer hold"))
             .unwrap();
         assert!(about.contains("││ "), "{about}");
+    }
+
+    /// A board with far more rows than a screen holds: twenty
+    /// milestones, forty ready tasks, twenty blocked ones.
+    fn crowded() -> Db {
+        let mut issues = Vec::new();
+        for n in 0..20 {
+            let mut m = test_issue(&format!("t-m{n:05}"));
+            m.kind = Kind::Milestone;
+            m.title = format!("milestone {n}");
+            issues.push(m);
+        }
+        for n in 0..40 {
+            let mut i = test_issue(&format!("t-r{n:05}"));
+            i.title = format!("ready {n}");
+            issues.push(i);
+        }
+        for n in 0..20 {
+            let mut i = test_issue(&format!("t-b{n:05}"));
+            i.title = format!("blocked {n}");
+            i.blocked_by = vec!["t-r00000".into()];
+            issues.push(i);
+        }
+        db(issues)
+    }
+
+    #[test]
+    fn the_board_keeps_the_chosen_row_in_view_all_the_way_down_and_back() {
+        for (width, height, preview) in [(100, 30, false), (70, 24, true), (100, 12, true)] {
+            board_walk(width, height, preview);
+        }
+    }
+
+    fn board_walk(width: u16, height: u16, preview: bool) {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+        let db = crowded();
+        let rows = board_rows(&db, Timestamp::now());
+        let screen = Screen {
+            view: View::Board,
+            header: test_header(),
+            widths: widths(&rows),
+            rows,
+            recent: Vec::new(),
+        };
+        let mut st = State::new();
+        st.view = View::Board;
+        st.preview = preview;
+        st.list.select(step(&screen.rows, None, 1));
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        let limits = Limits::default();
+        let mut shown = |st: &mut State| -> String {
+            let (list, preview) = (&mut st.list, st.preview);
+            terminal
+                .draw(|f| draw_rows(f, &screen, list, &db, preview, &[]))
+                .unwrap();
+            let buffer = terminal.backend().buffer().clone();
+            (0..buffer.area.height)
+                .map(|y| {
+                    (0..buffer.area.width)
+                        .map(|x| buffer[(x, y)].symbol().to_string())
+                        .collect::<String>()
+                        + "\n"
+                })
+                .collect()
+        };
+        // press until the cursor stops, checking it stays in view
+        let mut walk = |st: &mut State, code: KeyCode| {
+            loop {
+                let before = st.list.selected();
+                handle(st, press(code), &screen.rows, &db, &limits);
+                let chosen = match &screen.rows[st.list.selected().unwrap()] {
+                    Row::Issue { issue, .. } => issue.id.clone(),
+                    _ => panic!("an issue row"),
+                };
+                let text = shown(st);
+                assert!(
+                    text.contains(&format!("› │ {chosen}")),
+                    "{chosen} off screen:\n{text}"
+                );
+                if st.list.selected() == before {
+                    return;
+                }
+            }
+        };
+        walk(&mut st, KeyCode::Char('j'));
+        assert_eq!(st.list.selected(), Some(screen.rows.len() - 2));
+        walk(&mut st, KeyCode::Char('k'));
+        assert_eq!(st.list.selected(), Some(1));
+        walk(&mut st, KeyCode::Char('G'));
+        assert_eq!(st.list.selected(), Some(screen.rows.len() - 2));
+        walk(&mut st, KeyCode::Char('g'));
+        assert_eq!(st.list.selected(), Some(1));
     }
 }

@@ -37,7 +37,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The screen's list and board each have the data ref's last commits in
   a pane across the lower third, where the board had them as its last
   section, and the list sits in a rounded pane of its own. The preview
-  takes its half, or its side, of what is above.
+  takes its half, or its side, of what is above. In the pane the times
+  line up, the commit is magenta, the verb bold, each issue id cyan and
+  whoever a commit names after `by` in their colour.
 - The screen's header is three rows: the prefix as a badge and the three
   views with the one in use bright, HEAD at the right; the filter, or on
   a page the trail of ids opened from the view, with the counts at the
