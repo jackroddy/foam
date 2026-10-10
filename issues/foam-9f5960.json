@@ -3,7 +3,7 @@
   "title": "Remove a note with a tombstone",
   "body": "foam note rm <note> marks it deleted_at so the merge does not bring it back; show and the screen leave it out.",
   "type": "task",
-  "status": "open",
+  "status": "closed",
   "priority": 2,
   "labels": [],
   "parent": "foam-12ec90",
@@ -13,16 +13,19 @@
   "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-10T00:03:11.238738824Z",
-  "updated_at": "2026-10-10T00:03:11.238738824Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-10-10T00:31:31.964353424Z",
+  "closed_at": "2026-10-10T00:31:31.964353424Z",
+  "close_reason": "note --rm sets deleted_at; show and the screen skip it, json keeps it; a removed note cannot be edited",
+  "resolution": "done",
   "notes": [],
   "stamps": {
     "created": {
       "commit": "34d8e13",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "04e0935",
+      "branch": "dev"
+    }
   }
 }
