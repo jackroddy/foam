@@ -1,0 +1,28 @@
+{
+  "id": "foam-88a632",
+  "title": "Review the README before the 0.4.0 release",
+  "body": "The storage and sync section says how schemas work now: migrated on read, the ref taken to the foam's schema on the first write with a message, the gate and the window, stats and doctor showing the schema. The show example carries a note id. Every command and flag still matches --help; only stats changed.",
+  "type": "chore",
+  "status": "open",
+  "priority": 1,
+  "labels": [],
+  "parent": "foam-b3f162",
+  "blocked_by": [],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-10-10T00:19:32.547925981Z",
+  "updated_at": "2026-10-10T00:19:32.547925981Z",
+  "closed_at": null,
+  "close_reason": null,
+  "resolution": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "76b248f",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
