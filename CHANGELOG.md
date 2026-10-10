@@ -40,6 +40,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The screen draws from a palette of eight colours, one per concept:
+  cyan for what is named (ids, slugs, the prefix, a branch and commit),
+  green for open and what opens, yellow for claimed and the claim, blue
+  for deferred, light blue for what the cursor is on, magenta for agents
+  and the memories, red for P0, P1 and a memory that may no longer hold,
+  and a grey shade under the chosen row and under code. People, section
+  titles, milestones, bullets and a verb that changes no status are
+  bold; closed, times, borders and the rest are dim. `foam list` no
+  longer colours P2.
 - The screen's list and board each have the data ref's last commits in
   a pane across the lower third, where the board had them as its last
   section, and the list sits in a rounded pane of its own. The preview

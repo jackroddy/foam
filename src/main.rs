@@ -9,6 +9,8 @@ mod merge;
 mod migrate;
 mod model;
 mod ops;
+#[cfg(feature = "tui")]
+mod palette;
 mod prime;
 mod render;
 mod store;

@@ -19,6 +19,7 @@ use crate::git::{Distance, Stamp};
 use crate::graph::{self, BOARD_LOG};
 use crate::md;
 use crate::model::{Issue, Kind, Memory, Status};
+use crate::palette;
 use crate::render;
 use crate::store::{DATA_REF, Db, Store};
 
@@ -873,7 +874,7 @@ fn header(db: &Db, stamp: &Stamp) -> Header {
         )
     })
     .collect();
-    parts.push((format!("✦ {} memories", db.memories.len()), Color::Cyan));
+    parts.push((format!("✦ {} memories", db.memories.len()), palette::AGENT));
     Header {
         prefix: db.meta.prefix.clone(),
         stamp: format!("{} @ {}", stamp.branch, stamp.commit),
@@ -931,7 +932,7 @@ fn header_lines(
     width: usize,
 ) -> [Line<'static>; 3] {
     let dim = |s: &str| Span::raw(s.to_string()).dim();
-    let mut top = vec![badge(&h.prefix, Color::Cyan), Span::raw("  "), dim("[ ")];
+    let mut top = vec![badge(&h.prefix, palette::REF), Span::raw("  "), dim("[ ")];
     for (n, v) in [View::List, View::Board, View::Memories]
         .into_iter()
         .enumerate()
@@ -940,7 +941,7 @@ fn header_lines(
             top.push(dim(" │ "));
         }
         top.push(if v == view {
-            Span::raw(v.name()).bold().cyan()
+            Span::raw(v.name()).bold().fg(palette::FOCUS)
         } else {
             dim(v.name())
         });
@@ -967,9 +968,9 @@ fn trail_spans(view: View, ids: &[String]) -> Vec<Span<'static>> {
     for (n, id) in ids.iter().enumerate() {
         spans.push(Span::raw(" › ").dim());
         spans.push(if n + 1 == ids.len() {
-            Span::raw(id.clone()).bold().cyan()
+            Span::raw(id.clone()).bold().fg(palette::REF)
         } else {
-            Span::raw(id.clone()).cyan()
+            Span::raw(id.clone()).fg(palette::REF)
         });
     }
     spans
@@ -1095,25 +1096,29 @@ fn rollup_text(r: Option<(usize, usize)>) -> String {
 /// Green once every child is closed.
 fn rollup_style(r: Option<(usize, usize)>) -> Style {
     match r {
-        Some((closed, total)) if total > 0 && closed == total => Style::new().fg(Color::Green),
+        Some((closed, total)) if total > 0 && closed == total => {
+            Style::new().add_modifier(Modifier::BOLD)
+        }
         _ => Style::new(),
     }
 }
 
 /// A person's name is cyan, an agent's magenta: the session
 /// suffix is what tells them apart.
+/// A person is bold; the session suffix marks an agent, and the
+/// colour says so from across the room.
 fn actor(name: &str) -> Style {
-    Style::new().fg(if name.contains('/') {
-        Color::Magenta
+    if name.contains('/') {
+        Style::new().fg(palette::AGENT)
     } else {
-        Color::Cyan
-    })
+        Style::new().add_modifier(Modifier::BOLD)
+    }
 }
 
 /// A milestone's kind stands out; every other kind recedes.
 fn kind_style(kind: Kind) -> Style {
     if kind == Kind::Milestone {
-        Style::new().fg(Color::Magenta)
+        Style::new().add_modifier(Modifier::BOLD)
     } else {
         Style::new().add_modifier(Modifier::DIM)
     }
@@ -1129,7 +1134,7 @@ fn suffix_spans(suffix: &str) -> Vec<Span<'static>> {
         if n > 0 {
             spans.push(Span::raw(" "));
         }
-        spans.push(Span::raw(id.to_string()).cyan());
+        spans.push(Span::raw(id.to_string()).fg(palette::REF));
     }
     spans
 }
@@ -1233,7 +1238,10 @@ fn draw_rows(
     if let (Some(issue), Some(area)) = (chosen, preview_area) {
         let lines = preview_lines(db, issue, inner(area.width));
         frame.render_widget(
-            Paragraph::new(lines).block(pane(Span::raw(format!(" {} ", issue.id)).cyan(), false)),
+            Paragraph::new(lines).block(pane(
+                Span::raw(format!(" {} ", issue.id)).fg(palette::REF),
+                false,
+            )),
             area,
         );
     }
@@ -1292,12 +1300,12 @@ fn memory_about(m: &Memory, distance: Distance, marked: bool) -> Vec<Line<'stati
     }
     lines.push(Line::from(vec![
         label("on"),
-        Span::raw(format!("{} @ {}", m.stamp.branch, m.stamp.commit)).cyan(),
+        Span::raw(format!("{} @ {}", m.stamp.branch, m.stamp.commit)).fg(palette::REF),
     ]));
     lines.push(Line::default());
     let age = short_age(&m.stamp, distance);
     lines.push(Line::from(if marked {
-        Span::raw(format!("{age}: may no longer hold")).yellow()
+        Span::raw(format!("{age}: may no longer hold")).fg(palette::ALARM)
     } else {
         Span::raw(age).dim()
     }));
@@ -1370,7 +1378,7 @@ fn draw_memories(
         lines.extend(post_box(
             &Post {
                 id: None,
-                author: Some(&m.slug),
+                author: Some((&m.slug, Style::new().fg(palette::REF))),
                 edited: (m.updated_at != m.created_at).then_some(m.updated_at),
                 at: m.created_at,
                 text: &m.text,
@@ -1434,7 +1442,7 @@ fn reveal(scroll: &mut usize, cursor: usize, boxes: &[NoteBox], rows: usize) {
 
 /// The row under the cursor: a background under its colours,
 /// never in place of them.
-const CHOSEN: Style = Style::new().bg(Color::DarkGray);
+const CHOSEN: Style = Style::new().bg(palette::SHADE);
 
 /// The about pane's width, borders included, when it stands
 /// beside the posts.
@@ -1489,7 +1497,10 @@ fn draw_detail(
     };
 
     frame.render_widget(
-        Paragraph::new(heading).block(pane(Span::raw(format!(" {} ", issue.id)).cyan(), false)),
+        Paragraph::new(heading).block(pane(
+            Span::raw(format!(" {} ", issue.id)).fg(palette::REF),
+            false,
+        )),
         card,
     );
 
@@ -1554,7 +1565,7 @@ fn rows_in(outer: u16) -> usize {
 /// with a bold title, the others dim.
 fn pane(title: Span<'static>, focused: bool) -> Block<'static> {
     let (border, title) = if focused {
-        (Style::new(), title.bold())
+        (Style::new(), title.bold().fg(palette::FOCUS))
     } else {
         (Style::new().add_modifier(Modifier::DIM), title.dim())
     };
@@ -1588,28 +1599,27 @@ fn badge(text: &str, bg: Color) -> Span<'static> {
         format!(" {text} "),
         Style::new()
             .bg(bg)
-            .fg(Color::Black)
+            .fg(palette::INK)
             .add_modifier(Modifier::BOLD),
     )
 }
 
 fn priority_badge(p: u8) -> Span<'static> {
     let bg = match p {
-        0 => Color::Red,
-        1 => Color::LightRed,
-        2 => Color::Yellow,
-        3 => Color::Gray,
-        _ => Color::DarkGray,
+        0 => palette::ALARM,
+        1 => palette::ALARM_SOFT,
+        2 => palette::QUIET,
+        _ => palette::SHADE,
     };
     badge(&format!("P{p}"), bg)
 }
 
 fn status_colour(s: Status) -> Color {
     match s {
-        Status::Open => Color::Green,
-        Status::InProgress => Color::Yellow,
-        Status::Deferred => Color::Blue,
-        Status::Closed => Color::DarkGray,
+        Status::Open => palette::OPEN,
+        Status::InProgress => palette::CLAIMED,
+        Status::Deferred => palette::DEFERRED,
+        Status::Closed => palette::SHADE,
     }
 }
 
@@ -1669,7 +1679,10 @@ fn about(db: &Db, i: &Issue, width: usize, tie: Option<usize>) -> About {
     let mut ties = Vec::new();
     let mut tie_lines = Vec::new();
     let mut tie_row = |lines: &mut Vec<Line<'static>>, id: &str, rest: Vec<Span<'static>>| {
-        let mut spans = vec![Span::raw("› ").dim(), Span::raw(id.to_string()).cyan()];
+        let mut spans = vec![
+            Span::raw("› ").dim(),
+            Span::raw(id.to_string()).fg(palette::REF),
+        ];
         spans.extend(rest);
         let mut line = Line::from(spans);
         if tie == Some(ties.len()) {
@@ -1809,7 +1822,7 @@ fn posts(
         let mut lines = post_box(
             &Post {
                 id: Some(&n.id),
-                author: Some(&n.author),
+                author: Some((&n.author, actor(&n.author))),
                 edited: n.edited_at,
                 at: n.at,
                 text: &n.text,
@@ -1844,7 +1857,8 @@ fn posts(
 /// issue's own first post.
 struct Post<'a> {
     id: Option<&'a str>,
-    author: Option<&'a str>,
+    /// Who wrote it, in their colour; `None` for the body.
+    author: Option<(&'a str, Style)>,
     edited: Option<Timestamp>,
     at: Timestamp,
     text: &'a str,
@@ -1862,23 +1876,15 @@ struct Post<'a> {
 /// accent colour; the rest are dim.
 fn post_box(p: &Post, style: &render::Style, width: usize, chosen: bool) -> Vec<Line<'static>> {
     let border = if chosen {
-        Style::new().fg(Color::Cyan)
+        Style::new().fg(palette::FOCUS)
     } else {
         Style::new().add_modifier(Modifier::DIM)
     };
     let edge = |s: String| Span::styled(s, border);
     let mut top = vec![edge("╭─ ".into())];
     let mut used = 2 + 1 + 1;
-    if let Some(author) = p.author {
-        // the session suffix marks an agent, and the colour says
-        // so from across the room
-        let who = Style::new()
-            .add_modifier(Modifier::BOLD)
-            .fg(if author.contains('/') {
-                Color::Magenta
-            } else {
-                Color::Cyan
-            });
+    if let Some((author, style)) = p.author {
+        let who = style.add_modifier(Modifier::BOLD);
         top.push(Span::styled(author.to_string(), who));
         top.push(edge(" · ".into()));
         used += author.chars().count() + 3;
@@ -1889,7 +1895,7 @@ fn post_box(p: &Post, style: &render::Style, width: usize, chosen: bool) -> Vec<
     if let Some(flag) = &p.flag {
         let flag = format!("· {flag} ");
         used += flag.chars().count();
-        top.push(Span::raw(flag).yellow());
+        top.push(Span::raw(flag).fg(palette::ALARM));
     }
     top.push(edge("─".repeat(width.saturating_sub(used))));
     top.push(edge("╮".into()));
@@ -1950,7 +1956,7 @@ fn log_spans(msg: &str) -> Vec<Span<'_>> {
         spans.push(if n == 0 {
             Span::styled(word, verb_style(word))
         } else if is_id(word) {
-            Span::raw(word).cyan()
+            Span::raw(word).fg(palette::REF)
         } else {
             Span::raw(word)
         });
@@ -1962,19 +1968,13 @@ fn log_spans(msg: &str) -> Vec<Span<'_>> {
     spans
 }
 
-/// The colour of a commit's verb, bold; a verb without one of its
-/// own is bold alone.
+/// A commit's verb, bold, in the colour of what it does to the
+/// issue; a verb that changes no status is bold alone.
 fn verb_style(verb: &str) -> Style {
     let colour = match verb {
-        "create" => Some(Color::Green),
-        "reopen" => Some(Color::LightGreen),
-        "close" => Some(Color::Magenta),
-        "claim" => Some(Color::Yellow),
-        "unclaim" => Some(Color::LightYellow),
-        "note" => Some(Color::Blue),
-        "update" => Some(Color::LightBlue),
-        "remember" => Some(Color::LightMagenta),
-        "forget" => Some(Color::LightRed),
+        "create" | "reopen" | "unclaim" => Some(palette::OPEN),
+        "claim" => Some(palette::CLAIMED),
+        "remember" | "forget" => Some(palette::AGENT),
         _ => None,
     };
     let style = Style::new().add_modifier(Modifier::BOLD);
@@ -2042,20 +2042,20 @@ fn line<'a>(
     match row {
         Row::Header(h) if boxed => Line::from(vec![
             edge("╭─ ".into()),
-            Span::raw(*h).bold().cyan(),
+            Span::raw(*h).bold(),
             edge(format!(
                 " {}╮",
                 "─".repeat(width.saturating_sub(h.chars().count() + 5))
             )),
         ]),
-        Row::Header(h) => Line::from(Span::raw(*h).bold().cyan()),
+        Row::Header(h) => Line::from(Span::raw(*h).bold()),
         Row::End => Line::from(edge(format!("╰{}╯", "─".repeat(width.saturating_sub(2))))),
         Row::Note(n) => inside(vec![Span::raw(*n).dim()]),
         // the memories are drawn as boxes, never as rows
         Row::Memory { .. } => Line::default(),
         Row::Log { oid, when, msg } => {
             let mut spans = vec![
-                Span::raw(oid.as_str()).magenta(),
+                Span::raw(oid.as_str()).dim(),
                 Span::raw("  "),
                 Span::raw(when.as_str()).dim(),
                 Span::raw("  "),
@@ -2075,7 +2075,7 @@ fn line<'a>(
                 .saturating_sub(lead.chars().count() + issue.id.chars().count());
             let mut spans = vec![
                 Span::raw(lead.as_str()).dim(),
-                Span::raw(issue.id.as_str()).cyan(),
+                Span::raw(issue.id.as_str()).fg(palette::REF),
                 Span::raw(format!("{}  ", " ".repeat(id_pad))),
                 priority(issue.priority),
                 Span::raw("  "),
@@ -2130,9 +2130,8 @@ fn line<'a>(
 
 fn priority(p: u8) -> Span<'static> {
     let style = match p {
-        0 => Style::new().fg(Color::Red).add_modifier(Modifier::BOLD),
-        1 => Style::new().fg(Color::Red),
-        2 => Style::new().fg(Color::Yellow),
+        0 => Style::new().fg(palette::ALARM).add_modifier(Modifier::BOLD),
+        1 => Style::new().fg(palette::ALARM),
         4 => Style::new().add_modifier(Modifier::DIM),
         _ => Style::new(),
     };
@@ -2141,9 +2140,9 @@ fn priority(p: u8) -> Span<'static> {
 
 fn status(s: Status, width: usize) -> Span<'static> {
     let style = match s {
-        Status::Open => Style::new().fg(Color::Green),
-        Status::InProgress => Style::new().fg(Color::Yellow),
-        Status::Deferred => Style::new().fg(Color::Blue),
+        Status::Open => Style::new().fg(palette::OPEN),
+        Status::InProgress => Style::new().fg(palette::CLAIMED),
+        Status::Deferred => Style::new().fg(palette::DEFERRED),
         Status::Closed => Style::new().add_modifier(Modifier::DIM),
     };
     Span::styled(pad(status_name(s), width), style)
@@ -3056,7 +3055,7 @@ mod tests {
         let (lines, boxes) = posts(&i, 40, &page, true);
         let plain = |l: &Line| {
             let corner = l.spans.iter().find(|s| s.content.contains('╭')).unwrap();
-            corner.style.fg == Some(Color::Cyan)
+            corner.style.fg == Some(palette::FOCUS)
         };
         assert!(plain(&lines[boxes[0].lines.start]));
         assert!(!plain(&lines[boxes[1].lines.start]));
@@ -3275,12 +3274,15 @@ mod tests {
         // the chosen box is cyan, the other dim, and the flag yellow
         let x = u16::try_from(rows[review].find("╭─ review").unwrap()).unwrap();
         assert_eq!(buffer[(2, 4)].fg, Color::Reset);
-        assert_eq!(buffer[(x, u16::try_from(review).unwrap())].fg, Color::Cyan);
+        assert_eq!(
+            buffer[(x, u16::try_from(review).unwrap())].fg,
+            palette::FOCUS
+        );
         let flag = rows[review].find("on dev, may").unwrap();
         let x = u16::try_from(rows[review][..flag].chars().count()).unwrap();
         assert_eq!(
             buffer[(x, u16::try_from(review).unwrap())].fg,
-            Color::Yellow
+            palette::ALARM
         );
         let about = rows
             .iter()
@@ -3411,9 +3413,10 @@ mod tests {
         assert!(spans[0].style.add_modifier.contains(Modifier::BOLD));
         assert_eq!(spans[4].style.fg, None);
         assert_eq!(spans[6].style.fg, Some(Color::Cyan));
-        assert_eq!(
-            log_spans("forget prefix")[0].style.fg,
-            Some(Color::LightRed)
-        );
+        assert_eq!(log_spans("forget prefix")[0].style.fg, Some(palette::AGENT));
+        // a verb that changes no status is bold alone
+        let update = log_spans("update t-abc123");
+        assert_eq!(update[0].style.fg, None);
+        assert!(update[0].style.add_modifier.contains(Modifier::BOLD));
     }
 }

@@ -78,7 +78,6 @@ impl Style {
         let code = match p {
             0 => "1;31",
             1 => "31",
-            2 => "33",
             4 => "2",
             _ => "",
         };
@@ -682,7 +681,7 @@ mod tests {
         );
         let colored = listing(&COLOR, None, &rows[..1]);
         assert!(colored.contains("\x1b[33min_progress\x1b[0m"), "{colored}");
-        assert!(colored.contains("\x1b[33mP2\x1b[0m"), "{colored}");
+        assert!(colored.contains("  P2  "), "{colored}");
     }
 
     #[test]

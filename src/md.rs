@@ -3,7 +3,9 @@
 //! tables and inline code. Everything else stays literal text.
 
 use crate::hl::{Class, Lexer};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
+
+use crate::palette;
 use ratatui::text::{Line, Span};
 
 /// A run of text inside a paragraph, list item or table cell.
@@ -50,15 +52,17 @@ struct Theme {
 }
 
 const THEME: Theme = Theme {
-    code: Style::new().bg(Color::DarkGray),
-    panel: Style::new().bg(Color::DarkGray),
-    lang: Style::new().bg(Color::DarkGray).add_modifier(Modifier::DIM),
-    bullet: Style::new().fg(Color::Cyan),
+    code: Style::new().bg(palette::SHADE),
+    panel: Style::new().bg(palette::SHADE),
+    lang: Style::new().bg(palette::SHADE).add_modifier(Modifier::DIM),
+    bullet: Style::new().add_modifier(Modifier::BOLD),
     rule: Style::new().add_modifier(Modifier::DIM),
-    comment: Style::new().bg(Color::DarkGray).add_modifier(Modifier::DIM),
-    string: Style::new().bg(Color::DarkGray).fg(Color::Green),
-    number: Style::new().bg(Color::DarkGray).fg(Color::Magenta),
-    keyword: Style::new().bg(Color::DarkGray).fg(Color::Blue),
+    // inside a code panel the hues name token kinds, not the
+    // concepts they stand for elsewhere; the panel keeps them apart
+    comment: Style::new().bg(palette::SHADE).add_modifier(Modifier::DIM),
+    string: Style::new().bg(palette::SHADE).fg(palette::OPEN),
+    number: Style::new().bg(palette::SHADE).fg(palette::AGENT),
+    keyword: Style::new().bg(palette::SHADE).fg(palette::DEFERRED),
 };
 
 const MIN_COLUMN: usize = 8;
@@ -602,6 +606,7 @@ fn stacked(
 mod tests {
     use super::*;
     use crate::render::wrap_at;
+    use ratatui::style::Color;
 
     fn strings(lines: &[Line]) -> Vec<String> {
         lines.iter().map(Line::to_string).collect()
