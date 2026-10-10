@@ -3,7 +3,7 @@
   "title": "A frozen fixture per schema and a test that reads each",
   "body": "tests/schemas/N holds meta.json and records as written by that schema; a test builds a ref from each and checks the chain yields the same records. A bump without a fixture and a step fails the build.",
   "type": "task",
-  "status": "open",
+  "status": "closed",
   "priority": 2,
   "labels": [],
   "parent": "foam-a947aa",
@@ -13,16 +13,19 @@
   "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-10T00:03:11.166495528Z",
-  "updated_at": "2026-10-10T00:03:11.166495528Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-10-10T00:15:19.25560084Z",
+  "closed_at": "2026-10-10T00:15:19.25560084Z",
+  "close_reason": "tests/schemas/1 frozen; seed_ref builds a ref from a fixture with plumbing; the test reads every fixture and checks the bump on write",
+  "resolution": "done",
   "notes": [],
   "stamps": {
     "created": {
       "commit": "34d8e13",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "e57529a",
+      "branch": "dev"
+    }
   }
 }
