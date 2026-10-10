@@ -13,11 +13,20 @@
   "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-10T05:01:46.080364969Z",
-  "updated_at": "2026-10-10T05:01:46.080364969Z",
+  "updated_at": "2026-10-10T05:01:46.092567181Z",
   "closed_at": null,
   "close_reason": null,
   "resolution": null,
-  "notes": [],
+  "notes": [
+    {
+      "id": "4423491e",
+      "at": "2026-10-10T05:01:46.092566371Z",
+      "author": "Jack Roddy/42dfd115",
+      "text": "Design, filed 2026-10-09. The five-line cut is a floor, not a rule. The notes pane has R rows; the body and each top-level note ask for the rows their whole text takes, borders included. Give every box an equal share of R, with the gaps between boxes taken off first. A box that needs less than its share takes what it needs and the rest is shared again among the boxes that still want more, until nothing is left or everyone is whole. A box that needs more than its share is cut at its share, with \"⋯ n more\" under the text. A share never drops under five lines of text: when it would, the boxes stop shrinking and the pane scrolls as now. Never cut a box to hide a single line: \"⋯ 1 more\" costs the row the line would take, so show the line instead. Thread pages and the body's page show boxes whole as now, since they are one thread; this is the issue's page only. With two notes and fifty rows, each gets about twenty-four lines; with one six-line note among many, it shows all six.",
+      "commit": "c8446ad",
+      "branch": "dev"
+    }
+  ],
   "stamps": {
     "created": {
       "commit": "c8446ad",
