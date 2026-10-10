@@ -1,0 +1,28 @@
+{
+  "id": "foam-28497d",
+  "title": "Show the schema in stats and doctor",
+  "body": "Both print the ref's schema and the binary's, and doctor says when an upgrade is pending on the next write.",
+  "type": "task",
+  "status": "open",
+  "priority": 2,
+  "labels": [],
+  "parent": "foam-a947aa",
+  "blocked_by": [],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-10-10T00:03:11.14873043Z",
+  "updated_at": "2026-10-10T00:03:11.14873043Z",
+  "closed_at": null,
+  "close_reason": null,
+  "resolution": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "34d8e13",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
