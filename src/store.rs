@@ -7,6 +7,7 @@ use jiff::Timestamp;
 
 use crate::git::{Conflict, EntryKind, Git, Swap, TreeEntry};
 use crate::merge;
+use crate::migrate;
 use crate::model::{Issue, LEASE_MINUTES, Memory, Meta, SCHEMA_VERSION, STALE_AFTER, canonical};
 
 pub const DATA_REF: &str = "refs/foam/data";
@@ -306,23 +307,34 @@ impl Store {
 
 impl Db {
     fn decode(files: &BTreeMap<String, (String, Vec<u8>)>) -> Result<Db> {
-        let (_, meta) = files.get("meta.json").context("meta.json is missing")?;
-        let meta: Meta = serde_json::from_slice(meta).context("meta.json")?;
-        if meta.schema_version > SCHEMA_VERSION {
-            bail!(
-                "data is schema {} but this foam reads up to {SCHEMA_VERSION}",
-                meta.schema_version
-            );
+        // every file goes through the migration chain as JSON before
+        // anything is read into a type, so the types only ever see
+        // this foam's schema
+        let mut values = migrate::Files::new();
+        for (path, (_, bytes)) in files {
+            let value: serde_json::Value =
+                serde_json::from_slice(bytes).with_context(|| path.clone())?;
+            values.insert(path.clone(), value);
         }
+        let from = values
+            .get("meta.json")
+            .context("meta.json is missing")?
+            .get("schema_version")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|v| u32::try_from(v).ok())
+            .context("meta.json has no schema_version")?;
+        migrate::upgrade(&mut values, from)?;
 
+        let meta = values.remove("meta.json").expect("checked above");
+        let meta: Meta = serde_json::from_value(meta).context("meta.json")?;
         let mut issues = BTreeMap::new();
         let mut memories = BTreeMap::new();
-        for (path, (_, bytes)) in files {
+        for (path, value) in values {
             if let Some(name) = path.strip_prefix("issues/") {
-                let issue: Issue = serde_json::from_slice(bytes).with_context(|| path.clone())?;
+                let issue: Issue = serde_json::from_value(value).with_context(|| path.clone())?;
                 issues.insert(name.trim_end_matches(".json").to_string(), issue);
             } else if let Some(name) = path.strip_prefix("memories/") {
-                let memory: Memory = serde_json::from_slice(bytes).with_context(|| path.clone())?;
+                let memory: Memory = serde_json::from_value(value).with_context(|| path.clone())?;
                 memories.insert(name.trim_end_matches(".json").to_string(), memory);
             }
         }

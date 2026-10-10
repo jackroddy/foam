@@ -2,6 +2,7 @@ mod cmd;
 mod git;
 mod graph;
 mod merge;
+mod migrate;
 mod model;
 mod ops;
 mod prime;
