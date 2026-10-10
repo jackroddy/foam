@@ -128,9 +128,10 @@ bright, and HEAD at the right; under it the filter, or on a page the trail
 of ids you opened to get there, with the counts at the right, run together
 as a powerline, which needs a Nerd or Powerline font for the arrows. The
 screen says `claimed` where the commands say `in_progress`. The screen
-opens on the listing, with a preview of the chosen issue beside it. Tab
-switches to the board, then to the memories, and Enter opens the chosen
-issue's page, with its notes shown as boxes. The body and the notes render
+opens on the listing, in a pane with a preview of the chosen issue beside
+it, and the data ref's last commits in a pane across the lower third; the
+board has the same. Tab switches to the board, then to the memories, and
+Enter opens the chosen issue's page, with its notes shown as boxes. The body and the notes render
 a little markdown: `backticked` code, bulleted and numbered lists, fenced
 code blocks, and tables.
 

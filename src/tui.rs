@@ -390,6 +390,9 @@ struct Screen<'a> {
     header: Header,
     rows: Vec<Row<'a>>,
     widths: Widths,
+    /// The data ref's last commits, newest first, under the list
+    /// and the board.
+    recent: Vec<Row<'a>>,
 }
 
 /// What every screen says at the top: the prefix, where HEAD is,
@@ -747,28 +750,24 @@ fn build<'a>(
     let now = Timestamp::now();
     let stamp = store.git.head_stamp()?;
     let header = header(db, &stamp);
-    let mut rows = match view {
+    let rows = match view {
         View::List => list_rows(db, filter, actor, folded),
         View::Board => board_rows(db, now),
         View::Memories => memory_rows(db, filter, |commit| store.git.distance(commit)),
     };
-    if view == View::Board {
-        let log = store.git.log(DATA_REF, BOARD_LOG, None)?;
-        if !log.is_empty() {
-            rows.push(Row::Header("Recent"));
-            let style = human();
-            for (oid, when, msg) in &log {
-                let when = when
-                    .parse::<Timestamp>()
-                    .map(|t| style.when(t))
-                    .unwrap_or_else(|_| when.clone());
-                rows.push(Row::Log {
-                    oid: oid[..7].to_string(),
-                    when,
-                    msg: msg.clone(),
-                });
-            }
-            rows.push(Row::End);
+    let mut recent = Vec::new();
+    if view != View::Memories {
+        let style = human();
+        for (oid, when, msg) in store.git.log(DATA_REF, BOARD_LOG, None)? {
+            let when = when
+                .parse::<Timestamp>()
+                .map(|t| style.when(t))
+                .unwrap_or(when);
+            recent.push(Row::Log {
+                oid: oid[..7].to_string(),
+                when,
+                msg,
+            });
         }
     }
     let widths = widths(&rows);
@@ -777,6 +776,7 @@ fn build<'a>(
         header,
         rows,
         widths,
+        recent,
     })
 }
 
@@ -1165,24 +1165,38 @@ fn draw_rows(
         Some(Row::Issue { issue, .. }) if preview => Some(*issue),
         _ => None,
     };
+    // the recent commits take the lower third, and the preview
+    // gives way inside what is left
+    let [upper, recent_area] =
+        Layout::vertical([Constraint::Min(0), Constraint::Length(body.height / 3)]).areas(body);
     let (rows_area, preview_area) = match chosen {
-        None => (body, None),
+        None => (upper, None),
         Some(_) if body.width >= WIDE => {
             let [rows, preview] =
                 Layout::horizontal([Constraint::Min(0), Constraint::Length(PREVIEW_WIDTH)])
-                    .areas(body);
+                    .areas(upper);
             (rows, Some(preview))
         }
         Some(_) => {
             let [rows, preview] =
-                Layout::vertical([Constraint::Min(0), Constraint::Length(body.height / 2)])
-                    .areas(body);
+                Layout::vertical([Constraint::Min(0), Constraint::Length(upper.height / 2)])
+                    .areas(upper);
             (rows, Some(preview))
         }
     };
+    let boxed = screen.view == View::Board;
+    // the list sits in a pane; the board's sections are boxes
+    // of their own
+    let rows_area = if boxed {
+        rows_area
+    } else {
+        let block = pane(Span::raw(" list "), true);
+        let inside = block.inner(rows_area);
+        frame.render_widget(block, rows_area);
+        inside
+    };
     // the gutter takes two columns from every row
     let width = usize::from(rows_area.width.saturating_sub(2));
-    let boxed = screen.view == View::Board;
     let columns = Columns::at(if boxed {
         width.saturating_sub(4)
     } else {
@@ -1198,6 +1212,7 @@ fn draw_rows(
         .highlight_symbol("› ")
         .highlight_spacing(HighlightSpacing::Always);
     frame.render_stateful_widget(list, rows_area, state);
+    draw_recent(frame, recent_area, screen);
     if let (Some(issue), Some(area)) = (chosen, preview_area) {
         let lines = preview_lines(db, issue, inner(area.width));
         frame.render_widget(
@@ -1211,6 +1226,23 @@ fn draw_rows(
         if preview { "no preview" } else { "preview" }
     );
     frame.render_widget(Paragraph::new(keys).dim(), foot);
+}
+
+/// The recent pane: as many of the data ref's last commits as fit.
+fn draw_recent(frame: &mut Frame, area: Rect, screen: &Screen) {
+    let block = pane(Span::raw(" recent "), false);
+    let inside = block.inner(area);
+    let width = usize::from(inside.width);
+    let mut lines: Vec<Line> = screen
+        .recent
+        .iter()
+        .take(usize::from(inside.height))
+        .map(|r| line(r, &screen.widths, width, Columns::at(width), false))
+        .collect();
+    if lines.is_empty() {
+        lines.push(Line::from(Span::raw("nothing yet").dim()));
+    }
+    frame.render_widget(Paragraph::new(lines).block(block), area);
 }
 
 /// What the preview shows of an issue: the title, the about
@@ -2297,6 +2329,11 @@ mod tests {
             header: test_header(),
             widths: widths(&rows),
             rows,
+            recent: vec![Row::Log {
+                oid: "abc1234".into(),
+                when: "just now".into(),
+                msg: "Close t-000003".into(),
+            }],
         };
         let render = |width: u16, height: u16, preview: bool| {
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
@@ -2329,11 +2366,22 @@ mod tests {
         );
         assert!(at(&wide, "│  P2   task   open ").is_some(), "{wide:#?}");
         assert!(at(&wide, "│ one paragraph").is_some(), "{wide:#?}");
-        // the rows keep their columns at the narrower width
-        assert!(wide[3].starts_with("  t-000001"), "{}", wide[3]);
-        // under: the pane takes the lower half
+        // the rows keep their columns at the narrower width, inside
+        // the list's pane
+        assert!(wide[3].starts_with("╭ list "), "{}", wide[3]);
+        assert!(wide[4].starts_with("│   t-000001"), "{}", wide[4]);
+        // the recent commits take the lower third: 8 of 26 rows
+        assert!(wide[21].starts_with("╭ recent "), "{}", wide[21]);
+        assert!(
+            wide[22].starts_with("│ abc1234  just now  Close t-000003"),
+            "{}",
+            wide[22]
+        );
+        // under: the pane takes the lower half of what is above
+        // the recent commits
         let narrow = render(70, 30, true);
-        assert!(narrow[16].starts_with("╭ t-000002 "), "{}", narrow[16]);
+        assert!(narrow[12].starts_with("╭ t-000002 "), "{}", narrow[12]);
+        assert!(narrow[21].starts_with("╭ recent "), "{}", narrow[21]);
         // off: no pane at all
         let off = render(120, 30, false);
         assert!(at(&off, "╭ t-000002 ").is_none(), "{off:#?}");
@@ -3108,6 +3156,7 @@ mod tests {
             header: test_header(),
             widths: widths(&rows),
             rows,
+            recent: Vec::new(),
         };
         let mut shelf = Shelf::default();
         shelf.go(1);
