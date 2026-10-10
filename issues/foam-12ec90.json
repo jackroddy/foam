@@ -1,0 +1,28 @@
+{
+  "id": "foam-12ec90",
+  "title": "v0.5.0",
+  "body": "Threads and edits on notes, on the ids v0.4.0 gives them.",
+  "type": "milestone",
+  "status": "open",
+  "priority": 1,
+  "labels": [],
+  "parent": null,
+  "blocked_by": [],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-10-10T00:03:11.099831952Z",
+  "updated_at": "2026-10-10T00:03:11.099831952Z",
+  "closed_at": null,
+  "close_reason": null,
+  "resolution": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "34d8e13",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
