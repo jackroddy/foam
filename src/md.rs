@@ -2,6 +2,7 @@
 //! lines of an exact width: paragraphs, lists, fenced code,
 //! tables and inline code. Everything else stays literal text.
 
+use crate::hl::{Class, Lexer};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
@@ -42,6 +43,10 @@ struct Theme {
     lang: Style,
     bullet: Style,
     rule: Style,
+    comment: Style,
+    string: Style,
+    number: Style,
+    keyword: Style,
 }
 
 const THEME: Theme = Theme {
@@ -50,6 +55,10 @@ const THEME: Theme = Theme {
     lang: Style::new().bg(Color::DarkGray).add_modifier(Modifier::DIM),
     bullet: Style::new().fg(Color::Cyan),
     rule: Style::new().add_modifier(Modifier::DIM),
+    comment: Style::new().bg(Color::DarkGray).add_modifier(Modifier::DIM),
+    string: Style::new().bg(Color::DarkGray).fg(Color::Green),
+    number: Style::new().bg(Color::DarkGray).fg(Color::Magenta),
+    keyword: Style::new().bg(Color::DarkGray).fg(Color::Blue),
 };
 
 const MIN_COLUMN: usize = 8;
@@ -467,16 +476,40 @@ fn code(
             (lang.chars().take(tag).collect(), theme.lang),
         ]);
     }
+    let mut lexer = lang.and_then(Lexer::new);
     for line in lines {
-        let n = line.chars().count();
-        let shown = if n > width {
-            let mut s: String = line.chars().take(width.saturating_sub(1)).collect();
-            s.push('…');
-            s
-        } else {
-            format!("{line}{}", " ".repeat(width - n))
+        let segs: Vec<Seg> = match &mut lexer {
+            Some(lexer) => lexer
+                .line(line)
+                .into_iter()
+                .map(|(s, class)| {
+                    let style = match class {
+                        Class::Plain => theme.panel,
+                        Class::Comment => theme.comment,
+                        Class::Str => theme.string,
+                        Class::Number => theme.number,
+                        Class::Keyword => theme.keyword,
+                    };
+                    (s, style)
+                })
+                .collect(),
+            None => vec![(line.clone(), theme.panel)],
         };
-        out.push(vec![(shown, theme.panel)]);
+        let n = len(&segs);
+        let mut shown = Vec::new();
+        if n > width {
+            let mut room = width.saturating_sub(1);
+            for (s, style) in segs {
+                let s: String = s.chars().take(room).collect();
+                room -= s.chars().count();
+                push_seg(&mut shown, s, style);
+            }
+            push_seg(&mut shown, "…".into(), theme.panel);
+        } else {
+            shown = segs;
+            push_seg(&mut shown, " ".repeat(width - n), theme.panel);
+        }
+        out.push(shown);
     }
 }
 
@@ -722,6 +755,17 @@ mod tests {
                 .all(|l| l.spans.iter().all(|s| s.style.bg == Some(Color::DarkGray)))
         );
         assert!(lines[0].spans[1].style.add_modifier.contains(Modifier::DIM));
+    }
+
+    #[test]
+    fn a_known_fence_highlights_and_an_unknown_one_stays_plain() {
+        let lines = render("```rust\nfn main() {}\n```", 16);
+        let fun = lines[1].spans.iter().find(|s| s.content == "fn").unwrap();
+        assert_eq!(fun.style.fg, Some(Color::Blue));
+        assert_eq!(fun.style.bg, Some(Color::DarkGray));
+        let lines = render("```nosuchlang\nfn main() {}\n```", 16);
+        assert_eq!(lines[1].spans.len(), 1);
+        assert_eq!(lines[1].spans[0].style, THEME.panel);
     }
 
     #[test]

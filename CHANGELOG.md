@@ -21,7 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in its corner, and tables as a grid, with columns narrowed and cells
   wrapped when the box is too narrow, or one record per row when even
   that does not fit. The lines of a paragraph join and reflow; `foam
-  show` prints the text as written.
+  show` prints the text as written. A fenced block tagged rust, python,
+  sh, json, toml, yaml or diff has its comments dim, strings green,
+  numbers magenta and keywords blue; any other tag stays plain.
 - The screen's page has a cursor over the body and the notes. `j` and
   `k` move it and the chosen box has the bright border; `u` goes to the
   note it answers, `[` and `]` to its neighbours in the thread, Space
