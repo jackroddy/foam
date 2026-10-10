@@ -37,8 +37,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The screen's header is three rows: the prefix as a badge and the three
   views with the one in use bright, HEAD at the right; the filter, or on
   a page the trail of ids opened from the view, with the counts at the
-  right as badges, each with a glyph for its status and one more for the
-  memories; and a rule.
+  right as badges run together into a powerline, each with a glyph for
+  its status and one more for the memories; and a rule. The arrows are
+  powerline glyphs, which need a Nerd or Powerline font.
+- The screen says `claimed` where the commands say `in_progress`: in the
+  columns, the badges, the filter and the board's section. The stored
+  word and the commands keep `in_progress` until the schema next moves.
 - The notes pane on the screen's page is titled `notes`, not `posts`, and
   the footer's Tab hint says the same.
 

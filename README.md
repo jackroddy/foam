@@ -125,7 +125,9 @@ board, open an issue now and then, and step in with `foam create`,
 Run `foam` with no command in a terminal and you get a screen. The header
 names the three views, list, board and memories, with the one you are on
 bright, and HEAD at the right; under it the filter, or on a page the trail
-of ids you opened to get there, with the counts at the right. The screen
+of ids you opened to get there, with the counts at the right, run together
+as a powerline, which needs a Nerd or Powerline font for the arrows. The
+screen says `claimed` where the commands say `in_progress`. The screen
 opens on the listing, with a preview of the chosen issue beside it. Tab
 switches to the board, then to the memories, and Enter opens the chosen
 issue's page, with its notes shown as boxes. The body and the notes render

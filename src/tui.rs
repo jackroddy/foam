@@ -76,7 +76,7 @@ impl Filter {
             return parts.join(" · ");
         }
         if let Some(s) = self.status {
-            parts.push(s.to_string());
+            parts.push(status_name(s).to_string());
         }
         if let Some(k) = self.kind {
             parts.push(k.to_string());
@@ -132,7 +132,7 @@ enum View {
     /// What `foam list` prints: open and in-progress issues as
     /// a tree.
     List,
-    /// What `foam board` prints: milestones, in progress, ready,
+    /// What `foam board` prints: milestones, claimed, ready,
     /// blocked and the recent log.
     Board,
     /// What `foam memories` prints, with how far behind each one is.
@@ -793,7 +793,7 @@ fn widths(rows: &[Row]) -> Widths {
             widths.id = widths
                 .id
                 .max(lead.chars().count() + issue.id.chars().count());
-            widths.status = widths.status.max(issue.status.to_string().len());
+            widths.status = widths.status.max(status_name(issue.status).len());
             widths.kind = widths.kind.max(issue.kind.to_string().len());
             widths.rollup = widths.rollup.max(rollup_text(*rollup).len());
         }
@@ -845,27 +845,55 @@ fn short_age(stamp: &Stamp, distance: Distance) -> String {
 
 fn header(db: &Db, stamp: &Stamp) -> Header {
     let count = |s: Status| db.issues.values().filter(|i| i.status == s).count();
-    let mut stats = Vec::new();
-    for s in [
+    let mut parts: Vec<(String, Color)> = [
         Status::Open,
         Status::InProgress,
         Status::Deferred,
         Status::Closed,
-    ] {
-        stats.push(badge(
-            &format!("{} {} {}", status_glyph(s), count(s), s),
+    ]
+    .into_iter()
+    .map(|s| {
+        (
+            format!("{} {} {}", status_glyph(s), count(s), status_name(s)),
             status_colour(s),
-        ));
-        stats.push(Span::raw(" "));
-    }
-    stats.push(badge(
-        &format!("✦ {} memories", db.memories.len()),
-        Color::Cyan,
-    ));
+        )
+    })
+    .collect();
+    parts.push((format!("✦ {} memories", db.memories.len()), Color::Cyan));
     Header {
         prefix: db.meta.prefix.clone(),
         stamp: format!("{} @ {}", stamp.branch, stamp.commit),
-        stats,
+        stats: flow(&parts),
+    }
+}
+
+/// Badges run together, each flowing into the next through an
+/// arrow in both their colours.
+fn flow(parts: &[(String, Color)]) -> Vec<Span<'static>> {
+    let mut spans = Vec::new();
+    let mut previous = None;
+    for (text, colour) in parts {
+        // U+E0B2 is powerline's left-pointing arrow, which a Nerd
+        // or Powerline font has and most others lack
+        let mut arrow = Style::new().fg(*colour);
+        if let Some(p) = previous {
+            arrow = arrow.bg(p);
+        }
+        spans.push(Span::styled("\u{e0b2}", arrow));
+        spans.push(badge(text, *colour));
+        previous = Some(*colour);
+    }
+    spans
+}
+
+/// The status as the screen says it; the stored word differs for
+/// a claim, until the schema is next bumped.
+fn status_name(s: Status) -> &'static str {
+    match s {
+        Status::Open => "open",
+        Status::InProgress => "claimed",
+        Status::Deferred => "deferred",
+        Status::Closed => "closed",
     }
 }
 
@@ -1005,7 +1033,7 @@ fn board_rows(db: &Db, now: Timestamp) -> Vec<Row<'_>> {
         rows.push(Row::End);
     }
     if !board.in_progress.is_empty() {
-        rows.push(Row::Header("In progress"));
+        rows.push(Row::Header("Claimed"));
         rows.extend(
             board
                 .in_progress
@@ -1537,7 +1565,7 @@ fn status_colour(s: Status) -> Color {
 }
 
 fn status_badge(s: Status) -> Span<'static> {
-    badge(&s.to_string(), status_colour(s))
+    badge(status_name(s), status_colour(s))
 }
 
 fn about(db: &Db, i: &Issue, width: usize, tie: Option<usize>) -> About {
@@ -2010,7 +2038,7 @@ fn status(s: Status, width: usize) -> Span<'static> {
         Status::Deferred => Style::new().fg(Color::Blue),
         Status::Closed => Style::new().add_modifier(Modifier::DIM),
     };
-    Span::styled(pad(&s.to_string(), width), style)
+    Span::styled(pad(status_name(s), width), style)
 }
 
 /// How a title `t` columns long and a tail `l` long share `room`
@@ -2157,7 +2185,7 @@ mod tests {
         let db = db(vec![m, busy, free, held]);
         let rows = board_rows(&db, Timestamp::now());
         let headers: Vec<&str> = rows.iter().filter_map(header).collect();
-        assert_eq!(headers, ["Milestones", "In progress", "Ready", "Blocked"]);
+        assert_eq!(headers, ["Milestones", "Claimed", "Ready", "Blocked"]);
         // the milestone waits on nothing listed, so it is ready too
         assert_eq!(
             ids(&rows),
@@ -2405,13 +2433,15 @@ mod tests {
         );
         assert!(text[0].ends_with("dev @ abc1234"), "{}", text[0]);
         assert!(text[1].starts_with("mine  "), "{}", text[1]);
-        assert!(
-            text[1].ends_with(
-                " ○ 1 open   ◐ 1 in_progress   ◌ 0 deferred   ● 0 closed   ✦ 0 memories "
-            ),
-            "{}",
-            text[1]
-        );
+        let stats = [
+            "\u{e0b2} ○ 1 open ",
+            "\u{e0b2} ◐ 1 claimed ",
+            "\u{e0b2} ◌ 0 deferred ",
+            "\u{e0b2} ● 0 closed ",
+            "\u{e0b2} ✦ 0 memories ",
+        ]
+        .concat();
+        assert!(text[1].ends_with(&stats), "{}", text[1]);
         assert!(
             text[..2].iter().all(|t| t.chars().count() == 90),
             "{text:#?}"
@@ -2426,8 +2456,13 @@ mod tests {
         assert!(board.style.add_modifier.contains(Modifier::BOLD));
         let list = lines[0].spans.iter().find(|s| s.content == "list").unwrap();
         assert!(list.style.add_modifier.contains(Modifier::DIM));
-        assert_eq!(lines[1].spans[2].style.bg, Some(Color::Green));
-        assert_eq!(lines[1].spans[4].style.bg, Some(Color::Yellow));
+        // each arrow is the badge after it over the badge before it
+        assert_eq!(lines[1].spans[2].style.fg, Some(Color::Green));
+        assert_eq!(lines[1].spans[2].style.bg, None);
+        assert_eq!(lines[1].spans[3].style.bg, Some(Color::Green));
+        assert_eq!(lines[1].spans[4].style.fg, Some(Color::Yellow));
+        assert_eq!(lines[1].spans[4].style.bg, Some(Color::Green));
+        assert_eq!(lines[1].spans[5].style.bg, Some(Color::Yellow));
         // on a page the context is the trail from the view
         let trail = trail_spans(View::List, &["t-000001".into(), "t-000002".into()]);
         assert_eq!(Line::from(trail).to_string(), "list › t-000001 › t-000002");
