@@ -162,12 +162,13 @@ was.
 
 Notes and issues are written from the screen. On an opened thread `h`
 and `l` select a note, and Enter offers to reply to it or edit it; `n` on
-the issue's page starts a new note. On the list or the board `n` opens a
-form under the chosen row: `j` and `k` walk its fields, Enter opens the
-title or the body for typing and leaves it again, `h` and `l` turn the
-kind, the priority and the parent, which starts on the chosen issue when
-that is a milestone, and Enter on `create` writes the issue and lands the
-cursor on it. The compose box is drawn where the note will land
+the issue's page starts a new note. On the list or the board `n` opens a form under
+the chosen row, typing into the title; Enter confirms a field and moves to
+the next, `j` and `k` walk the fields, `h` and `l` turn the kind, the
+priority and the parent, which starts on the chosen issue when that is a
+milestone, and Enter on `create` writes the issue and lands the cursor on
+it. `e` opens the same form filled from the chosen issue, and `save`
+writes the changes. The compose box is drawn where the note will land
 and the terminal's cursor sits in it. Enter sends, Shift+Enter breaks the
 line in a terminal that reports the shift, and Alt+Enter or Ctrl-j does
 everywhere; Esc closes the box and keeps the draft until you leave the

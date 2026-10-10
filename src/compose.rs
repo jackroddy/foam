@@ -204,6 +204,8 @@ impl Field {
 /// under the cursor.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Form {
+    /// The issue being changed, or `None` for a new one.
+    pub edit: Option<String>,
     pub title: Editor,
     pub body: Editor,
     pub kind: Kind,
@@ -218,11 +220,12 @@ pub struct Form {
 }
 
 impl Form {
-    /// A blank form: a task at p2, under `under` if that is one of
-    /// `parents`.
+    /// A blank form, typing into the title: a task at p2, under
+    /// `under` if that is one of `parents`.
     pub fn new(parents: Vec<(String, String)>, under: Option<&str>) -> Form {
         let parent = under.and_then(|u| parents.iter().position(|(id, _)| id == u));
         Form {
+            edit: None,
             title: Editor::new(Target::Note, ""),
             body: Editor::new(Target::Note, ""),
             kind: Kind::Task,
@@ -230,7 +233,32 @@ impl Form {
             parent,
             parents,
             field: Field::Title,
-            editing: false,
+            editing: true,
+            cancel: false,
+        }
+    }
+
+    /// A form filled from an issue, to change it.
+    pub fn edit(
+        id: &str,
+        title: &str,
+        body: &str,
+        kind: Kind,
+        priority: u8,
+        parent: Option<&str>,
+        parents: Vec<(String, String)>,
+    ) -> Form {
+        let parent = parent.and_then(|p| parents.iter().position(|(x, _)| x == p));
+        Form {
+            edit: Some(id.to_string()),
+            title: Editor::new(Target::Note, title),
+            body: Editor::new(Target::Note, body),
+            kind,
+            priority,
+            parent,
+            parents,
+            field: Field::Title,
+            editing: true,
             cancel: false,
         }
     }
@@ -352,9 +380,7 @@ mod tests {
         ];
         let mut f = Form::new(parents, Some("m-2"));
         assert_eq!(f.parent_id(), Some("m-2"));
-        assert_eq!(f.field, Field::Title);
-        assert!(f.editor().is_none());
-        f.editing = true;
+        assert_eq!((f.field, f.editing), (Field::Title, true));
         f.editor().unwrap().insert('t');
         assert_eq!(f.title.text(), "t");
         f.editing = false;
@@ -386,5 +412,22 @@ mod tests {
         assert!(f.cancel);
         assert_eq!(Field::Title.previous(), Field::Title);
         assert_eq!(Form::new(Vec::new(), Some("m-9")).parent, None);
+        let e = Form::edit(
+            "i-1",
+            "a",
+            "b",
+            Kind::Bug,
+            1,
+            Some("m-2"),
+            vec![("m-2".into(), "two".into())],
+        );
+        assert_eq!(
+            (e.edit.as_deref(), e.title.text(), e.body.text()),
+            (Some("i-1"), "a".into(), "b".into())
+        );
+        assert_eq!(
+            (e.kind, e.priority, e.parent_id()),
+            (Kind::Bug, 1, Some("m-2"))
+        );
     }
 }

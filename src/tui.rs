@@ -699,18 +699,45 @@ fn send(st: &mut State, store: &Store, actor: &str) -> bool {
             st.notice = Some("a title is needed".into());
             return false;
         }
-        let new = NewIssue {
-            title: form.title.text(),
-            body: form.body.text(),
-            kind: form.kind,
-            priority: form.priority,
-            labels: Vec::new(),
-            parent: form.parent_id().map(str::to_string),
-            blocked_by: Vec::new(),
+        let result = match &form.edit {
+            Some(id) => ops::update(
+                store,
+                std::slice::from_ref(id),
+                actor,
+                &ops::Changes {
+                    title: Some(form.title.text()),
+                    body: Some(form.body.text()),
+                    kind: Some(form.kind),
+                    priority: Some(form.priority),
+                    status: None,
+                    assignee: None,
+                    add_label: Vec::new(),
+                    rm_label: Vec::new(),
+                    // an empty parent clears it
+                    parent: Some(form.parent_id().unwrap_or("").to_string()),
+                    defer_until: None,
+                    resolution: None,
+                    reason: None,
+                },
+            )
+            .map(|mut issues| ("updated", issues.remove(0))),
+            None => ops::create(
+                store,
+                &NewIssue {
+                    title: form.title.text(),
+                    body: form.body.text(),
+                    kind: form.kind,
+                    priority: form.priority,
+                    labels: Vec::new(),
+                    parent: form.parent_id().map(str::to_string),
+                    blocked_by: Vec::new(),
+                },
+            )
+            .map(|issue| ("created", issue)),
         };
-        return match ops::create(store, &new) {
-            Ok(issue) => {
-                st.notice = Some(format!("created {}", issue.id));
+        return match result {
+            Ok((said, issue)) => {
+                st.notice = Some(format!("{said} {}", issue.id));
                 st.land = Some(issue.id);
                 st.form = None;
                 st.form_shown = false;
@@ -887,7 +914,12 @@ fn handle_form(form: &mut Form, key: KeyEvent, shown: &mut bool) -> Action {
             KeyCode::Esc => form.editing = false,
             KeyCode::Enter if body && (shift || alt) => ed.newline(),
             KeyCode::Char('j') if body && ctrl => ed.newline(),
-            KeyCode::Enter => form.editing = false,
+            // enter confirms the field and moves to the next, which
+            // is typed into at once when it is the body
+            KeyCode::Enter => {
+                form.field = form.field.next();
+                form.editing = form.field == Field::Body;
+            }
             KeyCode::Backspace => ed.backspace(),
             KeyCode::Delete => ed.delete(),
             KeyCode::Left => ed.left(),
@@ -911,7 +943,7 @@ fn handle_form(form: &mut Form, key: KeyEvent, shown: &mut bool) -> Action {
             Field::Title | Field::Body => form.editing = true,
             Field::Buttons if form.cancel => *shown = false,
             Field::Buttons => return Action::Send,
-            _ => form.turn(1),
+            _ => form.field = form.field.next(),
         },
         _ => {}
     }
@@ -1049,6 +1081,29 @@ fn handle_rows(
                 st.form = Some(Form::new(parents, under));
             }
             st.form_shown = true;
+            Action::Draw
+        }
+        KeyCode::Char('e') => {
+            if let Some(i) = chosen {
+                let parents: Vec<(String, String)> = db
+                    .issues
+                    .values()
+                    .filter(|m| {
+                        m.kind == Kind::Milestone && m.status != Status::Closed && m.id != i.id
+                    })
+                    .map(|m| (m.id.clone(), m.title.clone()))
+                    .collect();
+                st.form = Some(Form::edit(
+                    &i.id,
+                    &i.title,
+                    &i.body,
+                    i.kind,
+                    i.priority,
+                    i.parent.as_deref(),
+                    parents,
+                ));
+                st.form_shown = true;
+            }
             Action::Draw
         }
         KeyCode::Char('p') => {
@@ -1755,7 +1810,7 @@ fn draw_rows(
         }
     } else {
         format!(
-            "{}   n new   space fold   p {}   s/t/a/c / filter",
+            "{}   n new   e edit   space fold   p {}   s/t/a/c / filter",
             screen.view.keys(),
             if preview { "no preview" } else { "preview" }
         )
@@ -1781,11 +1836,15 @@ fn form_box(
         actor.to_string(),
         self::actor(actor).add_modifier(Modifier::BOLD),
     );
-    let used = 2 + actor.chars().count() + 13 + 1;
+    let what = match &form.edit {
+        Some(id) => format!(" · editing {id} "),
+        None => " · new issue ".to_string(),
+    };
+    let used = 2 + actor.chars().count() + what.chars().count() + 1;
     let mut out = vec![Line::from(vec![
         edge("╭ ".into()),
         who,
-        edge(" · new issue ".into()),
+        edge(what),
         edge("─".repeat(width.saturating_sub(used))),
         edge("╮".into()),
     ])];
@@ -1860,7 +1919,14 @@ fn form_box(
     row(
         vec![
             Span::raw(" ".repeat(label_w)),
-            button("create", !form.cancel),
+            button(
+                if form.edit.is_some() {
+                    "save"
+                } else {
+                    "create"
+                },
+                !form.cancel,
+            ),
             Span::raw("   "),
             button("cancel", form.cancel),
         ],
@@ -4769,44 +4835,48 @@ mod tests {
         let rows = list_rows(&db, &Filter::default(), "ann", &HashSet::new());
         let limits = Limits::default();
         let key = |st: &mut State, key: KeyEvent| handle(st, key, &rows, &db, &limits);
-        // the cursor is on the milestone, so the form starts under it
+        // the cursor is on the milestone, so the form starts under it,
+        // typing into the title
         assert_eq!(chosen(&st, &rows), "t-000001");
         key(&mut st, press(KeyCode::Char('n')));
         assert!(st.form_shown);
         let form = st.form.as_ref().unwrap();
         assert_eq!(form.parent_id(), Some("t-000001"));
         assert_eq!(
-            (form.kind, form.priority, form.field),
-            (Kind::Task, 2, Field::Title)
+            (form.kind, form.priority, form.field, form.editing),
+            (Kind::Task, 2, Field::Title, true)
         );
-        // enter types into the title; q and n are letters there;
-        // enter leaves it; j walks on; shift+enter breaks the body
-        key(&mut st, press(KeyCode::Enter));
+        // q and n are letters in the title; enter moves on to the body
+        // and keeps typing; shift+enter breaks the body; enter again
+        // lands on the kind
         for c in "Wire q n".chars() {
             key(&mut st, press(KeyCode::Char(c)));
         }
         key(&mut st, press(KeyCode::Enter));
-        assert!(!st.form.as_ref().unwrap().editing);
-        key(&mut st, press(KeyCode::Char('j')));
-        key(&mut st, press(KeyCode::Enter));
+        let form = st.form.as_ref().unwrap();
+        assert_eq!((form.field, form.editing), (Field::Body, true));
         key(&mut st, press(KeyCode::Char('a')));
         key(&mut st, shifted(KeyCode::Enter));
         key(&mut st, press(KeyCode::Char('b')));
-        key(&mut st, press(KeyCode::Esc));
+        key(&mut st, press(KeyCode::Enter));
         let form = st.form.as_ref().unwrap();
         assert_eq!(
             (form.title.text(), form.body.text()),
             ("Wire q n".into(), "a\nb".into())
         );
-        // tab to the kind, l turns it; down to the parent, h takes
-        // it off; the buttons: l is cancel, h is create, enter sends
-        key(&mut st, press(KeyCode::Tab));
+        assert_eq!((form.field, form.editing), (Field::Kind, false));
+        // l turns the kind, enter moves on; down to the parent, h
+        // takes it off; the buttons: l is cancel, h is create, enter
+        // sends
         key(&mut st, press(KeyCode::Char('l')));
-        key(&mut st, press(KeyCode::Down));
+        key(&mut st, press(KeyCode::Enter));
         key(&mut st, press(KeyCode::Down));
         key(&mut st, press(KeyCode::Char('h')));
         let form = st.form.as_ref().unwrap();
-        assert_eq!((form.kind, form.parent_id()), (Kind::Bug, None));
+        assert_eq!(
+            (form.kind, form.parent_id(), form.field),
+            (Kind::Bug, None, Field::Parent)
+        );
         key(&mut st, press(KeyCode::Char('j')));
         key(&mut st, press(KeyCode::Char('l')));
         assert!(st.form.as_ref().unwrap().cancel);
@@ -4821,6 +4891,17 @@ mod tests {
         key(&mut st, press(KeyCode::Esc));
         key(&mut st, press(KeyCode::Tab));
         assert!(st.form.is_none());
+        // e fills the form from the chosen issue, itself left out of
+        // the parents, and saves instead of creating
+        key(&mut st, press(KeyCode::BackTab));
+        assert_eq!(chosen(&st, &rows), "t-000001");
+        key(&mut st, press(KeyCode::Char('e')));
+        let form = st.form.as_ref().unwrap();
+        assert_eq!(form.edit.as_deref(), Some("t-000001"));
+        assert_eq!(form.title.text(), "the parent");
+        assert_eq!(form.kind, Kind::Milestone);
+        assert!(form.parents.is_empty());
+        assert!(form.editing);
     }
 
     #[test]
