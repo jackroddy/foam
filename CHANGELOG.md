@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The screen renders a little markdown in the body and the notes:
+  `backticked` code on a grey background, bulleted and numbered lists
+  with a hanging indent, fenced code blocks as a panel with the language
+  in its corner, and tables as a grid, with columns narrowed and cells
+  wrapped when the box is too narrow, or one record per row when even
+  that does not fit. The lines of a paragraph join and reflow; `foam
+  show` prints the text as written.
 - The screen's page has a cursor over the body and the notes. `j` and
   `k` move it and the chosen box has the bright border; `u` goes to the
   note it answers, `[` and `]` to its neighbours in the thread, Space

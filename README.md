@@ -125,7 +125,8 @@ board, open an issue now and then, and step in with `foam create`,
 Run `foam` with no command in a terminal and you get a screen. It opens on
 the listing, with a preview of the chosen issue beside it. Tab switches to
 the board, and Enter opens the chosen issue's page, with its notes shown as
-boxes.
+boxes. The body and the notes render a little markdown: `backticked`
+code, bulleted and numbered lists, fenced code blocks, and tables.
 
 On the listing, `j` and `k` move, `g` and `G` jump to the ends, Space folds
 an issue's children, and `p` hides the preview. `s` and `t` cycle the

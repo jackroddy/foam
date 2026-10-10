@@ -17,6 +17,7 @@ use ratatui::{DefaultTerminal, Frame};
 
 use crate::git::Stamp;
 use crate::graph::{self, BOARD_LOG};
+use crate::md;
 use crate::model::{Issue, Kind, Status};
 use crate::render;
 use crate::store::{DATA_REF, Db, Store};
@@ -982,12 +983,7 @@ fn preview_lines(db: &Db, issue: &Issue, width: usize) -> Vec<Line<'static>> {
     lines.extend(about(db, issue, width, None).lines);
     if !issue.body.is_empty() {
         lines.push(Line::default());
-        let wide = width.max(10);
-        lines.extend(
-            render::wrap_at(&issue.body, wide, wide)
-                .into_iter()
-                .map(|l| Line::from(Span::raw(l))),
-        );
+        lines.extend(md::render(&issue.body, width.max(10)));
     }
     lines
 }
@@ -1446,12 +1442,11 @@ fn post_box(p: &Post, style: &render::Style, width: usize, plain: bool) -> Vec<L
     top.push(edge("╮".into()));
     let mut out = vec![Line::from(top)];
     let inner = width.saturating_sub(4).max(16);
-    for l in render::wrap_at(p.text, inner, inner) {
-        out.push(Line::from(vec![
-            edge("│ ".into()),
-            Span::raw(pad(&l, inner)),
-            edge(" │".into()),
-        ]));
+    for l in md::render(p.text, inner) {
+        let mut spans = vec![edge("│ ".into())];
+        spans.extend(l.spans);
+        spans.push(edge(" │".into()));
+        out.push(Line::from(spans));
     }
     let mut from = String::new();
     if p.hidden > 0 {

@@ -1,6 +1,8 @@
 mod cmd;
 mod git;
 mod graph;
+#[cfg(feature = "tui")]
+mod md;
 mod merge;
 mod migrate;
 mod model;
