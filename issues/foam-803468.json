@@ -1,0 +1,28 @@
+{
+  "id": "foam-803468",
+  "title": "Bump meta.json on the first write by a newer binary",
+  "body": "A write by a binary above the ref's schema rewrites meta.json in the same commit and prints an obvious coloured line saying what happened and that older foams will now refuse the ref.",
+  "type": "task",
+  "status": "open",
+  "priority": 2,
+  "labels": [],
+  "parent": "foam-a947aa",
+  "blocked_by": [],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-10-10T00:03:11.130814345Z",
+  "updated_at": "2026-10-10T00:03:11.130814345Z",
+  "closed_at": null,
+  "close_reason": null,
+  "resolution": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "34d8e13",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
