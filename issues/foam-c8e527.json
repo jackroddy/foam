@@ -3,7 +3,7 @@
   "title": "Move through notes on the page: a note cursor, thread jumps and folding",
   "body": "",
   "type": "task",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 2,
   "labels": [],
   "parent": "foam-72e952",
@@ -12,13 +12,13 @@
   ],
   "related": [],
   "assignee": "Jack Roddy/42dfd115",
-  "lease_expires": "2026-10-10T01:40:52.601090796Z",
+  "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-10T01:09:23.167742144Z",
-  "updated_at": "2026-10-10T01:25:52.601090796Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-10-10T01:30:01.524102797Z",
+  "closed_at": "2026-10-10T01:30:01.524102797Z",
+  "close_reason": "cursor, folding, u/[/] and ^d/^u in d700248",
+  "resolution": "done",
   "notes": [
     {
       "id": "c8b9f991",
@@ -34,6 +34,9 @@
       "commit": "bb39c08",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "d700248",
+      "branch": "dev"
+    }
   }
 }
