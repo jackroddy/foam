@@ -270,11 +270,18 @@ foam create "Wire the parser" -p 1
 foam create "Test the parser" --blocked-by <id>
 foam claim <id>
 foam note <id> "PEG was a dead end: left recursion in the grammar"
+foam note <id> "packrat handles it" --reply-to <note>
 foam close <id> --reason "parser wired"
 foam update <ids> --priority 0 --parent <milestone>
 foam update <id> --defer-until 2026-10-01
 foam dep add <id> <blocker>
 ```
+
+A note is named by its id, which `foam show` prints, or by any prefix of it
+that is unique on the issue. `--reply-to` answers a note, and `foam show`
+and the screen draw the thread. `--edit` replaces a note's text, `--rm`
+removes it, and `--history` prints every text it has had, oldest first,
+read from the ref's history.
 
 #### milestones
 
@@ -345,7 +352,7 @@ foam ready [--limit N]          issues that can be worked now
 foam show <id>                  one issue in full, with notes, blockers and children
 foam create <title> [--type T] [-p 0-4] [--blocked-by ID] [--parent ID]
 foam claim <id> | unclaim <id> | heartbeat <id>
-foam note <id> <text>           append a note
+foam note <id> <text> [--reply-to N]  append a note, or answer one
 foam close <id> --reason <why> [--dropped]  | foam reopen <id>
 foam dep add <id> <blocker>     make <id> wait on <blocker>
 foam blocked                    what is waiting, and on what
@@ -402,7 +409,9 @@ foam claim <id> [--force]             take it with a lease; --force overrides an
 foam unclaim <id> [--force]           give it back; --force releases another's claim
 foam heartbeat <id>                   extend the lease on an issue you hold
 foam reclaim                          reopen every in-progress issue whose lease expired
-foam note <id> <text>                 append a note
+foam note <id> <text> [--reply-to N]  append a note, or answer note N
+foam note <id> --edit N <text>        replace note N's text
+foam note <id> --rm N | --history N   remove note N, or print every text it has had
 foam search <query>                   titles, bodies, notes and memories, closed included
 foam remember <slug> <text>           store a memory, replacing any with that slug
 foam memories                         list every memory

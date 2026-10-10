@@ -36,7 +36,7 @@ foam ready [--limit N]          issues that can be worked now
 foam show <id>                  one issue in full, with notes, blockers and children
 foam create <title> [--type T] [-p 0-4] [--blocked-by ID] [--parent ID]
 foam claim <id> | unclaim <id> | heartbeat <id>
-foam note <id> <text>           append a note
+foam note <id> <text> [--reply-to N]  append a note, or answer one
 foam close <id> --reason <why> [--dropped]  | foam reopen <id>
 foam dep add <id> <blocker>     make <id> wait on <blocker>
 foam blocked                    what is waiting, and on what
