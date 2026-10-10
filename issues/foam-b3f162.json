@@ -3,7 +3,7 @@
   "title": "v0.4.0",
   "body": "Schema migrations, and note ids as the first real step. Minor bump: the ref's schema goes to 2.",
   "type": "milestone",
-  "status": "open",
+  "status": "closed",
   "priority": 1,
   "labels": [],
   "parent": null,
@@ -13,16 +13,19 @@
   "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-10T00:03:11.088497256Z",
-  "updated_at": "2026-10-10T00:03:11.088497256Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-10-10T00:20:05.716193415Z",
+  "closed_at": "2026-10-10T00:20:05.716193415Z",
+  "close_reason": "tagged v0.4.0 at d1aea90",
+  "resolution": "done",
   "notes": [],
   "stamps": {
     "created": {
       "commit": "34d8e13",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "d1aea90",
+      "branch": "dev"
+    }
   }
 }
