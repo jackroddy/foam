@@ -13,11 +13,20 @@
   "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-10T02:18:54.559953585Z",
-  "updated_at": "2026-10-10T02:18:54.559953585Z",
+  "updated_at": "2026-10-10T02:18:54.572051327Z",
   "closed_at": null,
   "close_reason": null,
   "resolution": null,
-  "notes": [],
+  "notes": [
+    {
+      "id": "0a6fbdd8",
+      "at": "2026-10-10T02:18:54.572050697Z",
+      "author": "Jack Roddy/42dfd115",
+      "text": "Decided 2026-10-09: the screen says claimed now; the stored word, the CLI's --status value, the stats JSON key and graph's field stay in_progress until the next schema bump, since a bump for one word is not worth it. At that bump, go through the schema for other names we do not like, and shorten every keyword that can be shortened: field names, status and kind values, note fields. Every record repeats them, so the ref's size follows them. Ask Jack which spellings before writing the step.",
+      "commit": "d3d8a3a",
+      "branch": "dev"
+    }
+  ],
   "stamps": {
     "created": {
       "commit": "d3d8a3a",
