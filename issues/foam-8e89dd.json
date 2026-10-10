@@ -3,26 +3,29 @@
   "title": "Review the README against the binary",
   "body": "",
   "type": "chore",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 1,
   "labels": [],
   "parent": "foam-2df6cf",
   "blocked_by": [],
   "related": [],
   "assignee": "Jack Roddy/42dfd115",
-  "lease_expires": "2026-10-10T05:08:56.767554209Z",
+  "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-10T04:53:56.743064098Z",
-  "updated_at": "2026-10-10T04:53:56.767554209Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-10-10T04:54:48.632230329Z",
+  "closed_at": "2026-10-10T04:54:48.632230329Z",
+  "close_reason": "command sheet matches the binary's help; the screen section reflowed in ed21ccb",
+  "resolution": "done",
   "notes": [],
   "stamps": {
     "created": {
       "commit": "357ddd8",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "ed21ccb",
+      "branch": "dev"
+    }
   }
 }
