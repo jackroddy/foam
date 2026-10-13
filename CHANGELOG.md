@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tables. A note that takes more than one line goes under its header line.
   Piped, `--plain` and `--json` output print the text as written.
 
+### Changed
+
+- Inline code is cyan with no background, on the screen and in the
+  terminal.
+
 ## [0.6.0] - 2026-10-10
 
 ### Added

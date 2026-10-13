@@ -60,7 +60,7 @@ struct Theme {
 
 const THEME: Theme = Theme {
     heading: Style::new().add_modifier(Modifier::BOLD),
-    code: Style::new().bg(palette::SHADE),
+    code: Style::new().fg(palette::REF),
     panel: Style::new().bg(palette::SHADE),
     lang: Style::new().bg(palette::SHADE).add_modifier(Modifier::DIM),
     bullet: Style::new().add_modifier(Modifier::BOLD),
@@ -543,11 +543,15 @@ fn heading_lines(level: u8, text: &[Inline], width: usize, theme: &Theme, out: &
         1 => theme.heading.add_modifier(Modifier::UNDERLINED),
         _ => theme.heading,
     };
-    let words: Vec<Vec<Seg>> = words(text, theme)
-        .into_iter()
-        .map(|w| w.into_iter().map(|(s, st)| (s, st.patch(style))).collect())
-        .collect();
-    out.extend(wrap(&words, width));
+    // patched after the wrap, so the spaces between the words
+    // carry the underline too
+    for line in wrap(&words(text, theme), width) {
+        out.push(
+            line.into_iter()
+                .map(|(s, st)| (s, st.patch(style)))
+                .collect(),
+        );
+    }
 }
 
 fn list(items: &[Item], width: usize, theme: &Theme, out: &mut Vec<Vec<Seg>>) {
@@ -780,14 +784,15 @@ mod tests {
     }
 
     #[test]
-    fn inline_code_has_the_background_and_the_space_between_does_not() {
+    fn inline_code_has_the_colour_and_the_space_between_does_not() {
         let lines = render("run `foam prime` now", 30);
         assert_eq!(strings(&lines), padded(&["run foam prime now"], 30));
         let spans = &lines[0].spans;
         let code = spans.iter().find(|s| s.content == "foam prime").unwrap();
-        assert_eq!(code.style.bg, Some(Color::DarkGray));
+        assert_eq!(code.style.fg, Some(Color::Cyan));
+        assert_eq!(code.style.bg, None);
         let before = spans.iter().find(|s| s.content.ends_with("run ")).unwrap();
-        assert_eq!(before.style.bg, None);
+        assert_eq!(before.style.fg, None);
     }
 
     #[test]
@@ -821,9 +826,10 @@ mod tests {
                 },
             ]
         );
-        let lines = render("# One\n\n### Three", 10);
-        assert_eq!(strings(&lines), padded(&["One", "", "Three"], 10));
+        let lines = render("# One Two\n\n### Three", 10);
+        assert_eq!(strings(&lines), padded(&["One Two", "", "Three"], 10));
         let one = &lines[0].spans[0];
+        assert_eq!(one.content, "One Two");
         assert!(
             one.style
                 .add_modifier
@@ -865,7 +871,7 @@ mod tests {
         );
         let painted = text(md, 20, true);
         assert_eq!(painted[0], "\x1b[1;4mHead\x1b[0m");
-        assert_eq!(painted[2], "see \x1b[100mx\x1b[0m");
+        assert_eq!(painted[2], "see \x1b[36mx\x1b[0m");
         assert_eq!(
             painted[5],
             "\x1b[34;100mfn\x1b[0m\x1b[100m f() {}           \x1b[0m"
