@@ -1,0 +1,28 @@
+{
+  "id": "foam-cf77d9",
+  "title": "Does setting foam up stomp on an existing git hook?",
+  "body": "`foam init` and `foam sync --setup` call `install_hook` in `src/cmd.rs`, which writes the pre-push hook that pushes the data ref. What it does with a hook that is already there, read from the code at c15fa5e:\n\n| found | what happens |\n|---|---|\n| `core.hooksPath` set | nothing is written; stderr prints the block to add by hand |\n| a hook with foam's marker line | nothing |\n| a hook whose shebang is not a shell | left alone; stderr prints the block to run from it |\n| any other hook | foam's block is appended after the existing text |\n| no hook | foam's script is written, mode 755 |\n\n`tests/cli.rs` covers the `core.hooksPath` case, the non-shell case and the append. So on what is written, the answer is no: an existing hook keeps its text.\n\n`foam setup claude` edits `.claude/settings.json` through `serde_json`, adds its own entry to the `hooks` object and removes only entries it recognises as its own, so other hooks in that file stay.\n\n## Open\n\n- An existing hook that ends in `exec` or `exit` before its last line never reaches foam's block, so foam's push of the data ref silently does not happen. `install_hook` does not look for that, and nothing tells the user. Whether to detect it, or to put foam's block first, is the question that needs an answer.\n- `serde_json` rewrites `.claude/settings.json` whole. Whether the user's key order and formatting survive depends on the `preserve_order` feature, which needs checking.\n- The append sets the hook's mode to 755 whatever it was before.",
+  "type": "spike",
+  "status": "open",
+  "priority": 1,
+  "labels": [],
+  "parent": null,
+  "blocked_by": [],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-10-13T22:50:08.862730371Z",
+  "updated_at": "2026-10-13T22:50:08.862730371Z",
+  "closed_at": null,
+  "close_reason": null,
+  "resolution": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "c15fa5e",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
