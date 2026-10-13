@@ -1,0 +1,28 @@
+{
+  "id": "foam-19122a",
+  "title": "Cut the release: version, changelog date, tag, merge to main",
+  "body": "",
+  "type": "chore",
+  "status": "open",
+  "priority": 1,
+  "labels": [],
+  "parent": "foam-ca3184",
+  "blocked_by": [],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-10-13T03:36:07.733587056Z",
+  "updated_at": "2026-10-13T03:36:07.733587056Z",
+  "closed_at": null,
+  "close_reason": null,
+  "resolution": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "7b841ab",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
