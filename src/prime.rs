@@ -26,7 +26,8 @@ dead end, so the next session does not retry it. `foam close <id> --reason \
 Write a body, a note or a memory as markdown. The screen and `foam show` \
 render `#`, `##` and `###` headings, `code`, bullet and numbered lists, \
 fenced code with a language, tables and a `---` rule, and leave everything \
-else as typed.
+else as typed. A fence is the one place whitespace survives, so a diagram, a \
+tree or example output goes in one, tagged `text`.
 
 Memories are facts about the code or the world that a next session would \
 otherwise rediscover: `foam remember <slug> <text>`. Remember facts, never \
