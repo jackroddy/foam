@@ -3,26 +3,29 @@
   "title": "Review the README against the binary",
   "body": "",
   "type": "chore",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 1,
   "labels": [],
   "parent": "foam-ca3184",
   "blocked_by": [],
   "related": [],
   "assignee": "Jack Roddy/f1b5fba8",
-  "lease_expires": "2026-10-13T03:51:14.035748217Z",
+  "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-13T03:36:07.724667952Z",
-  "updated_at": "2026-10-13T03:36:14.035748217Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-10-13T03:36:37.609604129Z",
+  "closed_at": "2026-10-13T03:36:37.609604129Z",
+  "close_reason": "Reviewed every command and flag in the README against foam --help and each subcommand's help, the prime copy against foam prime --plain, and the markdown descriptions on the screen and show sections. No mismatch.",
+  "resolution": "done",
   "notes": [],
   "stamps": {
     "created": {
       "commit": "7b841ab",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "7b841ab",
+      "branch": "dev"
+    }
   }
 }
