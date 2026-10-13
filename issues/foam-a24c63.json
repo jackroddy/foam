@@ -13,11 +13,20 @@
   "lease_expires": "2026-10-13T02:52:08.071807134Z",
   "defer_until": null,
   "created_at": "2026-10-13T02:33:24.907866353Z",
-  "updated_at": "2026-10-13T02:37:08.071807134Z",
+  "updated_at": "2026-10-13T02:40:04.852510195Z",
   "closed_at": null,
   "close_reason": null,
   "resolution": null,
-  "notes": [],
+  "notes": [
+    {
+      "id": "eea0fbd1",
+      "at": "2026-10-13T02:40:04.852509425Z",
+      "author": "Jack Roddy/f1b5fba8",
+      "text": "Levels: one `#` is bold and underlined, two and three are bold and look the same. The screen has bold, dim, underline and colour, and a third distinct look did not seem worth a colour that means something else elsewhere. Four or more hashes, a bare hash, and a hash without a space stay text.",
+      "commit": "f76d340",
+      "branch": "dev"
+    }
+  ],
   "stamps": {
     "created": {
       "commit": "c8446ad",
