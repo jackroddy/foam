@@ -263,13 +263,24 @@ fn markdown(s: &mut Scenario) {
         "The ref holds `issues/<id>.json` and `memories/<slug>.json`; `foam stats` says how big it is.",
     ]));
     let body = "\
+# A heading of one hash is bold and underlined
+
 The screen draws a small subset of markdown and leaves the rest as text.
 
-- `backticked` code gets a shade
+## Two hashes are bold
+
+### So are three, and `code` in a heading keeps its colour
+
+#### Four stay text, as does **bold** and _italic_
+
+---
+
+- `backticked` code is cyan
 - bullets hang their wrapped lines under the text, like this one does \
 once it runs past the box's width
   - a nested bullet steps in
 - a long word has to be cut: antidisestablishmentarianismantidisestablishmentarianism
+- a rule of three or more dashes is drawn across the width, like the one above
 
 1. numbered lists keep their numbers
 2. and line them up
@@ -277,13 +288,19 @@ once it runs past the box's width
 
 ```rust
 fn render(text: &str, width: usize) -> Vec<Line<'static>> {
-    // comments go dim, strings green, numbers magenta
+    // comments go dim, strings green, numbers magenta, keywords blue
+    let shown = \"a gutter down the left, and a line too long for the box is cut\";
     layout(&parse(text), width.max(1))
 }
 ```
 
+```
+a fence with no language has no name over its gutter
+```
+
 | flag | meaning |
 |------|---------|
+| header | bold, over a rule |
 | `-p` | priority |
 | `--parent` | the milestone |
 
@@ -335,6 +352,8 @@ fn render(text: &str, width: usize) -> Vec<Line<'static>> {
         "Parsing is line-oriented, in order of precedence:\n\n\
 - a fence opens a code block\n\
 - a line with `|` over a delimiter row opens a table\n\
+- one to three `#` and a space open a heading\n\
+- three or more `-` alone are a rule\n\
 - `-`, `*`, `+` or `1.` opens a list item\n\
 - a blank line ends a paragraph\n\
 - anything else joins the paragraph\n\n\

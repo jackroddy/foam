@@ -115,8 +115,18 @@ impl Style {
             return text.to_string();
         }
         let width = self.width.saturating_sub(hang).max(20);
-        let lines = crate::md::text(text, width, self.color);
-        lines.join(&format!("\n{}", " ".repeat(hang)))
+        let indent = " ".repeat(hang);
+        let mut out = String::new();
+        for (n, line) in crate::md::text(text, width, self.color).iter().enumerate() {
+            if n > 0 {
+                out.push('\n');
+            }
+            if n > 0 && !line.is_empty() {
+                out.push_str(&indent);
+            }
+            out.push_str(line);
+        }
+        out
     }
 }
 
