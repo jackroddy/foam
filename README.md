@@ -156,10 +156,10 @@ box moves to the top of the pane, whole, with every reply of a note's
 thread under it, each hanging from a rail down from what it answers, in
 one pane that scrolls by the line. The body and the notes render a little
 markdown: headings of one to three `#`, `backticked` code, bulleted and
-numbered lists, fenced code blocks with a language, and tables. Ctrl-d
-and Ctrl-u scroll without moving the cursor. Tab moves onto the parent,
-children, and blockers, Enter follows the one you're on, and Esc goes
-back to the page before, with the cursor where it was.
+numbered lists, fenced code blocks with a language, tables, and a `---`
+rule. Ctrl-d and Ctrl-u scroll without moving the cursor. Tab moves onto
+the parent, children, and blockers, Enter follows the one you're on, and
+Esc goes back to the page before, with the cursor where it was.
 
 Notes are written from the screen. On an opened thread `h` and `l` select
 a note, and Enter offers to reply to it or edit it; `n` on the issue's
@@ -386,7 +386,7 @@ This is what a session reads first, taken from a small repo:
 
 foam tracks this repository's issues and memories on a git ref; nothing is checked out and nothing here is a file to edit. It is the one place work and facts go: not a TODO comment, a plan file, a handoff note, a todo list in the harness, or the harness's own memory.
 
-Work: `foam ready`, then `foam claim <id>` before touching code. When you find work that has no issue, including anything noticed on the way, `foam create` it and keep going. `foam note <id> <text>` when you decide something or hit a dead end, so the next session does not retry it. `foam close <id> --reason <why>` once it is done, and `foam unclaim <id>` anything you stop working on. Write a body, a note or a memory as markdown: `#` headings, `code`, bullets, fenced code with a language, a table; the screen and `foam show` render those and nothing more.
+Work: `foam ready`, then `foam claim <id>` before touching code. When you find work that has no issue, including anything noticed on the way, `foam create` it and keep going. `foam note <id> <text>` when you decide something or hit a dead end, so the next session does not retry it. `foam close <id> --reason <why>` once it is done, and `foam unclaim <id>` anything you stop working on. Write a body, a note or a memory as markdown: `#` headings, `code`, bullets, fenced code with a language, a table, a `---` rule; the screen and `foam show` render those and nothing more.
 
 Memories are facts about the code or the world that a next session would otherwise rediscover: `foam remember <slug> <text>`. Remember facts, never rules; a rule is something a person decided and belongs in CLAUDE.md. When a fact would serve better as a rule or an issue, say so in your reply. A memory marked old or from another branch may no longer hold: check it against the code, `foam remember` it again if it still holds, `foam forget <slug>` if not.
 

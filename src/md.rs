@@ -1,7 +1,7 @@
 //! A small markdown subset, parsed into blocks and laid out as
 //! lines of an exact width: headings, paragraphs, lists, fenced
-//! code, tables and inline code. Everything else stays literal
-//! text.
+//! code, tables, rules and inline code. Everything else stays
+//! literal text.
 
 use crate::hl::{Class, Lexer};
 use ratatui::style::{Color, Modifier, Style};
@@ -43,10 +43,12 @@ pub enum Block {
         header: Vec<Vec<Inline>>,
         rows: Vec<Vec<Vec<Inline>>>,
     },
+    Rule,
 }
 
 struct Theme {
     heading: Style,
+    header: Style,
     code: Style,
     lang: Style,
     bullet: Style,
@@ -59,6 +61,7 @@ struct Theme {
 
 const THEME: Theme = Theme {
     heading: Style::new().add_modifier(Modifier::BOLD),
+    header: Style::new().add_modifier(Modifier::BOLD),
     code: Style::new().fg(palette::REF),
     lang: Style::new().add_modifier(Modifier::DIM),
     bullet: Style::new().add_modifier(Modifier::BOLD),
@@ -118,6 +121,12 @@ pub fn parse(text: &str) -> Vec<Block> {
                 level,
                 text: inlines(rest),
             });
+            i += 1;
+            continue;
+        }
+        if rule(line) {
+            flush(&mut blocks, &mut para, &mut list);
+            blocks.push(Block::Rule);
             i += 1;
             continue;
         }
@@ -200,6 +209,12 @@ fn heading(line: &str) -> Option<(u8, &str)> {
     }
     let rest = line[hashes..].strip_prefix(' ')?.trim();
     (!rest.is_empty()).then_some((hashes as u8, rest))
+}
+
+/// Whether `line` is a rule: three or more `-` and nothing else.
+fn rule(line: &str) -> bool {
+    let line = line.trim();
+    line.len() >= 3 && line.bytes().all(|b| b == b'-')
 }
 
 /// The language of a line that opens a fence, `Some(None)` for a
@@ -442,6 +457,7 @@ fn lines(blocks: &[Block], width: usize) -> Vec<Vec<Seg>> {
             Block::List(items) => list(items, width, theme, &mut out),
             Block::Code { lang, lines } => code(lang.as_deref(), lines, width, theme, &mut out),
             Block::Table { header, rows } => table(header, rows, width, theme, &mut out),
+            Block::Rule => out.push(vec![("─".repeat(width), theme.rule)]),
         }
     }
     out
@@ -647,7 +663,7 @@ fn code(
                 room -= s.chars().count();
                 push_seg(&mut shown, s, style);
             }
-            push_seg(&mut shown, "…".into(), Style::new());
+            push_seg(&mut shown, "…".into(), theme.rule);
         } else {
             shown.extend(segs);
         }
@@ -685,9 +701,16 @@ fn table(
         }
     }
     let sep = || (" │ ".to_string(), theme.rule);
-    let draw = |row: &[Vec<Inline>], out: &mut Vec<Vec<Seg>>| {
-        let wrapped: Vec<Vec<Vec<Seg>>> =
-            (0..cols).map(|c| wrap(&cell(row, c), widths[c])).collect();
+    let draw = |row: &[Vec<Inline>], style: Style, out: &mut Vec<Vec<Seg>>| {
+        let wrapped: Vec<Vec<Vec<Seg>>> = (0..cols)
+            .map(|c| {
+                let words: Vec<Vec<Seg>> = cell(row, c)
+                    .into_iter()
+                    .map(|w| w.into_iter().map(|(s, st)| (s, st.patch(style))).collect())
+                    .collect();
+                wrap(&words, widths[c])
+            })
+            .collect();
         let height = wrapped.iter().map(Vec::len).max().unwrap_or(1);
         for l in 0..height {
             let mut segs = Vec::new();
@@ -703,12 +726,12 @@ fn table(
             out.push(segs);
         }
     };
-    draw(header, out);
+    draw(header, theme.header, out);
     let rule: Vec<String> = widths.iter().map(|&w| "─".repeat(w)).collect();
     let rule_line = vec![(rule.join("─┼─"), theme.rule)];
     out.push(rule_line);
     for row in rows {
-        draw(row, out);
+        draw(row, Style::new(), out);
     }
 }
 
@@ -841,6 +864,27 @@ mod tests {
     }
 
     #[test]
+    fn a_line_of_dashes_is_a_rule_and_ends_the_block_before_it() {
+        assert_eq!(
+            parse("text\n---\n- item\n  ----\n--"),
+            [
+                Block::Paragraph(vec![Inline::Text("text".into())]),
+                Block::Rule,
+                Block::List(vec![Item {
+                    depth: 0,
+                    number: None,
+                    text: vec![Inline::Text("item".into())],
+                }]),
+                Block::Rule,
+                Block::Paragraph(vec![Inline::Text("--".into())]),
+            ]
+        );
+        let lines = render("---", 6);
+        assert_eq!(strings(&lines), ["──────"]);
+        assert!(lines[0].spans[0].style.add_modifier.contains(Modifier::DIM));
+    }
+
+    #[test]
     fn four_hashes_or_a_bare_hash_stay_text() {
         for text in ["#### four", "#", "# ", "#nospace"] {
             assert_eq!(
@@ -874,7 +918,10 @@ mod tests {
         assert_eq!(painted[2], "see \x1b[36mx\x1b[0m");
         assert_eq!(painted[4], "\x1b[2m┌ rust\x1b[0m");
         assert_eq!(painted[5], "\x1b[2m│ \x1b[0m\x1b[34mfn\x1b[0m f() {}");
-        assert_eq!(painted[7], "a\x1b[2m │ \x1b[0mb");
+        assert_eq!(
+            painted[7],
+            "\x1b[1ma\x1b[0m\x1b[2m │ \x1b[0m\x1b[1mb\x1b[0m"
+        );
     }
 
     #[test]
@@ -990,8 +1037,10 @@ mod tests {
 
     #[test]
     fn a_fence_without_a_language_cuts_long_lines() {
-        let lines = strings(&render("```\nshort\na line far too long\n```", 10));
-        assert_eq!(lines, ["│ short   ", "│ a line …"]);
+        let lines = render("```\nshort\na line far too long\n```", 10);
+        assert_eq!(strings(&lines), ["│ short   ", "│ a line …"]);
+        let cut = lines[1].spans.iter().find(|s| s.content == "…").unwrap();
+        assert!(cut.style.add_modifier.contains(Modifier::DIM));
     }
 
     #[test]
@@ -1006,6 +1055,22 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn a_table_header_is_bold_and_its_rows_are_not() {
+        let lines = render("| a | b |\n|---|---|\n| 1 | 2 |", 10);
+        let bold = |l: &Line, s: &str| {
+            l.spans
+                .iter()
+                .find(|x| x.content.trim() == s)
+                .unwrap()
+                .style
+                .add_modifier
+                .contains(Modifier::BOLD)
+        };
+        assert!(bold(&lines[0], "a") && bold(&lines[0], "b"));
+        assert!(!bold(&lines[2], "1") && !bold(&lines[2], "2"));
     }
 
     #[test]

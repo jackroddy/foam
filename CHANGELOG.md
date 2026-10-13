@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The screen renders a line of one to three `#` as a heading: bold, and
   underlined for `#`.
+- A line of three or more `-` on its own renders as a rule across the
+  width.
 - `show`, `recall` and `memories` render markdown on a terminal, as the
   screen does: headings, `code`, lists, fenced code with a language, and
   tables. A note that takes more than one line goes under its header line.
@@ -22,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   terminal.
 - A code block has a dim gutter down its left, with the language at the
   top, in place of the shaded panel.
+- A table's header row is bold.
 
 ## [0.6.0] - 2026-10-10
 
