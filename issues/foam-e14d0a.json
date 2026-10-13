@@ -6,7 +6,7 @@
   "status": "closed",
   "priority": 2,
   "labels": [],
-  "parent": null,
+  "parent": "foam-ca3184",
   "blocked_by": [
     "foam-a24c63"
   ],
@@ -15,7 +15,7 @@
   "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-13T02:33:38.351947499Z",
-  "updated_at": "2026-10-13T02:44:54.120674759Z",
+  "updated_at": "2026-10-13T03:36:07.715048106Z",
   "closed_at": "2026-10-13T02:44:54.120674759Z",
   "close_reason": "Landed in commit bb756ff, 'Render markdown in show, recall and memories on a terminal'. Note 1 has the layout decisions.",
   "resolution": "done",
