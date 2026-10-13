@@ -4,7 +4,7 @@
 //! text.
 
 use crate::hl::{Class, Lexer};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 
 use crate::palette;
 use ratatui::text::{Line, Span};
@@ -336,6 +336,98 @@ type Seg = (String, Style);
 /// The blocks as lines exactly `width` characters long, a blank
 /// line between blocks.
 pub fn layout(blocks: &[Block], width: usize) -> Vec<Line<'static>> {
+    lines(blocks, width)
+        .into_iter()
+        .map(|segs| finish(segs, width))
+        .collect()
+}
+
+/// `text` laid out at `width` for a terminal: one string per
+/// line, trailing blanks dropped, and the screen's styles as
+/// escape codes when `color`.
+pub fn text(text: &str, width: usize, color: bool) -> Vec<String> {
+    lines(&parse(text), width)
+        .into_iter()
+        .map(|segs| {
+            let mut out = String::new();
+            for (s, style) in trimmed(segs, color) {
+                let codes = if color { sgr(style) } else { String::new() };
+                if codes.is_empty() {
+                    out.push_str(&s);
+                } else {
+                    out.push_str(&format!("\x1b[{codes}m{s}\x1b[0m"));
+                }
+            }
+            out
+        })
+        .collect()
+}
+
+/// `segs` without trailing blanks, keeping those under a
+/// background when `color` paints it.
+fn trimmed(mut segs: Vec<Seg>, color: bool) -> Vec<Seg> {
+    while let Some((s, style)) = segs.last_mut() {
+        if color && *style != Style::new() {
+            break;
+        }
+        let keep = s.trim_end().len();
+        if keep > 0 {
+            s.truncate(keep);
+            break;
+        }
+        segs.pop();
+    }
+    segs
+}
+
+/// The SGR parameters of `style`, empty for the default.
+fn sgr(style: Style) -> String {
+    let mut codes: Vec<String> = Vec::new();
+    let modifiers = [
+        (Modifier::BOLD, 1),
+        (Modifier::DIM, 2),
+        (Modifier::UNDERLINED, 4),
+    ];
+    for (m, code) in modifiers {
+        if style.add_modifier.contains(m) {
+            codes.push(code.to_string());
+        }
+    }
+    if let Some(c) = style.fg.and_then(ansi) {
+        codes.push(c.to_string());
+    }
+    if let Some(c) = style.bg.and_then(ansi) {
+        codes.push((c + 10).to_string());
+    }
+    codes.join(";")
+}
+
+/// The foreground parameter of a named colour.
+fn ansi(color: Color) -> Option<u8> {
+    Some(match color {
+        Color::Black => 30,
+        Color::Red => 31,
+        Color::Green => 32,
+        Color::Yellow => 33,
+        Color::Blue => 34,
+        Color::Magenta => 35,
+        Color::Cyan => 36,
+        Color::Gray => 37,
+        Color::DarkGray => 90,
+        Color::LightRed => 91,
+        Color::LightGreen => 92,
+        Color::LightYellow => 93,
+        Color::LightBlue => 94,
+        Color::LightMagenta => 95,
+        Color::LightCyan => 96,
+        Color::White => 97,
+        _ => return None,
+    })
+}
+
+/// The blocks as lines of at most `width` characters, a blank
+/// line between blocks.
+fn lines(blocks: &[Block], width: usize) -> Vec<Vec<Seg>> {
     let theme = &THEME;
     let mut out: Vec<Vec<Seg>> = Vec::new();
     for (n, block) in blocks.iter().enumerate() {
@@ -350,7 +442,7 @@ pub fn layout(blocks: &[Block], width: usize) -> Vec<Line<'static>> {
             Block::Table { header, rows } => table(header, rows, width, theme, &mut out),
         }
     }
-    out.into_iter().map(|segs| finish(segs, width)).collect()
+    out
 }
 
 /// A line cut or padded to exactly `width`, adjacent segments of
@@ -751,6 +843,34 @@ mod tests {
                 "{text:?}"
             );
         }
+    }
+
+    #[test]
+    fn terminal_text_drops_trailing_blanks_and_paints_only_in_color() {
+        let md = "# Head\n\nsee `x`\n\n```rust\nfn f() {}\n```\n\n| a | b |\n|---|---|\n| 1 | 2 |";
+        assert_eq!(
+            text(md, 20, false),
+            [
+                "Head",
+                "",
+                "see x",
+                "",
+                "                rust",
+                "fn f() {}",
+                "",
+                "a │ b",
+                "──┼──",
+                "1 │ 2",
+            ]
+        );
+        let painted = text(md, 20, true);
+        assert_eq!(painted[0], "\x1b[1;4mHead\x1b[0m");
+        assert_eq!(painted[2], "see \x1b[100mx\x1b[0m");
+        assert_eq!(
+            painted[5],
+            "\x1b[34;100mfn\x1b[0m\x1b[100m f() {}           \x1b[0m"
+        );
+        assert_eq!(painted[7], "a\x1b[2m │ \x1b[0mb");
     }
 
     #[test]

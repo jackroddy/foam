@@ -107,24 +107,16 @@ impl Style {
         }
     }
 
-    /// Wrap `text` to the width, the first line starting `used`
-    /// columns in and each later line indented by `hang` spaces,
-    /// or leave it alone when plain.
-    fn wrapped(&self, text: &str, used: usize, hang: usize) -> String {
+    /// `text` rendered as markdown in the width less `hang`, each
+    /// line after the first indented by `hang` spaces, or left
+    /// alone when plain.
+    fn markdown(&self, text: &str, hang: usize) -> String {
         if !self.human {
             return text.to_string();
         }
-        let first = self.width.saturating_sub(used).max(20);
-        let rest = self.width.saturating_sub(hang).max(20);
-        let mut out = String::new();
-        for (n, line) in wrap_at(text, first, rest).iter().enumerate() {
-            if n > 0 {
-                out.push('\n');
-                out.push_str(&" ".repeat(hang));
-            }
-            out.push_str(line);
-        }
-        out
+        let width = self.width.saturating_sub(hang).max(20);
+        let lines = crate::md::text(text, width, self.color);
+        lines.join(&format!("\n{}", " ".repeat(hang)))
     }
 }
 
@@ -196,6 +188,21 @@ pub fn bytes(n: u64) -> String {
 }
 
 /// Pad `s` on the right to `width` characters.
+/// The characters of `s` a terminal shows: those outside its
+/// escape sequences.
+fn visible(s: &str) -> usize {
+    let mut n = 0;
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            chars.by_ref().find(|&c| c == 'm');
+        } else {
+            n += 1;
+        }
+    }
+    n
+}
+
 fn pad(s: &str, width: usize) -> String {
     let n = s.chars().count();
     format!("{s}{}", " ".repeat(width.saturating_sub(n)))
@@ -491,7 +498,7 @@ pub fn issue(style: &Style, i: &Issue, db: &Db) -> String {
     }
     if !i.body.is_empty() {
         out.push('\n');
-        let _ = writeln!(out, "{}", style.wrapped(&i.body, 0, 0));
+        let _ = writeln!(out, "{}", style.markdown(&i.body, 0));
     }
     if !i.notes.is_empty() {
         out.push('\n');
@@ -502,12 +509,19 @@ pub fn issue(style: &Style, i: &Issue, db: &Db) -> String {
                 head.push_str(&format!(" · edited {}", style.when(e)));
             }
             head.push_str("] ");
-            let _ = writeln!(
-                out,
-                "{}{}",
-                style.dim(&head),
-                style.wrapped(&n.text, head.chars().count(), depth * 2 + 2)
-            );
+            let hang = depth * 2 + 2;
+            let text = style.markdown(&n.text, hang);
+            let fits = !text.contains('\n') && head.chars().count() + visible(&text) <= style.width;
+            if !style.human || fits {
+                let _ = writeln!(out, "{}{text}", style.dim(&head));
+            } else {
+                let _ = writeln!(
+                    out,
+                    "{}\n{}{text}",
+                    style.dim(head.trim_end()),
+                    " ".repeat(hang)
+                );
+            }
         }
     }
     out
@@ -531,7 +545,7 @@ pub fn memories(style: &Style, git: &Git, memories: &[&Memory]) -> String {
         .unwrap_or(0);
     for m in memories {
         let hang = slug_w + 2;
-        let text = style.wrapped(&m.text, hang, hang);
+        let text = style.markdown(&m.text, hang);
         let _ = writeln!(
             out,
             "{}  {}{}",
@@ -545,7 +559,7 @@ pub fn memories(style: &Style, git: &Git, memories: &[&Memory]) -> String {
 
 /// A memory's text and age, as `recall` prints them.
 pub fn memory(style: &Style, git: &Git, m: &Memory) -> String {
-    let text = style.wrapped(&m.text, 0, 0);
+    let text = style.markdown(&m.text, 0);
     if style.human {
         format!(
             "{text}{}\n",
@@ -563,7 +577,7 @@ pub fn memory(style: &Style, git: &Git, m: &Memory) -> String {
 /// text's last line when it fits there and on its own otherwise.
 fn trailing_age(style: &Style, text: &str, hang: usize, m: &Memory, git: &Git) -> String {
     let age = format!("({})", age(&m.stamp, git.distance(&m.stamp.commit)));
-    let last = text.rsplit('\n').next().unwrap_or("").chars().count();
+    let last = visible(text.rsplit('\n').next().unwrap_or(""));
     let first_line = !text.contains('\n');
     let used = if first_line { hang + last } else { last };
     if used + 2 + age.chars().count() <= style.width {
@@ -655,6 +669,46 @@ mod tests {
         assert_eq!(lines, ["one two", "three", "four", "", "five"]);
         assert_eq!(wrap_at("abcdefghijkl x", 5, 5), ["abcdefghijkl", "x"]);
         assert_eq!(wrap_at("aa bb cc dd", 2, 5), ["aa", "bb cc", "dd"]);
+    }
+
+    #[test]
+    fn an_issue_renders_its_body_and_notes_as_markdown_in_the_terminal_form() {
+        let mut a = test_issue("t-000001");
+        a.title = "t".into();
+        a.body = "## Head\n\n- one\n- two\n\n```sh\nls   -l\n```".into();
+        let note = |id: &str, text: &str, reply_to: Option<&str>| crate::model::Note {
+            id: id.into(),
+            at: Timestamp::now(),
+            author: "ann".into(),
+            text: text.into(),
+            commit: "none".into(),
+            branch: "dev".into(),
+            edited_at: None,
+            deleted_at: None,
+            reply_to: reply_to.map(Into::into),
+        };
+        a.notes = vec![
+            note("1", "short `one`", None),
+            note("2", "- a bullet\n- another", Some("1")),
+        ];
+        let text = issue(&HUMAN, &a, &crate::store::test_db());
+        let body = text.split_once("\n\n").unwrap().1;
+        let lines: Vec<&str> = body.lines().collect();
+        let tag = format!("{:>40}", "sh");
+        assert_eq!(
+            &lines[..7],
+            ["Head", "", "• one", "• two", "", &tag, "ls   -l"],
+            "{body}"
+        );
+        assert!(lines[8].ends_with(" ann] short one"), "{body}");
+        assert!(
+            lines[9].starts_with("  [2 ") && lines[9].ends_with(" ann]"),
+            "{body}"
+        );
+        assert_eq!(&lines[10..], ["    • a bullet", "    • another"], "{body}");
+        let plain = issue(&Style::PLAIN, &a, &crate::store::test_db());
+        assert!(plain.contains("\n## Head\n\n- one\n"), "{plain}");
+        assert!(plain.contains(" ann] - a bullet\n- another\n"), "{plain}");
     }
 
     #[test]
@@ -797,8 +851,7 @@ mod tests {
         let text = issue(&HUMAN, &i, &db);
         assert!(text.contains("created: 2h ago\n"), "{text}");
         assert!(text.lines().all(|l| l.chars().count() <= 40), "{text}");
-        assert!(text.contains("[0a1b2c3d 1m ago ann] a note"), "{text}");
-        assert!(text.contains("\n  "), "{text}");
+        assert!(text.contains("[0a1b2c3d 1m ago ann]\n  a note"), "{text}");
         let plain = issue(&Style::PLAIN, &i, &db);
         assert!(plain.contains("  on main (none)\n"), "{plain}");
         assert!(plain.contains(&format!("\n{}\n", i.body)), "{plain}");

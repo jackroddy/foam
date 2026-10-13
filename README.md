@@ -235,7 +235,8 @@ foam-a5def3         P2  open         task            Test the parser  waits on f
 #### foam show
 
 `foam show` prints one issue in full, with its fields, children, blockers,
-body, and notes.
+body, and notes. On a terminal the body and the notes render the same
+markdown the screen does; piped, or with `--plain`, they print as written.
 
 ```
 foam-dac906  Wire the parser
@@ -385,7 +386,7 @@ This is what a session reads first, taken from a small repo:
 
 foam tracks this repository's issues and memories on a git ref; nothing is checked out and nothing here is a file to edit. It is the one place work and facts go: not a TODO comment, a plan file, a handoff note, a todo list in the harness, or the harness's own memory.
 
-Work: `foam ready`, then `foam claim <id>` before touching code. When you find work that has no issue, including anything noticed on the way, `foam create` it and keep going. `foam note <id> <text>` when you decide something or hit a dead end, so the next session does not retry it. `foam close <id> --reason <why>` once it is done, and `foam unclaim <id>` anything you stop working on. Write a body, a note or a memory as markdown: `#` headings, `code`, bullets, fenced code with a language, a table; the screen renders those and nothing more.
+Work: `foam ready`, then `foam claim <id>` before touching code. When you find work that has no issue, including anything noticed on the way, `foam create` it and keep going. `foam note <id> <text>` when you decide something or hit a dead end, so the next session does not retry it. `foam close <id> --reason <why>` once it is done, and `foam unclaim <id>` anything you stop working on. Write a body, a note or a memory as markdown: `#` headings, `code`, bullets, fenced code with a language, a table; the screen and `foam show` render those and nothing more.
 
 Memories are facts about the code or the world that a next session would otherwise rediscover: `foam remember <slug> <text>`. Remember facts, never rules; a rule is something a person decided and belongs in CLAUDE.md. When a fact would serve better as a rule or an issue, say so in your reply. A memory marked old or from another branch may no longer hold: check it against the code, `foam remember` it again if it still holds, `foam forget <slug>` if not.
 

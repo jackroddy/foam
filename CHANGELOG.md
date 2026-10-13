@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The screen renders a line of one to three `#` as a heading: bold, and
   underlined for `#`.
+- `show`, `recall` and `memories` render markdown on a terminal, as the
+  screen does: headings, `code`, lists, fenced code with a language, and
+  tables. A note that takes more than one line goes under its header line.
+  Piped, `--plain` and `--json` output print the text as written.
 
 ## [0.6.0] - 2026-10-10
 
