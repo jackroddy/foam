@@ -24,7 +24,8 @@ A release is a milestone titled `vX.Y.Z`, priority 1. Its children are the
 milestones and issues that ship in it, plus two standing chores: review the
 README against the binary, and cut the release (version in Cargo.toml, the
 changelog's Unreleased section dated, an annotated tag, dev merged to main;
-I push). The release is ready when every leaf below it is closed, and it is
+I push, then I run `cargo publish`, and you remind me of both when the tag
+is made). The release is ready when every leaf below it is closed, and it is
 closed with the reason "tagged vX.Y.Z at <commit>".
 
 When the number changes, retitle the milestone: `foam update <id> --title
