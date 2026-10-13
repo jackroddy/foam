@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The screen renders a line of one to three `#` as a heading: bold, and
+  underlined for `#`.
+
 ## [0.6.0] - 2026-10-10
 
 ### Added

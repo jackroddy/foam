@@ -1,6 +1,7 @@
 //! A small markdown subset, parsed into blocks and laid out as
-//! lines of an exact width: paragraphs, lists, fenced code,
-//! tables and inline code. Everything else stays literal text.
+//! lines of an exact width: headings, paragraphs, lists, fenced
+//! code, tables and inline code. Everything else stays literal
+//! text.
 
 use crate::hl::{Class, Lexer};
 use ratatui::style::{Modifier, Style};
@@ -27,6 +28,11 @@ pub struct Item {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Block {
+    Heading {
+        /// One to three, the number of `#`.
+        level: u8,
+        text: Vec<Inline>,
+    },
     Paragraph(Vec<Inline>),
     List(Vec<Item>),
     Code {
@@ -40,6 +46,7 @@ pub enum Block {
 }
 
 struct Theme {
+    heading: Style,
     code: Style,
     panel: Style,
     lang: Style,
@@ -52,6 +59,7 @@ struct Theme {
 }
 
 const THEME: Theme = Theme {
+    heading: Style::new().add_modifier(Modifier::BOLD),
     code: Style::new().bg(palette::SHADE),
     panel: Style::new().bg(palette::SHADE),
     lang: Style::new().bg(palette::SHADE).add_modifier(Modifier::DIM),
@@ -104,6 +112,15 @@ pub fn parse(text: &str) -> Vec<Block> {
                 i += 1;
             }
             blocks.push(Block::Table { header, rows });
+            continue;
+        }
+        if let Some((level, rest)) = heading(line) {
+            flush(&mut blocks, &mut para, &mut list);
+            blocks.push(Block::Heading {
+                level,
+                text: inlines(rest),
+            });
+            i += 1;
             continue;
         }
         if let Some((item, col)) = list_item(line) {
@@ -173,6 +190,18 @@ fn push_text(to: &mut Vec<Inline>, s: &str) {
     } else {
         to.push(Inline::Text(s.to_string()));
     }
+}
+
+/// The level and text of a heading line: one to three `#`, a
+/// space, and text.
+fn heading(line: &str) -> Option<(u8, &str)> {
+    let line = line.trim_start();
+    let hashes = line.bytes().take_while(|&b| b == b'#').count();
+    if !(1..=3).contains(&hashes) {
+        return None;
+    }
+    let rest = line[hashes..].strip_prefix(' ')?.trim();
+    (!rest.is_empty()).then_some((hashes as u8, rest))
 }
 
 /// The language of a line that opens a fence, `Some(None)` for a
@@ -314,6 +343,7 @@ pub fn layout(blocks: &[Block], width: usize) -> Vec<Line<'static>> {
             out.push(Vec::new());
         }
         match block {
+            Block::Heading { level, text } => heading_lines(*level, text, width, theme, &mut out),
             Block::Paragraph(text) => out.extend(wrap(&words(text, theme), width)),
             Block::List(items) => list(items, width, theme, &mut out),
             Block::Code { lang, lines } => code(lang.as_deref(), lines, width, theme, &mut out),
@@ -414,6 +444,18 @@ fn wrap(words: &[Vec<Seg>], width: usize) -> Vec<Vec<Seg>> {
     }
     lines.push(line);
     lines
+}
+
+fn heading_lines(level: u8, text: &[Inline], width: usize, theme: &Theme, out: &mut Vec<Vec<Seg>>) {
+    let style = match level {
+        1 => theme.heading.add_modifier(Modifier::UNDERLINED),
+        _ => theme.heading,
+    };
+    let words: Vec<Vec<Seg>> = words(text, theme)
+        .into_iter()
+        .map(|w| w.into_iter().map(|(s, st)| (s, st.patch(style))).collect())
+        .collect();
+    out.extend(wrap(&words, width));
 }
 
 fn list(items: &[Item], width: usize, theme: &Theme, out: &mut Vec<Vec<Seg>>) {
@@ -637,7 +679,7 @@ mod tests {
 
     #[test]
     fn every_line_is_exactly_the_width() {
-        let text = "a `code` b\n\n- item\n  - deeper\n\n```rs\nfn main() {}\n```\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\nanunbrokenwordlongerthanthewidth";
+        let text = "# head\n\na `code` b\n\n- item\n  - deeper\n\n```rs\nfn main() {}\n```\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\nanunbrokenwordlongerthanthewidth";
         for width in [3, 10, 30] {
             for line in strings(&render(text, width)) {
                 assert_eq!(line.chars().count(), width, "{line:?}");
@@ -662,6 +704,53 @@ mod tests {
         assert_eq!(lines, padded(&["aaaa", "bb cc d"], 8));
         let lines = strings(&render("x `0123456789`", 6));
         assert_eq!(lines, padded(&["x", "012345", "6789"], 6));
+    }
+
+    #[test]
+    fn a_heading_ends_the_block_before_it_and_is_bold() {
+        let blocks = parse("text\n## Two `c`\nmore\n- item\n# One");
+        assert_eq!(
+            blocks,
+            [
+                Block::Paragraph(vec![Inline::Text("text".into())]),
+                Block::Heading {
+                    level: 2,
+                    text: vec![Inline::Text("Two ".into()), Inline::Code("c".into())],
+                },
+                Block::Paragraph(vec![Inline::Text("more".into())]),
+                Block::List(vec![Item {
+                    depth: 0,
+                    number: None,
+                    text: vec![Inline::Text("item".into())],
+                }]),
+                Block::Heading {
+                    level: 1,
+                    text: vec![Inline::Text("One".into())],
+                },
+            ]
+        );
+        let lines = render("# One\n\n### Three", 10);
+        assert_eq!(strings(&lines), padded(&["One", "", "Three"], 10));
+        let one = &lines[0].spans[0];
+        assert!(
+            one.style
+                .add_modifier
+                .contains(Modifier::BOLD | Modifier::UNDERLINED)
+        );
+        let three = &lines[2].spans[0];
+        assert!(three.style.add_modifier.contains(Modifier::BOLD));
+        assert!(!three.style.add_modifier.contains(Modifier::UNDERLINED));
+    }
+
+    #[test]
+    fn four_hashes_or_a_bare_hash_stay_text() {
+        for text in ["#### four", "#", "# ", "#nospace"] {
+            assert_eq!(
+                parse(text),
+                [Block::Paragraph(vec![Inline::Text(text.trim().into())])],
+                "{text:?}"
+            );
+        }
     }
 
     #[test]
