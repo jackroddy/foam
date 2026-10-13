@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Inline code is cyan with no background, on the screen and in the
   terminal.
+- A code block has a dim gutter down its left, with the language at the
+  top, in place of the shaded panel.
 
 ## [0.6.0] - 2026-10-10
 

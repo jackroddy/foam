@@ -694,10 +694,9 @@ mod tests {
         let text = issue(&HUMAN, &a, &crate::store::test_db());
         let body = text.split_once("\n\n").unwrap().1;
         let lines: Vec<&str> = body.lines().collect();
-        let tag = format!("{:>40}", "sh");
         assert_eq!(
             &lines[..7],
-            ["Head", "", "• one", "• two", "", &tag, "ls   -l"],
+            ["Head", "", "• one", "• two", "", "┌ sh", "│ ls   -l"],
             "{body}"
         );
         assert!(lines[8].ends_with(" ann] short one"), "{body}");

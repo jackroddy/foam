@@ -48,7 +48,6 @@ pub enum Block {
 struct Theme {
     heading: Style,
     code: Style,
-    panel: Style,
     lang: Style,
     bullet: Style,
     rule: Style,
@@ -61,16 +60,15 @@ struct Theme {
 const THEME: Theme = Theme {
     heading: Style::new().add_modifier(Modifier::BOLD),
     code: Style::new().fg(palette::REF),
-    panel: Style::new().bg(palette::SHADE),
-    lang: Style::new().bg(palette::SHADE).add_modifier(Modifier::DIM),
+    lang: Style::new().add_modifier(Modifier::DIM),
     bullet: Style::new().add_modifier(Modifier::BOLD),
     rule: Style::new().add_modifier(Modifier::DIM),
-    // inside a code panel the hues name token kinds, not the
-    // concepts they stand for elsewhere; the panel keeps them apart
-    comment: Style::new().bg(palette::SHADE).add_modifier(Modifier::DIM),
-    string: Style::new().bg(palette::SHADE).fg(palette::OPEN),
-    number: Style::new().bg(palette::SHADE).fg(palette::AGENT),
-    keyword: Style::new().bg(palette::SHADE).fg(palette::DEFERRED),
+    // inside a code block the hues name token kinds, not the
+    // concepts they stand for elsewhere; the gutter keeps them apart
+    comment: Style::new().add_modifier(Modifier::DIM),
+    string: Style::new().fg(palette::OPEN),
+    number: Style::new().fg(palette::AGENT),
+    keyword: Style::new().fg(palette::DEFERRED),
 };
 
 const MIN_COLUMN: usize = 8;
@@ -349,8 +347,12 @@ pub fn text(text: &str, width: usize, color: bool) -> Vec<String> {
     lines(&parse(text), width)
         .into_iter()
         .map(|segs| {
+            let mut merged = Vec::new();
+            for (s, style) in segs {
+                push_seg(&mut merged, s, style);
+            }
             let mut out = String::new();
-            for (s, style) in trimmed(segs, color) {
+            for (s, style) in trimmed(merged, color) {
                 let codes = if color { sgr(style) } else { String::new() };
                 if codes.is_empty() {
                     out.push_str(&s);
@@ -611,11 +613,11 @@ fn code(
     theme: &Theme,
     out: &mut Vec<Vec<Seg>>,
 ) {
+    let inner = width.saturating_sub(2);
     if let Some(lang) = lang {
-        let tag = lang.chars().count().min(width);
         out.push(vec![
-            (" ".repeat(width - tag), theme.panel),
-            (lang.chars().take(tag).collect(), theme.lang),
+            ("┌ ".into(), theme.rule),
+            (lang.chars().take(inner).collect(), theme.lang),
         ]);
     }
     let mut lexer = lang.and_then(Lexer::new);
@@ -626,7 +628,7 @@ fn code(
                 .into_iter()
                 .map(|(s, class)| {
                     let style = match class {
-                        Class::Plain => theme.panel,
+                        Class::Plain => Style::new(),
                         Class::Comment => theme.comment,
                         Class::Str => theme.string,
                         Class::Number => theme.number,
@@ -635,21 +637,19 @@ fn code(
                     (s, style)
                 })
                 .collect(),
-            None => vec![(line.clone(), theme.panel)],
+            None => vec![(line.clone(), Style::new())],
         };
-        let n = len(&segs);
-        let mut shown = Vec::new();
-        if n > width {
-            let mut room = width.saturating_sub(1);
+        let mut shown = vec![("│ ".to_string(), theme.rule)];
+        if len(&segs) > inner {
+            let mut room = inner.saturating_sub(1);
             for (s, style) in segs {
                 let s: String = s.chars().take(room).collect();
                 room -= s.chars().count();
                 push_seg(&mut shown, s, style);
             }
-            push_seg(&mut shown, "…".into(), theme.panel);
+            push_seg(&mut shown, "…".into(), Style::new());
         } else {
-            shown = segs;
-            push_seg(&mut shown, " ".repeat(width - n), theme.panel);
+            shown.extend(segs);
         }
         out.push(shown);
     }
@@ -861,8 +861,8 @@ mod tests {
                 "",
                 "see x",
                 "",
-                "                rust",
-                "fn f() {}",
+                "┌ rust",
+                "│ fn f() {}",
                 "",
                 "a │ b",
                 "──┼──",
@@ -872,10 +872,8 @@ mod tests {
         let painted = text(md, 20, true);
         assert_eq!(painted[0], "\x1b[1;4mHead\x1b[0m");
         assert_eq!(painted[2], "see \x1b[36mx\x1b[0m");
-        assert_eq!(
-            painted[5],
-            "\x1b[34;100mfn\x1b[0m\x1b[100m f() {}           \x1b[0m"
-        );
+        assert_eq!(painted[4], "\x1b[2m┌ rust\x1b[0m");
+        assert_eq!(painted[5], "\x1b[2m│ \x1b[0m\x1b[34mfn\x1b[0m f() {}");
         assert_eq!(painted[7], "a\x1b[2m │ \x1b[0mb");
     }
 
@@ -957,24 +955,27 @@ mod tests {
     }
 
     #[test]
-    fn a_fence_with_a_language_tags_the_panel() {
+    fn a_fence_with_a_language_names_it_over_the_gutter() {
         let lines = render("```rust\nfn main() {}\n\tlet x = 1;\n```\nafter", 16);
         assert_eq!(
             strings(&lines),
             [
-                "            rust",
-                "fn main() {}    ",
-                "    let x = 1;  ",
+                "┌ rust          ",
+                "│ fn main() {}  ",
+                "│     let x = 1;",
                 "                ",
                 "after           ",
             ]
         );
+        assert_eq!(lines[0].spans[0].content, "┌ rust");
+        assert!(lines[0].spans[0].style.add_modifier.contains(Modifier::DIM));
+        assert_eq!(lines[1].spans[0].content, "│ ");
+        assert!(lines[1].spans[0].style.add_modifier.contains(Modifier::DIM));
         assert!(
-            lines[..3]
+            lines
                 .iter()
-                .all(|l| l.spans.iter().all(|s| s.style.bg == Some(Color::DarkGray)))
+                .all(|l| l.spans.iter().all(|s| s.style.bg.is_none()))
         );
-        assert!(lines[0].spans[1].style.add_modifier.contains(Modifier::DIM));
     }
 
     #[test]
@@ -982,16 +983,15 @@ mod tests {
         let lines = render("```rust\nfn main() {}\n```", 16);
         let fun = lines[1].spans.iter().find(|s| s.content == "fn").unwrap();
         assert_eq!(fun.style.fg, Some(Color::Blue));
-        assert_eq!(fun.style.bg, Some(Color::DarkGray));
         let lines = render("```nosuchlang\nfn main() {}\n```", 16);
-        assert_eq!(lines[1].spans.len(), 1);
-        assert_eq!(lines[1].spans[0].style, THEME.panel);
+        assert_eq!(lines[1].spans.len(), 2);
+        assert_eq!(lines[1].spans[1].style, Style::new());
     }
 
     #[test]
     fn a_fence_without_a_language_cuts_long_lines() {
         let lines = strings(&render("```\nshort\na line far too long\n```", 10));
-        assert_eq!(lines, ["short     ", "a line fa…"]);
+        assert_eq!(lines, ["│ short   ", "│ a line …"]);
     }
 
     #[test]
