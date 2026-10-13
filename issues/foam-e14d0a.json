@@ -15,11 +15,20 @@
   "lease_expires": "2026-10-13T02:55:04.870698318Z",
   "defer_until": null,
   "created_at": "2026-10-13T02:33:38.351947499Z",
-  "updated_at": "2026-10-13T02:40:04.870698318Z",
+  "updated_at": "2026-10-13T02:44:54.110852419Z",
   "closed_at": null,
   "close_reason": null,
   "resolution": null,
-  "notes": [],
+  "notes": [
+    {
+      "id": "d7c975d3",
+      "at": "2026-10-13T02:44:54.110851619Z",
+      "author": "Jack Roddy/f1b5fba8",
+      "text": "A note that renders to one line that fits after its header stays on that line, as before. One that renders to more than one line, or to a line too long for the room after the header, goes under the header at the thread's indent. A fence or a bullet cannot start after the header, and rendering the first line narrower than the rest would need a second width through the layout. The memories listing renders every block under the slug column at the width less the column, so a table in a memory comes out as a table; the open question about that listing is answered that way. `foam search` still shows title rows only.",
+      "commit": "bb756ff",
+      "branch": "dev"
+    }
+  ],
   "stamps": {
     "created": {
       "commit": "c8446ad",
