@@ -3,7 +3,7 @@
   "title": "The CLI renders markdown in bodies, notes and memories",
   "body": "The screen renders a body through `md::render` in `src/md.rs`. The CLI does not. `render::issue` in `src/render.rs` prints the body with `Style::wrapped(&i.body, 0, 0)` and each note the same way under a hanging indent. `render::memory` and `render::memories` print memory text the same way. `Style::wrapped` returns the text untouched when `human` is false, which `Style::detect` sets for a pipe, `--plain` and `--json`. On a terminal it calls `wrap_at`, which keeps line breaks and collapses every run of whitespace to one space.\n\nSo the markdown that `foam prime` asks an agent to write comes out as its source characters. On a terminal it comes out worse than the source: a fence loses its indentation, a table loses its column spacing, and a long bullet wraps without a hanging indent.\n\nThe commands that print this text:\n\n| command | function | text |\n|---|---|---|\n| `foam show` | `render::issue` | body and notes |\n| `foam recall` | `render::memory` | one memory |\n| `foam memories` | `render::memories` | one line per memory |\n| `foam search` | `render::memories` | memory hits |\n| `foam prime` | `prime.rs` | memories, raw |\n\n## Proposal\n\n- A function in `md.rs` that lays out blocks for a terminal rather than the screen, along the lines of `md::text(text: &str, width: usize, color: bool) -> String`. It reuses `parse` and the width logic in `layout`, and emits ANSI only when `color` is set.\n- `render::issue` and `render::memory` call it when `human` is set, at `style.width` less the hang, and indent each line by the hang. The `Paragraph`, `List`, `Code`, `Table` and `Heading` blocks all render. Headers come from foam-a24c63, which this issue waits on.\n- Piped, `--plain` and `--json` output stay the raw markdown. A program reading foam wants the source.\n- `foam prime` stays raw. The agent reads markdown.\n\n## Open\n\n- What `foam memories` does with a memory that holds a fence or a table. The listing is one line per memory, and a table does not fit on one line. Rendering only inline code there and leaving blocks to `foam recall` is one answer.\n- Whether `foam search` shows the matching body or note under an issue hit. Today it shows title rows only, so there is nothing to render.",
   "type": "feature",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 2,
   "labels": [],
   "parent": null,
@@ -12,13 +12,13 @@
   ],
   "related": [],
   "assignee": "Jack Roddy/f1b5fba8",
-  "lease_expires": "2026-10-13T02:55:04.870698318Z",
+  "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-13T02:33:38.351947499Z",
-  "updated_at": "2026-10-13T02:44:54.110852419Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-10-13T02:44:54.120674759Z",
+  "closed_at": "2026-10-13T02:44:54.120674759Z",
+  "close_reason": "Landed in commit bb756ff, 'Render markdown in show, recall and memories on a terminal'. Note 1 has the layout decisions.",
+  "resolution": "done",
   "notes": [
     {
       "id": "d7c975d3",
@@ -34,6 +34,9 @@
       "commit": "c8446ad",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "bb756ff",
+      "branch": "dev"
+    }
   }
 }
