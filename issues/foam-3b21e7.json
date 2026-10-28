@@ -3,20 +3,20 @@
   "title": "foam publishes a new data ref to origin without being asked",
   "body": "When a clone has a remote named `origin`, `init` in `src/cmd.rs` calls `setup_sync`, which installs `.git/hooks/pre-push`. That hook runs `foam sync --remote \"$1\"` before every `git push` to a remote with a URL. `sync` pushes `refs/foam/data` whether or not the remote already has it, and it installs the hook itself before it pushes. So when origin has no `refs/foam/data`, `foam init` creates the ref locally and the user's next `git push` of code publishes it to origin. A single manual `foam sync` does the same. The user never asked for either.\n\n```text\nsufr main ❯ foam init\ninitialized refs/foam/data with prefix sufr\ninstalled ./.git/hooks/pre-push\norigin has no refs/foam/data yet; if another clone has foam data, run `foam sync` there, then `foam sync` here\n```\n\nfoam has done this since commit b85f88e, which added sync. `README.md:72` documents it.\n\n`sync --setup` does not opt in to anything today. It runs `setup_sync` with `remote_has_data` fixed at `false`, so it never adds a refspec. Its only effect beyond a plain `sync` is a printed hint when `core.hooksPath` is set or the existing pre-push hook is not a shell script.\n\nThe requirement: foam data that `init` creates stays in the local clone until the user opts in to storing it on a remote.\n\n## Proposal\n\nThe remote is the opt-in. foam syncs with a remote only when that remote already has `refs/foam/data`. The one command that puts the ref on a remote that lacks it is `foam sync --setup`.\n\n| command | remote has the ref | remote lacks the ref |\n|---|---|---|\n| `init` | fetches it, adds the refspec, installs the hook | creates the ref locally; prints that `foam sync --setup` publishes it |\n| `sync` | fetches, merges, pushes, installs the hook | fails with the same hint |\n| `sync` from the hook | as above | exits 0 and prints nothing |\n| `sync --setup` | as plain `sync` | pushes the ref, then adds the refspec and installs the hook |\n\n`sync` installs the hook only once the remote has the ref, after a fetch that found it or a push that created it.\n\n`doctor` checks the hook and the refspec only when `refs/foam/origin` exists, which means this clone has fetched from or pushed to origin. The check needs no network.\n\n## Rejected\n\n- A per-clone config key naming the synced remote. A second clone of a repo whose origin already has data would need the key set as well, and the remote already records the same fact.\n\n## Cost\n\n- The default changes, so the fix ships in a minor release.\n- Clones set up by an older `init` keep their hook. The hook becomes harmless, since `sync` from the hook leaves a remote without the ref alone.\n- If someone deletes the ref from a remote, every clone stops syncing with it until someone runs `foam sync --setup` again.\n- `README.md:72-89`, the changelog, and the tests in `tests/cli.rs` that expect `init` or `sync` to install the hook against an empty origin all change.",
   "type": "bug",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 0,
   "labels": [],
   "parent": "foam-a3d399",
   "blocked_by": [],
   "related": [],
   "assignee": "Jack Roddy/ec76ebe9",
-  "lease_expires": "2026-10-28T01:53:46.737306984Z",
+  "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-28T01:34:34.05668487Z",
-  "updated_at": "2026-10-28T01:43:49.56162399Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-10-28T01:47:54.741727393Z",
+  "closed_at": "2026-10-28T01:47:54.741727393Z",
+  "close_reason": "Landed in 6143829 on dev. init keeps new data local, sync --setup is the only command that publishes it, and the hook leaves a remote without the ref alone. The note records why refs/foam/origin is now written after init and after a push.",
+  "resolution": "done",
   "notes": [
     {
       "id": "5269390a",
@@ -32,6 +32,9 @@
       "commit": "c15fa5e",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "6143829",
+      "branch": "dev"
+    }
   }
 }
