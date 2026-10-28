@@ -1,0 +1,28 @@
+{
+  "id": "foam-f88e61",
+  "title": "v0.8.0",
+  "body": "The work planned for 0.7.0 that did not ship in it. 0.7.0 went out with the opt-in publishing fix alone, so that the fix reached users quickly.",
+  "type": "milestone",
+  "status": "open",
+  "priority": 2,
+  "labels": [],
+  "parent": null,
+  "blocked_by": [],
+  "related": [],
+  "assignee": null,
+  "lease_expires": null,
+  "defer_until": null,
+  "created_at": "2026-10-28T01:49:57.445398645Z",
+  "updated_at": "2026-10-28T01:49:57.445398645Z",
+  "closed_at": null,
+  "close_reason": null,
+  "resolution": null,
+  "notes": [],
+  "stamps": {
+    "created": {
+      "commit": "6143829",
+      "branch": "dev"
+    },
+    "closed": null
+  }
+}
