@@ -754,11 +754,21 @@ fn sync_moves_data_between_clones_and_merges_it() {
     // init in a: origin exists but has no data yet
     let out = stdout(foam(&a).args(["init", "--prefix", "t"]));
     assert!(out.contains("initialized"), "{out}");
-    assert!(a.join(".git/hooks/pre-push").exists());
-    let x = stdout(foam(&a).args(["create", "from a"]));
-    // the refspec waits for the push that puts the ref on origin
+    assert!(out.contains("stays in this clone"), "{out}");
     assert!(!out.contains("fetch refspec"), "{out}");
-    assert!(stdout(foam(&a).arg("sync")).contains("fetch refspec"));
+    assert!(!a.join(".git/hooks/pre-push").exists());
+    let x = stdout(foam(&a).args(["create", "from a"]));
+
+    // only --setup puts the ref on an origin that lacks it
+    let out = foam(&a).arg("sync").output().unwrap();
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("`foam sync --setup` publishes it"), "{err}");
+    assert!(!a.join(".git/hooks/pre-push").exists());
+    let out = stdout(foam(&a).args(["sync", "--setup"]));
+    assert!(out.contains("pushed"), "{out}");
+    assert!(out.contains("fetch refspec"), "{out}");
+    assert!(a.join(".git/hooks/pre-push").exists());
 
     // init in b adopts the remote's data instead of starting fresh
     let out = stdout(foam(&b).args(["init"]));
@@ -812,6 +822,7 @@ fn sync_moves_data_between_clones_and_merges_it() {
 fn git_push_carries_the_data_ref_through_the_hook() {
     let (root, a, b) = two_clones();
     stdout(foam(&a).args(["init", "--prefix", "t"]));
+    stdout(foam(&a).args(["sync", "--setup"]));
     stdout(foam(&a).args(["create", "hooked"]));
     commit(&a, "two");
     // the hook runs foam from PATH, which git() sets to this build
@@ -954,7 +965,7 @@ fn sync_stops_at_the_gate_when_origin_is_newer_than_this_foam() {
     let (_root, a, b) = two_clones();
     stdout(foam(&a).args(["init", "--prefix", "t"]));
     stdout(foam(&a).args(["create", "from a"]));
-    stdout(foam(&a).arg("sync"));
+    stdout(foam(&a).args(["sync", "--setup"]));
     stdout(foam(&b).arg("init"));
     // b moves the ref to a schema this foam cannot read, with git
     // alone and the hook out of the way, as a newer foam would
@@ -1125,7 +1136,7 @@ fn two_clones_that_both_ran_init_still_merge() {
     stdout(foam(&b).args(["init", "--prefix", "bb"]));
     let x = stdout(foam(&a).args(["create", "from a"]));
     let y = stdout(foam(&b).args(["create", "from b"]));
-    stdout(foam(&a).arg("sync"));
+    stdout(foam(&a).args(["sync", "--setup"]));
     let out = stdout(foam(&b).arg("sync"));
     assert!(out.contains("merged origin"), "{out}");
     let listed = stdout(foam(&b).arg("list"));
@@ -1142,17 +1153,20 @@ fn two_clones_that_both_ran_init_still_merge() {
 fn init_before_origin_has_data_leaves_git_fetch_working() {
     let (_root, a, b) = two_clones();
     let out = stdout(foam(&b).args(["init", "--prefix", "bb"]));
-    assert!(out.contains("origin has no refs/foam/data yet"), "{out}");
-    assert!(b.join(".git/hooks/pre-push").exists());
+    assert!(out.contains("origin has no refs/foam/data"), "{out}");
+    assert!(!b.join(".git/hooks/pre-push").exists());
     // a refspec naming a ref origin lacks would fail this fetch
     assert!(!git(&b, &["config", "--get-all", "remote.origin.fetch"]).contains("refs/foam"));
     git(&b, &["fetch", "-q"]);
 
     stdout(foam(&a).args(["init", "--prefix", "aa"]));
     let x = stdout(foam(&a).args(["create", "from a"]));
-    stdout(foam(&a).arg("sync"));
+    stdout(foam(&a).args(["sync", "--setup"]));
+
+    // once origin has the ref, a plain sync joins it
     let out = stdout(foam(&b).arg("sync"));
     assert!(out.contains("fetch refspec"), "{out}");
+    assert!(b.join(".git/hooks/pre-push").exists());
     assert!(stdout(foam(&b).arg("list")).contains(&x));
     git(&b, &["fetch", "-q"]);
 }
@@ -1164,7 +1178,7 @@ fn init_without_a_remote_says_so_and_sync_sets_up_later() {
     std::fs::create_dir(&dir).unwrap();
     init_repo(&dir);
     let out = stdout(foam(&dir).args(["init", "--prefix", "t"]));
-    assert!(out.contains("sync is not set up"), "{out}");
+    assert!(out.contains("stays in this clone"), "{out}");
     assert!(!dir.join(".git/hooks/pre-push").exists());
     let x = stdout(foam(&dir).args(["create", "x"]));
 
@@ -1174,7 +1188,8 @@ fn init_without_a_remote_says_so_and_sync_sets_up_later() {
         &["init", "-q", "--bare", "-b", "main", bare.to_str().unwrap()],
     );
     git(&dir, &["remote", "add", "origin", bare.to_str().unwrap()]);
-    let out = stdout(foam(&dir).arg("sync"));
+    assert!(!foam(&dir).arg("sync").output().unwrap().status.success());
+    let out = stdout(foam(&dir).args(["sync", "--setup"]));
     assert!(out.contains("installed"), "{out}");
     assert!(out.contains("pushed"), "{out}");
     assert!(out.contains("fetch refspec"), "{out}");
@@ -1262,46 +1277,68 @@ fn init_offline_and_from_a_subdirectory() {
 #[test]
 fn hook_install_respects_other_hooks() {
     // a redirected hooks path is left alone
-    let dir = repo();
-    git(
-        dir.path(),
-        &["remote", "add", "origin", "/nonexistent/remote.git"],
-    );
-    let elsewhere = dir.path().join("myhooks");
+    let (_root, a, _b) = two_clones();
+    let elsewhere = a.join("myhooks");
     std::fs::create_dir_all(&elsewhere).unwrap();
     git(
-        dir.path(),
+        &a,
         &["config", "core.hooksPath", elsewhere.to_str().unwrap()],
     );
-    let out = foam(dir.path()).arg("init").output().unwrap();
+    stdout(foam(&a).args(["init", "--prefix", "t"]));
+    let out = foam(&a).args(["sync", "--setup"]).output().unwrap();
     assert!(out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("core.hooksPath is set"));
     assert!(!elsewhere.join("pre-push").exists());
-    assert!(!dir.path().join(".git/hooks/pre-push").exists());
+    assert!(!a.join(".git/hooks/pre-push").exists());
 
     // a python hook is left alone; a shell hook gets the block appended
-    let dir = repo();
-    git(
-        dir.path(),
-        &["remote", "add", "origin", "/nonexistent/remote.git"],
-    );
-    let hook = dir.path().join(".git/hooks/pre-push");
+    let (_root, a, _b) = two_clones();
+    let hook = a.join(".git/hooks/pre-push");
     std::fs::create_dir_all(hook.parent().unwrap()).unwrap();
     std::fs::write(&hook, "#!/usr/bin/env python3\nprint('hi')\n").unwrap();
-    let out = foam(dir.path()).arg("init").output().unwrap();
+    stdout(foam(&a).args(["init", "--prefix", "t"]));
+    let out = foam(&a).args(["sync", "--setup"]).output().unwrap();
     assert!(String::from_utf8_lossy(&out.stderr).contains("not a shell script"));
     assert_eq!(
         std::fs::read_to_string(&hook).unwrap(),
         "#!/usr/bin/env python3\nprint('hi')\n"
     );
     std::fs::write(&hook, "#!/bin/bash\necho hi\n").unwrap();
-    // the remote is unreachable, so the sync itself fails;
-    // the setup half has already run
-    let _ = foam(dir.path()).args(["sync", "--setup"]).output().unwrap();
+    stdout(foam(&a).arg("sync"));
     let text = std::fs::read_to_string(&hook).unwrap();
     assert!(text.starts_with("#!/bin/bash\necho hi\n"), "{text}");
     assert!(text.contains("foam sync --remote"), "{text}");
     assert!(text.contains("command -v foam"), "{text}");
+}
+
+#[test]
+fn a_hook_never_publishes_the_data_ref() {
+    let (root, a, _b) = two_clones();
+    stdout(foam(&a).args(["init", "--prefix", "t"]));
+    stdout(foam(&a).args(["create", "local only"]));
+
+    // the hook an older init installed against an empty origin
+    let hook = a.join(".git/hooks/pre-push");
+    std::fs::create_dir_all(hook.parent().unwrap()).unwrap();
+    std::fs::write(
+        &hook,
+        "#!/bin/sh\ncat >/dev/null\nFOAM_IN_HOOK=1 foam sync --remote \"$1\" || exit 1\n",
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    commit(&a, "two");
+    let out = git_output(&a, &["push", "-q"]);
+    assert!(out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!err.contains("foam:"), "{err}");
+    let bare = root.path().join("remote.git");
+    let out = git_output(&bare, &["rev-parse", "-q", "--verify", "refs/foam/data"]);
+    assert!(!out.status.success());
+    stdout(foam(&a).arg("doctor"));
 }
 
 #[test]

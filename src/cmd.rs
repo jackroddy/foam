@@ -428,12 +428,7 @@ pub fn run(cli: Cli, command: Cmd) -> Result<()> {
             SetupCmd::Claude { remove } => setup_claude(&store, remove),
             SetupCmd::Bash => unreachable!("handled before the store opens"),
         },
-        Cmd::Sync { remote, setup } => {
-            if setup {
-                setup_sync(&store, &remote, false)?;
-            }
-            sync(&store, &remote)
-        }
+        Cmd::Sync { remote, setup } => sync(&store, &remote, setup),
         Cmd::Doctor => doctor(&store, cli.json),
         Cmd::Stats => stats(&store, cli.json),
         Cmd::Log { id, limit } => {
@@ -512,7 +507,9 @@ fn init(store: &Store, prefix: Option<String>) -> Result<()> {
         match store.git.ls_remote(remote, DATA_REF) {
             Ok(has) => Some(has),
             Err(e) => {
-                eprintln!("foam: could not reach {remote} ({e:#}); starting locally, sync later");
+                eprintln!(
+                    "foam: could not reach {remote} ({e:#}); the data stays in this clone until `foam sync --setup` publishes it"
+                );
                 None
             }
         }
@@ -521,21 +518,27 @@ fn init(store: &Store, prefix: Option<String>) -> Result<()> {
     };
     if remote_data == Some(true) {
         store.git.fetch(remote, &format!("{DATA_REF}:{DATA_REF}"))?;
+
+        // sync's hook and doctor take this ref as the mark of a
+        // clone that shares its data with origin
+        if let Some(tip) = store.git.rev_parse(DATA_REF)? {
+            store.git.update_ref(ORIGIN_REF, &tip, None)?;
+        }
         println!("fetched {DATA_REF} from {remote}");
     } else {
         store.init(&prefix)?;
         println!("initialized {DATA_REF} with prefix {prefix}");
     }
-    if has_remote {
-        setup_sync(store, remote, remote_data == Some(true))?;
-        if remote_data == Some(false) {
-            println!(
-                "{remote} has no {DATA_REF} yet; if another clone has foam data, run `foam sync` there, then `foam sync` here"
-            );
-        }
-    } else {
+    if remote_data == Some(true) {
+        add_refspec(store, remote)?;
+        install_hook(store, true)?;
+    } else if remote_data == Some(false) {
         println!(
-            "no remote named {remote}, so sync is not set up; `foam sync` sets it up once there is one"
+            "{remote} has no {DATA_REF}, so the data stays in this clone; `foam sync --setup` publishes it to {remote}"
+        );
+    } else if !has_remote {
+        println!(
+            "no remote named {remote}, so the data stays in this clone; `foam sync --setup` publishes it once there is one"
         );
     }
     println!("run `foam setup claude` to load context into Claude Code at session start");
@@ -673,21 +676,6 @@ git rev-parse -q --verify refs/foam/data >/dev/null || exit 0
 FOAM_IN_HOOK=1 foam sync --remote \"$1\" || exit 1
 ";
 
-/// Install the pre-push hook, and the fetch refspec once
-/// `remote` has the data ref.
-fn setup_sync(store: &Store, remote: &str, remote_has_data: bool) -> Result<()> {
-    if store.git.remote_url(remote).is_none() {
-        bail!("no remote named {remote}");
-    }
-
-    // a configured refspec whose source the remote lacks
-    // fails every fetch, so it waits until the ref is there
-    if remote_has_data {
-        add_refspec(store, remote)?;
-    }
-    install_hook(store, true)
-}
-
 /// Add the fetch refspec for the data ref to `remote`.
 fn add_refspec(store: &Store, remote: &str) -> Result<()> {
     let key = format!("remote.{remote}.fetch");
@@ -758,16 +746,23 @@ fn is_shell(script: &str) -> bool {
 }
 
 /// Fetch, merge and push the data ref, retrying while someone
-/// else keeps pushing first.
-fn sync(store: &Store, remote: &str) -> Result<()> {
+/// else keeps pushing first. Only `publish` puts the ref on a
+/// remote that lacks it.
+fn sync(store: &Store, remote: &str, publish: bool) -> Result<()> {
     if store.git.remote_url(remote).is_none() {
         bail!("no remote named {remote}");
     }
-    install_hook(store, false)?;
+    let in_hook = std::env::var_os("FOAM_IN_HOOK").is_some();
+
+    // a clone that has never fetched or pushed the ref has not
+    // published it, so its hook lets the push through without
+    // reaching the network
+    if in_hook && store.git.rev_parse(ORIGIN_REF)?.is_none() {
+        return Ok(());
+    }
 
     // git sends a hook's stdout to stderr, between its own
     // lines, so there every line says it is foam's
-    let in_hook = std::env::var_os("FOAM_IN_HOOK").is_some();
     let say = |line: String| {
         if in_hook {
             eprintln!("foam: {line}");
@@ -782,6 +777,19 @@ fn sync(store: &Store, remote: &str) -> Result<()> {
             .fetch_if_present(remote, &format!("+{DATA_REF}:{ORIGIN_REF}"))?
         {
             add_refspec(store, remote)?;
+            install_hook(store, publish)?;
+        } else if !publish {
+            if in_hook {
+                return Ok(());
+            }
+            let flag = if remote == "origin" {
+                String::new()
+            } else {
+                format!(" --remote {remote}")
+            };
+            bail!(
+                "{remote} has no {DATA_REF}, so the data stays in this clone; `foam sync --setup{flag}` publishes it there"
+            );
         }
         match store.absorb_origin()? {
             Absorbed::Nothing => {}
@@ -794,7 +802,7 @@ fn sync(store: &Store, remote: &str) -> Result<()> {
         let Some(data) = store.git.rev_parse(DATA_REF)? else {
             bail!("{NOT_INITIALIZED}");
         };
-        if store.git.rev_parse(ORIGIN_REF)? == Some(data) {
+        if store.git.rev_parse(ORIGIN_REF)?.as_deref() == Some(data.as_str()) {
             if !in_hook {
                 println!("{DATA_REF} is up to date with {remote}");
             }
@@ -804,7 +812,13 @@ fn sync(store: &Store, remote: &str) -> Result<()> {
         match store.git.push(remote, &format!("{DATA_REF}:{DATA_REF}"))? {
             Push::Done => {
                 say(format!("pushed {DATA_REF} to {remote}"));
+
+                // the remote now holds this tip, which the hook and
+                // doctor otherwise learn from the next fetch
+                let seen = store.git.rev_parse(ORIGIN_REF)?;
+                store.git.update_ref(ORIGIN_REF, &data, seen.as_deref())?;
                 add_refspec(store, remote)?;
+                install_hook(store, publish)?;
                 return Ok(());
             }
             Push::Rejected => eprintln!("foam: {remote} moved, fetching again"),
@@ -961,13 +975,11 @@ fn doctor(store: &Store, json: bool) -> Result<()> {
             ));
         }
     }
-    if store.git.remote_url("origin").is_some() {
+    // a clone that has never fetched or pushed the ref keeps
+    // its data local and needs neither the refspec nor the hook
+    if store.git.remote_url("origin").is_some() && store.git.rev_parse(ORIGIN_REF)?.is_some() {
         let spec = format!("+{DATA_REF}:{ORIGIN_REF}");
-        // the refspec is only expected once origin's data has
-        // been fetched, which is when sync adds it
-        if store.git.rev_parse(ORIGIN_REF)?.is_some()
-            && !store.git.config_all("remote.origin.fetch").contains(&spec)
-        {
+        if !store.git.config_all("remote.origin.fetch").contains(&spec) {
             report("origin has no fetch refspec for the data ref; `foam sync` adds it".into());
         }
         let hook = store.git.hooks_dir()?.join("pre-push");

@@ -47,7 +47,7 @@ foam init
 foam setup claude
 ```
 
-`foam init` creates the ref (and sets up sync, if your repo has a remote).
+`foam init` creates the ref, or fetches it when origin already has one.
 `foam setup claude` adds two hooks to `.claude/settings.json`: one that
 runs `foam prime` when a Claude Code session starts, and one that releases
 the session's claims when it ends. That's the whole integration. From
@@ -69,25 +69,26 @@ knows later that a memory is fifty commits behind. If two `foam` commands
 in the same clone race, the ref's compare-and-swap catches it and the loser
 retries.
 
-If your repo has a remote named `origin`, `foam init` installs a pre-push
-hook that runs `foam sync` before every push. It adds a fetch refspec so
-`git fetch` lands the remote's data on `refs/foam/origin`, but only when
-origin already has the ref: git fails any fetch whose configured refspec
-names a ref the remote lacks. If origin has no data ref yet, `foam init`
-tells you so and says to run `foam sync`. If there's no remote at all, it
-tells you sync isn't set up. Any `foam` command merges whatever a fetch
-brought in before it does its own work, so a clone is never behind what it
-has fetched.
+The data stays in your clone until you publish it. `foam sync --setup`
+pushes the ref to origin and installs a pre-push hook that runs `foam sync`
+before every push. It also adds a fetch refspec so `git fetch` lands the
+remote's data on `refs/foam/origin`. No other command pushes the ref to a
+remote that lacks it. That includes `foam init`, a plain `foam sync`, and the
+hook. A plain `foam sync` against such a remote fails and names the `--setup`
+command, and the hook lets the push through without touching the remote.
+
+Once origin has the ref, a clone syncs with it without `--setup`. `foam init` in
+a fresh clone fetches the ref, adds the refspec and installs the hook. A
+clone that ran `foam init` before origin had the ref needs one `foam sync`.
+Any `foam` command merges whatever a fetch brought in before it does its own
+work, so a clone is never behind what it has fetched.
 
 `foam sync` does the fetch, merge, and push by hand. It prints
 `foam: syncing ...` before it fetches and `foam: pushing ...` before it
-pushes, and it skips the push when origin already has the same tip. It installs
-the hook when it's missing and adds the refspec once origin has the ref, so
-a repo that added its remote after `foam init` needs only one `foam sync`.
-`--remote` names a remote other than origin. `--setup` adds advice: when
-`foam` can't install the hook, because `core.hooksPath` is set or the
-existing pre-push hook isn't a shell script, it prints the lines to add by
-hand.
+pushes, and it skips the push when origin already has the same tip.
+`--remote` names a remote other than origin. When `foam` can't install the
+hook, because `core.hooksPath` is set or the existing pre-push hook isn't a
+shell script, `--setup` prints the lines to add by hand.
 
 `foam stats` says how big the ref has grown: how many commits it holds, its
 schema beside this foam's, its objects and the bytes they take on disk, the

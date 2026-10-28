@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- foam no longer publishes a new data ref without being asked. When origin
+  has no `refs/foam/data`, `foam init` keeps the data in the clone and
+  installs no hook. `foam sync --setup` is the one command that pushes the
+  ref to a remote that lacks it. A plain `foam sync` against such a remote
+  fails and names that command.
+- The pre-push hook leaves a remote without `refs/foam/data` alone, so a
+  hook that an older `foam init` installed no longer publishes the data.
+- `foam doctor` checks the pre-push hook and the fetch refspec only in a
+  clone that has fetched or pushed the data ref.
+
 ## [0.6.1] - 2026-10-12
 
 ### Added

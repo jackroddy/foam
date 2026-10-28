@@ -144,7 +144,7 @@ fn two_agents(s: &mut Scenario) {
     let (a, b) = s.clones();
     stdout(foam(&a).args(["init", "--prefix", "s"]));
     let x = stdout(foam(&a).args(["create", "Shared work"]));
-    stdout(foam(&a).arg("sync"));
+    stdout(foam(&a).args(["sync", "--setup"]));
     stdout(foam(&b).arg("init"));
     s.session(&a, "ann");
     s.session(&b, "bob");

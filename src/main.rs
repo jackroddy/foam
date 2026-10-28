@@ -239,7 +239,7 @@ enum Cmd {
         /// Which remote
         #[arg(long, default_value = "origin")]
         remote: String,
-        /// Install the pre-push hook and say what became of it
+        /// Publish the data ref to a remote that lacks it
         #[arg(long)]
         setup: bool,
     },
