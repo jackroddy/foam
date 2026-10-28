@@ -1,0 +1,10 @@
+{
+  "slug": "stale-binary-after-publish",
+  "text": "After cargo publish, target/debug/foam can stay built from target/package/foam-<version>/src, the copy the publish verified. cargo build then reports foam Fresh and ignores edits to src/. The sandbox runs that binary, while integration tests use a fresh one. target/debug/foam.d lists the sources it was built from. cargo clean -p foam fixes it.",
+  "created_at": "2026-10-28T01:51:10.22649489Z",
+  "updated_at": "2026-10-28T01:51:10.22649489Z",
+  "stamp": {
+    "commit": "6143829",
+    "branch": "dev"
+  }
+}
