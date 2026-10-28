@@ -13,11 +13,20 @@
   "lease_expires": "2026-10-28T01:53:46.737306984Z",
   "defer_until": null,
   "created_at": "2026-10-28T01:34:34.05668487Z",
-  "updated_at": "2026-10-28T01:38:58.744631842Z",
+  "updated_at": "2026-10-28T01:43:49.56162399Z",
   "closed_at": null,
   "close_reason": null,
   "resolution": null,
-  "notes": [],
+  "notes": [
+    {
+      "id": "5269390a",
+      "at": "2026-10-28T01:43:49.56162317Z",
+      "author": "Jack Roddy/ec76ebe9",
+      "text": "`refs/foam/origin` is now the mark of a clone that shares its data. Before this change only a fetch wrote it, so two paths now write it too. `init` sets it after adopting origin's ref, and `sync` sets it after a push succeeds. Without that, a clone that had just run `foam sync --setup` looked unpublished to the hook and to `doctor`.\n\nThe hook's `sync` returns before any network call when `refs/foam/origin` is missing, so a clone that never published pays nothing on `git push`. A clone that has published and pushes code to another remote that lacks the ref, such as a fork, still prints `foam: syncing refs/foam/data with <remote>` before `sync` finds nothing there and exits 0.",
+      "commit": "c15fa5e",
+      "branch": "dev"
+    }
+  ],
   "stamps": {
     "created": {
       "commit": "c15fa5e",
