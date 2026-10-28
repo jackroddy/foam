@@ -3,26 +3,29 @@
   "title": "Review the README against the binary",
   "body": "",
   "type": "chore",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 1,
   "labels": [],
   "parent": "foam-a3d399",
   "blocked_by": [],
   "related": [],
   "assignee": "Jack Roddy/ec76ebe9",
-  "lease_expires": "2026-10-28T02:04:57.49511498Z",
+  "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-28T01:49:57.47612456Z",
-  "updated_at": "2026-10-28T01:49:57.49511498Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-10-28T01:51:10.236250089Z",
+  "closed_at": "2026-10-28T01:51:10.236250089Z",
+  "close_reason": "Compared the sync, init and doctor help with the README's command list and its storage and sync section. The rest of the README is unchanged since the 0.6.1 review in foam-74a99a. One mismatch turned up: the binary under review was stale, not the README. See memory stale-binary-after-publish.",
+  "resolution": "done",
   "notes": [],
   "stamps": {
     "created": {
       "commit": "6143829",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "6143829",
+      "branch": "dev"
+    }
   }
 }
