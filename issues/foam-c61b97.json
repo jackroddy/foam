@@ -3,26 +3,29 @@
   "title": "Cut the release: version, changelog date, tag, merge to main",
   "body": "",
   "type": "chore",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 1,
   "labels": [],
   "parent": "foam-a3d399",
   "blocked_by": [],
   "related": [],
   "assignee": "Jack Roddy/ec76ebe9",
-  "lease_expires": "2026-10-28T02:04:57.504416712Z",
+  "lease_expires": null,
   "defer_until": null,
   "created_at": "2026-10-28T01:49:57.485747319Z",
-  "updated_at": "2026-10-28T01:49:57.504416712Z",
-  "closed_at": null,
-  "close_reason": null,
-  "resolution": null,
+  "updated_at": "2026-10-28T01:51:23.512380225Z",
+  "closed_at": "2026-10-28T01:51:23.512380225Z",
+  "close_reason": "Version 0.7.0 in Cargo.toml and Cargo.lock, the changelog section dated 2026-10-27, commit aa051f8 'Release 0.7.0', annotated tag v0.7.0 on it, dev fast-forwarded to main. Not pushed.",
+  "resolution": "done",
   "notes": [],
   "stamps": {
     "created": {
       "commit": "6143829",
       "branch": "dev"
     },
-    "closed": null
+    "closed": {
+      "commit": "aa051f8",
+      "branch": "dev"
+    }
   }
 }
